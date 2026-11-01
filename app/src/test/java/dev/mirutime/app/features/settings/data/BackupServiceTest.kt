@@ -187,6 +187,7 @@ class BackupServiceTest {
         write(filesDir, "reader/fonts/custom.ttf", "font-bytes")
         write(filesDir, "reader/backgrounds/reader-bg.jpg", "reader-bg")
         write(filesDir, "backgrounds/theme-bg.jpg", "theme-bg")
+        write(filesDir, "preset_backgrounds/1_Backgrounds.jpeg", "preset-bytes")
         write(filesDir, "reader/fonts/stale.ttf.tmp", "temp")
         write(cacheDir, "bg_presets/cached.jpg", "cache")
         val prefs = ReaderBackupPrefs(
@@ -223,6 +224,9 @@ class BackupServiceTest {
         )
         assertFalse(entries.containsKey("reader/assets/fonts/stale.ttf.tmp"))
         assertFalse(entries.keys.any { it.contains("bg_presets") })
+        // Ready-made presets are re-downloadable and must stay out of backups;
+        // user backgrounds stay in.
+        assertFalse(entries.keys.any { it.contains("preset_backgrounds") })
 
         val manifest = BackupJson.decodeFromString(
             BackupManifest.serializer(),

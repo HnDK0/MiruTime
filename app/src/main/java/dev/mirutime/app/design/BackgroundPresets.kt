@@ -16,10 +16,6 @@ import dev.mirutime.core.log.MiruLog
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.time.Instant
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
@@ -70,9 +66,6 @@ private const val KEY_PRESETS_AT = "preset_bg_list_at"
 private const val PRESET_MAX_BYTES = 25 * 1024 * 1024
 private const val PRESET_THUMB_SIDE = 360
 private val ImageExt = Regex(".*\\.(jpe?g|png|webp)$", RegexOption.IGNORE_CASE)
-private val HttpDate: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US)
-        .withZone(ZoneOffset.UTC)
 
 private fun httpOpen(url: String, method: String = "GET", accept: String? = null): HttpURLConnection =
     (URL(url).openConnection() as HttpURLConnection).apply {
@@ -158,8 +151,17 @@ private const val PRESET_FILE_TIMEOUT_MS = 30_000L
 data class PresetRefreshResult(
     val presets: List<PresetBackground>,
     val downloaded: Int,
+    val skipped: Int,
     val failed: Int,
     val listingFetched: Boolean,
+)
+
+internal enum class PresetFileOutcome { Skipped, Downloaded, Failed }
+
+internal data class PresetDownloadTotals(
+    val downloaded: Int,
+    val skipped: Int,
+    val failed: Int,
 )
 
 // Opening the picker reads the cache only: no listing fetch, no image
@@ -172,9 +174,9 @@ suspend fun loadCachedPresetBackgrounds(context: Context): List<PresetBackground
         loadPresetListing(cached, refresh = false, fetch = ::fetchPresetListing).presets
     }
 
-// One explicit refresh: a fresh listing replaces the cache, then every picture
-// is pulled into the durable preset folder with bounded concurrency. A failed
-// picture or listing never throws and never stops the rest.
+// One explicit refresh: a fresh listing replaces the cache, then every missing
+// or invalid picture is pulled into the durable preset folder with bounded
+// concurrency. A valid cached picture costs zero network requests.
 suspend fun refreshPresetBackgrounds(context: Context): PresetRefreshResult =
     withContext(Dispatchers.IO) {
         migrateLegacyPresetDir(context)
@@ -184,15 +186,9 @@ suspend fun refreshPresetBackgrounds(context: Context): PresetRefreshResult =
             refresh = true,
             fetch = ::fetchPresetListing,
             save = { writeCachedPresets(context, it) },
-            // Conditional GET: an unchanged cached picture is kept without
-            // transferring the body, a stale one (e.g. an old placeholder
-            // committed under the same name) is re-downloaded.
-            download = { preset ->
-                downloadPresetFile(preset, presetFile(context, preset), conditional = true) != null
-            },
+            download = { preset -> refreshPresetFile(context, preset) },
         ).also { result ->
-            // A refreshed file may replace a stale cached picture; the old
-            // decoded thumb must not survive.
+            // A replaced picture invalidates its decoded thumb.
             synchronized(cachedPreviewCache) { cachedPreviewCache.clear() }
             cleanPresetCopies(context, result.presets)
             MiruLog.event(
@@ -200,6 +196,7 @@ suspend fun refreshPresetBackgrounds(context: Context): PresetRefreshResult =
                 "preset_refresh",
                 "total" to result.presets.size,
                 "downloaded" to result.downloaded,
+                "skipped" to result.skipped,
                 "failed" to result.failed,
             )
         }
@@ -218,51 +215,75 @@ private suspend fun fetchPresetListing(): List<PresetBackground>? {
 }
 
 // The shared decision: cached-only never invokes the fetcher or the downloader;
-// a refresh keeps the cache when the listing fails, otherwise downloads every
-// picture (unchanged ones are revalidated and kept by the downloader).
+// a refresh keeps the cache when the listing fails, otherwise checks every
+// picture locally and downloads only missing/invalid ones.
 internal suspend fun loadPresetListing(
     cached: List<PresetBackground>,
     refresh: Boolean,
     fetch: suspend () -> List<PresetBackground>?,
     save: (List<PresetBackground>) -> Unit = {},
-    download: suspend (PresetBackground) -> Boolean = { true },
+    download: suspend (PresetBackground) -> PresetFileOutcome = { PresetFileOutcome.Downloaded },
 ): PresetRefreshResult {
     if (!refresh) {
-        return PresetRefreshResult(cached, downloaded = 0, failed = 0, listingFetched = false)
+        return PresetRefreshResult(
+            presets = cached,
+            downloaded = 0,
+            skipped = 0,
+            failed = 0,
+            listingFetched = false,
+        )
     }
     val loaded = fetch()?.let(::dedupePresets)
-        ?: return PresetRefreshResult(cached, downloaded = 0, failed = 0, listingFetched = false)
+        ?: return PresetRefreshResult(
+            presets = cached,
+            downloaded = 0,
+            skipped = 0,
+            failed = 0,
+            listingFetched = false,
+        )
     save(loaded)
-    val (downloaded, failed) = downloadPresetFiles(loaded, download)
-    return PresetRefreshResult(loaded, downloaded, failed, listingFetched = true)
+    val totals = downloadPresetFiles(loaded, download)
+    return PresetRefreshResult(
+        presets = loaded,
+        downloaded = totals.downloaded,
+        skipped = totals.skipped,
+        failed = totals.failed,
+        listingFetched = true,
+    )
 }
 
 // Four pictures in flight at a time; one slow or dead file cannot hang the
 // whole refresh beyond its own timeout.
 internal suspend fun downloadPresetFiles(
     presets: List<PresetBackground>,
-    download: suspend (PresetBackground) -> Boolean,
-): Pair<Int, Int> = coroutineScope {
+    process: suspend (PresetBackground) -> PresetFileOutcome,
+): PresetDownloadTotals = coroutineScope {
     var downloaded = 0
+    var skipped = 0
     var failed = 0
     presets.chunked(PRESET_DOWNLOAD_CONCURRENCY).forEach { chunk ->
         val results = chunk.map { preset ->
             async {
                 try {
-                    withTimeout(PRESET_FILE_TIMEOUT_MS) { download(preset) }
+                    withTimeout(PRESET_FILE_TIMEOUT_MS) { process(preset) }
                 } catch (_: TimeoutCancellationException) {
-                    false
+                    PresetFileOutcome.Failed
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
-                    false
+                    PresetFileOutcome.Failed
                 }
             }
         }.awaitAll()
-        downloaded += results.count { it }
-        failed += results.count { !it }
+        for (outcome in results) {
+            when (outcome) {
+                PresetFileOutcome.Skipped -> skipped++
+                PresetFileOutcome.Downloaded -> downloaded++
+                PresetFileOutcome.Failed -> failed++
+            }
+        }
     }
-    downloaded to failed
+    PresetDownloadTotals(downloaded, skipped, failed)
 }
 
 // Old builds kept presets in cacheDir; move that folder once so existing
@@ -279,9 +300,6 @@ private fun migrateLegacyPresetDir(context: Context) {
         } else {
             runCatching {
                 file.copyTo(copy, overwrite = false)
-                // Keep the old mtime: the conditional refresh uses it to spot
-                // a picture that changed in the repository since download.
-                copy.setLastModified(file.lastModified())
                 file.delete()
             }
         }
@@ -292,20 +310,59 @@ private fun migrateLegacyPresetDir(context: Context) {
 private fun presetFile(context: Context, preset: PresetBackground) =
     File(presetBgDir(context).apply { mkdirs() }, preset.name.replace(Regex("[^A-Za-z0-9._-]"), "_"))
 
-// A file already in the preset folder is used as-is; only a missing one starts
-// a download. Shared by the refresh and the per-tile tap path.
-internal suspend fun presetFileForUse(
-    cached: File?,
+// JPEG / PNG / WebP magic bytes. A valid signature is enough to treat a cached
+// file as a picture; a full decode per preset on Refresh would cost more than
+// the file itself. An old HTML/error-page file fails this check and is replaced.
+internal fun isUsablePresetFile(file: File): Boolean {
+    if (!file.isFile || file.length() <= 0) return false
+    val head = ByteArray(12)
+    val read = runCatching { file.inputStream().use { it.read(head) } }.getOrDefault(0)
+    fun byte(index: Int) = head[index].toInt() and 0xFF
+    return when {
+        read >= 3 && byte(0) == 0xFF && byte(1) == 0xD8 && byte(2) == 0xFF -> true
+        read >= 8 && byte(0) == 0x89 && byte(1) == 0x50 && byte(2) == 0x4E && byte(3) == 0x47 &&
+            byte(4) == 0x0D && byte(5) == 0x0A && byte(6) == 0x1A && byte(7) == 0x0A -> true
+        read >= 12 && byte(0) == 'R'.code && byte(1) == 'I'.code &&
+            byte(2) == 'F'.code && byte(3) == 'F'.code &&
+            byte(8) == 'W'.code && byte(9) == 'E'.code &&
+            byte(10) == 'B'.code && byte(11) == 'P'.code -> true
+        else -> false
+    }
+}
+
+internal data class PresetFileResult(val file: File?, val skipped: Boolean)
+
+// Shared by Refresh and the tile tap: a valid local picture is used as-is with
+// zero network; a missing or invalid file is deleted and downloaded again.
+internal suspend fun obtainPresetFile(
+    target: File,
     download: suspend () -> File?,
-): File? = cached ?: download()
+): PresetFileResult {
+    val cached = target.takeIf(::isUsablePresetFile)
+    if (cached != null) return PresetFileResult(cached, skipped = true)
+    target.delete()
+    return PresetFileResult(download(), skipped = false)
+}
+
+private suspend fun refreshPresetFile(
+    context: Context,
+    preset: PresetBackground,
+): PresetFileOutcome {
+    val target = presetFile(context, preset)
+    val result = obtainPresetFile(target) { downloadPresetFile(preset, target) }
+    return when {
+        result.file == null -> PresetFileOutcome.Failed
+        result.skipped -> PresetFileOutcome.Skipped
+        else -> PresetFileOutcome.Downloaded
+    }
+}
 
 // Original bytes of a preset in durable app storage (downloaded once; unlike
 // the old cacheDir copy it is not evicted by the OS).
 private suspend fun ensurePresetFile(context: Context, preset: PresetBackground): File? =
     withContext(Dispatchers.IO) {
         val target = presetFile(context, preset)
-        val cached = target.takeIf { it.exists() && it.length() > 0 }
-        presetFileForUse(cached) { downloadPresetFile(preset, target) }
+        obtainPresetFile(target) { downloadPresetFile(preset, target) }.file
     }
 
 // Applies a ready-made background in place: returns the durable preset file
@@ -353,30 +410,14 @@ internal fun cleanPresetCopies(context: Context, presets: List<PresetBackground>
     if (cleaned != stored || activeMoved) notifyThemePrefsChanged()
 }
 
-private fun presetEtagFile(target: File) = File(target.parentFile, target.name + ".etag")
-
 private suspend fun downloadPresetFile(
     preset: PresetBackground,
     target: File,
-    conditional: Boolean = false,
 ): File? {
     val tmp = File(target.parentFile, target.name + ".tmp")
     return try {
-        val cached = target.takeIf { conditional && it.exists() && it.length() > 0 }
-        val etagFile = presetEtagFile(target)
-        val etag = etagFile.takeIf { cached != null && it.isFile }?.readText()?.trim()
         val conn = httpOpen(preset.url)
-        when {
-            !etag.isNullOrEmpty() -> conn.setRequestProperty("If-None-Match", etag)
-            cached != null -> conn.setRequestProperty(
-                "If-Modified-Since",
-                HttpDate.format(Instant.ofEpochMilli(cached.lastModified())),
-            )
-        }
-        val code = conn.responseCode
-        if (cached != null && code == HttpURLConnection.HTTP_NOT_MODIFIED) {
-            cached
-        } else if (code != 200) {
+        if (conn.responseCode != 200) {
             MiruLog.event("theme", "preset_download", "ok" to false, "reason" to "status")
             null
         } else {
@@ -398,10 +439,6 @@ private suspend fun downloadPresetFile(
                 }
             }
             if (tmp.renameTo(target)) {
-                val freshEtag = conn.getHeaderField("ETag")
-                runCatching {
-                    if (freshEtag.isNullOrBlank()) etagFile.delete() else etagFile.writeText(freshEtag)
-                }
                 MiruLog.event("theme", "preset_download", "ok" to true)
                 target
             } else {

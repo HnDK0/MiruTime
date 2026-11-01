@@ -225,7 +225,7 @@ fun ThemePickerRails(
                 text = if (refreshed.listingFetched) {
                     stringResource(
                         UiKitR.string.theme_presets_downloaded_fmt,
-                        refreshed.downloaded,
+                        refreshed.downloaded + refreshed.skipped,
                         refreshed.presets.size,
                     )
                 } else {

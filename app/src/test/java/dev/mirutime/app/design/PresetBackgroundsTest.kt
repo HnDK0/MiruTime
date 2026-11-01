@@ -1,6 +1,7 @@
 package dev.mirutime.app.design
 
 import java.io.File
+import java.nio.file.Files
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -24,12 +25,13 @@ class PresetBackgroundsTest {
             refresh = false,
             fetch = { fetches++; null },
             save = { error("open path must not write the listing") },
-            download = { downloads++; true },
+            download = { downloads++; PresetFileOutcome.Downloaded },
         )
 
         assertEquals(cached, result.presets)
         assertFalse(result.listingFetched)
         assertEquals(0, result.downloaded)
+        assertEquals(0, result.skipped)
         assertEquals(0, fetches)
         assertEquals(0, downloads)
     }
@@ -50,13 +52,17 @@ class PresetBackgroundsTest {
             refresh = true,
             fetch = { fetches++; fresh },
             save = { saved = it },
-            download = { preset -> downloaded += preset.url; true },
+            download = { preset ->
+                downloaded += preset.url
+                PresetFileOutcome.Downloaded
+            },
         )
 
         assertEquals(fresh, result.presets)
         assertEquals(fresh, saved)
         assertTrue(result.listingFetched)
         assertEquals(3, result.downloaded)
+        assertEquals(0, result.skipped)
         assertEquals(0, result.failed)
         assertEquals(1, fetches)
         assertEquals(fresh.map { it.url }, downloaded)
@@ -76,25 +82,92 @@ class PresetBackgroundsTest {
             refresh = true,
             fetch = { fresh },
             save = { saved = it },
-            download = { preset -> preset.url != "https://cdn/4.jpeg" },
+            download = { preset ->
+                if (preset.url == "https://cdn/4.jpeg") {
+                    PresetFileOutcome.Failed
+                } else {
+                    PresetFileOutcome.Downloaded
+                }
+            },
         )
 
         assertEquals(fresh, result.presets)
         assertEquals(fresh, saved)
         assertEquals(2, result.downloaded)
+        assertEquals(0, result.skipped)
         assertEquals(1, result.failed)
     }
 
     @Test
-    fun `tap uses the cached file and downloads only a missing one`() = runTest {
-        val cachedFile = File("cached.jpg")
+    fun `refresh counts valid cached pictures as skipped`() = runTest {
+        val fresh = listOf(
+            PresetBackground("3_Backgrounds.jpeg", "https://cdn/3.jpeg"),
+            PresetBackground("4_Backgrounds.jpeg", "https://cdn/4.jpeg"),
+            PresetBackground("5_Backgrounds.jpeg", "https://cdn/5.jpeg"),
+        )
+
+        val result = loadPresetListing(
+            cached = cached,
+            refresh = true,
+            fetch = { fresh },
+            save = {},
+            download = { preset ->
+                if (preset.url == "https://cdn/3.jpeg") {
+                    PresetFileOutcome.Downloaded
+                } else {
+                    PresetFileOutcome.Skipped
+                }
+            },
+        )
+
+        assertEquals(1, result.downloaded)
+        assertEquals(2, result.skipped)
+        assertEquals(0, result.failed)
+    }
+
+    @Test
+    fun `valid cached picture is skipped without a download`() = runTest {
+        val target = tempFile(jpegBytes())
         var downloads = 0
 
-        assertEquals(cachedFile, presetFileForUse(cachedFile) { downloads++; null })
-        assertEquals(0, downloads)
+        val result = obtainPresetFile(target) { downloads++; null }
 
-        val fetched = File("fetched.jpg")
-        assertEquals(fetched, presetFileForUse(null) { downloads++; fetched })
+        assertTrue(result.skipped)
+        assertEquals(target, result.file)
+        assertEquals(0, downloads)
+        assertTrue(target.exists())
+    }
+
+    @Test
+    fun `invalid cached file is deleted and replaced`() = runTest {
+        val target = tempFile("<html>not an image</html>".toByteArray())
+        assertFalse(isUsablePresetFile(target))
+
+        val result = obtainPresetFile(target) {
+            // The tap/Refresh path deletes the bad file before downloading.
+            assertFalse(target.exists())
+            target.writeBytes(jpegBytes())
+            target
+        }
+
+        assertFalse(result.skipped)
+        assertEquals(target, result.file)
+        assertTrue(isUsablePresetFile(target))
+    }
+
+    @Test
+    fun `missing picture is downloaded`() = runTest {
+        val target = File(Files.createTempDirectory("preset").toFile(), "missing.jpeg")
+        var downloads = 0
+
+        val result = obtainPresetFile(target) {
+            downloads++
+            target.writeBytes(jpegBytes())
+            target
+        }
+
+        assertFalse(result.skipped)
+        assertEquals(target, result.file)
         assertEquals(1, downloads)
     }
 
@@ -147,6 +220,15 @@ class PresetBackgroundsTest {
         assertEquals(false, en.contains("name=\"theme_preset_item_fmt\">Background"))
         assertEquals(false, ru.contains("name=\"theme_preset_item_fmt\">Фон"))
     }
+
+    private fun tempFile(content: ByteArray): File =
+        Files.createTempFile("preset", ".jpeg").toFile().apply {
+            writeBytes(content)
+            deleteOnExit()
+        }
+
+    private fun jpegBytes(): ByteArray =
+        byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte(), 0, 0x10)
 
     private fun source(relative: String): String = sequenceOf(
         File(relative),
