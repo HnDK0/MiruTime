@@ -1,0 +1,54 @@
+/.gradle
+/.kotlin
+/app/build
+/.idea
+/app/release
+# Keystore written into the workspace by CI (secrets -> file)
+/app/storeFile.jks
+/build
+/mirutime-core/build
+/translator/build
+.codegraph
+app/src/.DS_Store
+.DS_Store
+
+# Local SDK path
+local.properties
+
+# Documentation and change notes (not part of code snapshot)
+docs/
+CHANGES*.md
+/testfile
+/mirutime-core/.gradle
+
+/translator/.gradle
+
+/core-reader-model/build/
+/core-reader-model/.gradle/
+
+# Local agent instructions
+AGENTS.md
+
+/ui-kit/build/
+/ui-kit/.gradle/
+/ui-kit/.kotlin/
+
+/core-log/build/
+/core-log/.gradle/
+/core-log/.kotlin/
+
+/feature-tts/build/
+/feature-tts/.gradle/
+/feature-tts/.kotlin/
+
+/feature-reader/build/
+/feature-reader/.gradle/
+/feature-reader/.kotlin/
+tools/device-ui-qa.sh
+/.context
+/.opencode
+/plan
+/image-loader/build
+# Local test script
+tools/simulate-new-chapters.sh
+

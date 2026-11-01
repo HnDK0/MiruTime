@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Честные состояния загрузки/занятости. Отдельный файл, чтобы новые
+     строки не трогали общий strings.xml. -->
+<resources>
+    <string name="loading_value">…</string>
+    <string name="loading_updates">Загружаем обновления…</string>
+    <string name="loading_history">Загружаем историю…</string>
+    <string name="loading_searching">Ищем…</string>
+    <string name="loading_importing">Импортируем файлы…</string>
+    <string name="loading_downloads">Загружаем список…</string>
+    <string name="loading_deleting">Удаляем…</string>
+    <string name="loading_cleaning">Очищаем…</string>
+    <string name="loading_queueing">Добавляем в очередь…</string>
+</resources>

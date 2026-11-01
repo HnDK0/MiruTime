@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Translator debug fixture</title>
+<style>
+  body { font: 14px/1.5 sans-serif; margin: 12px; }
+  /* Deliberately offscreen without needing a scroll. */
+  .offscreen { position: absolute; left: -9999px; top: 0; width: 10px; }
+</style>
+</head>
+<body>
+  <p id="visibleOne">one</p>
+  <p id="visibleTwo">two</p>
+  <p id="visibleThree">three</p>
+  <p id="offscreen" class="offscreen">hidden text</p>
+  <div id="codeHost">
+    <pre id="preBlock">pre must stay</pre>
+    <code id="codeBlock">code must stay</code>
+  </div>
+  <p id="dupA">repeat</p>
+  <p id="dupB">repeat</p>
+  <div id="dynamicHost"></div>
+  <p id="restoreAnchor">anchor text</p>
+
+<script>
+(function () {
+  'use strict';
+
+  var testState = { status: 'idle', gen: 0, calls: 0, failedBatches: 0 };
+  window.__miruTestState = testState;
+
+  // Fixture-only fail hook: a batch containing FAILME is rejected the same way
+  // PageTranslationBridge.fail() rejects one, without a Kotlin round trip.
+  function shouldFailBatch(texts) {
+    for (var i = 0; i < texts.length; i++) {
+      if (String(texts[i]).indexOf('FAILME') !== -1) { return true; }
+    }
+    return false;
+  }
+
+  // Fake native bridge. Real translator JS observes these two entry points.
+  window.MiruTranslate = {
+    gen: 0,
+    translateAsync: function (batchId, json) {
+      testState.calls += 1;
+      var texts = null;
+      try { texts = JSON.parse(json); } catch (e) { texts = null; }
+      if (texts && shouldFailBatch(texts)) {
+        testState.failedBatches += 1;
+        setTimeout(function () {
+          if (window.__miruPageTranslator) {
+            window.__miruPageTranslator.failResult(batchId);
+          }
+        }, 0);
+        return;
+      }
+      TestBridge.translateAsync(batchId, json);
+    },
+    onState: function (status, gen) {
+      testState.status = status;
+      testState.gen = gen;
+      window.MiruTranslate.gen = gen;
+    }
+  };
+
+  function textOf(id) {
+    var el = document.getElementById(id);
+    return el ? el.textContent : null;
+  }
+
+  function spanCount(gen) {
+    var selector = gen === undefined
+      ? 'span[data-miru-tr]'
+      : 'span[data-miru-tr="' + gen + '"]';
+    return document.querySelectorAll(selector).length;
+  }
+
+  function waitFor(predicate, timeoutMs) {
+    var deadline = Date.now() + timeoutMs;
+    return new Promise(function (resolve) {
+      function poll() {
+        if (predicate()) { resolve(true); return; }
+        if (Date.now() >= deadline) { resolve(false); return; }
+        setTimeout(poll, 50);
+      }
+      poll();
+    });
+  }
+
+  function result(name, ok, detail) {
+    return { name: name, ok: !!ok, detail: detail || '' };
+  }
+
+  window.__miruDebugRun = async function () {
+    var results = [];
+    try {
+      if (!window.__miruPageTranslator) {
+        results.push(result('translator installed', false, 'window.__miruPageTranslator is missing'));
+        TestBridge.report(JSON.stringify(results));
+        return;
+      }
+      results.push(result('translator installed', true, ''));
+
+      window.__miruPageTranslator.start(1);
+      var settled = await waitFor(function () {
+        var state = window.__miruTestState;
+        return state.status === 'idle' && state.gen === 1 &&
+          textOf('visibleOne') === 'RU:one' &&
+          textOf('visibleTwo') === 'RU:two' &&
+          textOf('visibleThree') === 'RU:three' &&
+          textOf('offscreen') === 'RU:hidden text' &&
+          textOf('dupA') === 'RU:repeat' &&
+          textOf('dupB') === 'RU:repeat';
+      }, 8000);
+      results.push(result('start(1) settles to idle after translating the page', settled,
+        'state=' + window.__miruTestState.status +
+        ' gen=' + window.__miruTestState.gen +
+        ' spans=' + spanCount()));
+
+      results.push(result('visible paragraphs translated',
+        textOf('visibleOne') === 'RU:one' &&
+        textOf('visibleTwo') === 'RU:two' &&
+        textOf('visibleThree') === 'RU:three',
+        'one=' + JSON.stringify(textOf('visibleOne')) +
+        ' two=' + JSON.stringify(textOf('visibleTwo')) +
+        ' three=' + JSON.stringify(textOf('visibleThree'))));
+
+      results.push(result('offscreen text translated without scrolling',
+        textOf('offscreen') === 'RU:hidden text',
+        'offscreen=' + JSON.stringify(textOf('offscreen'))));
+
+      results.push(result('duplicate text translated in both nodes',
+        textOf('dupA') === 'RU:repeat' && textOf('dupB') === 'RU:repeat',
+        'dupA=' + JSON.stringify(textOf('dupA')) +
+        ' dupB=' + JSON.stringify(textOf('dupB'))));
+
+      results.push(result('pre/code content left untouched',
+        textOf('preBlock') === 'pre must stay' &&
+        textOf('codeBlock') === 'code must stay' &&
+        !document.querySelector('#codeHost span[data-miru-tr]'),
+        'pre=' + JSON.stringify(textOf('preBlock')) +
+        ' code=' + JSON.stringify(textOf('codeBlock'))));
+
+      var dynamic = document.createElement('p');
+      dynamic.id = 'dynamic';
+      dynamic.textContent = 'fresh dynamic text';
+      document.getElementById('dynamicHost').appendChild(dynamic);
+      var dynamicOk = await waitFor(function () {
+        return textOf('dynamic') === 'RU:fresh dynamic text';
+      }, 8000);
+      results.push(result('text appended after start is translated', dynamicOk,
+        'dynamic=' + JSON.stringify(textOf('dynamic'))));
+
+      results.push(result('translated spans carry generation 1', spanCount(1) > 0,
+        'spans=' + spanCount(1)));
+
+      window.__miruPageTranslator.restore();
+      var restored = await waitFor(function () {
+        return spanCount() === 0 &&
+          textOf('visibleOne') === 'one' &&
+          textOf('offscreen') === 'hidden text' &&
+          textOf('dupA') === 'repeat' &&
+          textOf('dupB') === 'repeat' &&
+          textOf('restoreAnchor') === 'anchor text' &&
+          textOf('dynamic') === 'fresh dynamic text';
+      }, 3000);
+      results.push(result('restore() removes all spans and restores originals', restored,
+        'spans=' + spanCount() +
+        ' one=' + JSON.stringify(textOf('visibleOne')) +
+        ' dynamic=' + JSON.stringify(textOf('dynamic'))));
+
+      var postRestore = document.createElement('p');
+      postRestore.id = 'postRestore';
+      postRestore.textContent = 'post restore text';
+      document.getElementById('dynamicHost').appendChild(postRestore);
+
+      window.__miruPageTranslator.start(2);
+      var secondRun = await waitFor(function () {
+        return textOf('visibleOne') === 'RU:one' &&
+          textOf('dynamic') === 'RU:fresh dynamic text' &&
+          textOf('postRestore') === 'RU:post restore text' &&
+          spanCount(2) > 0;
+      }, 8000);
+      results.push(result('start(2) after restore translates content again', secondRun,
+        'one=' + JSON.stringify(textOf('visibleOne')) +
+        ' dynamic=' + JSON.stringify(textOf('dynamic')) +
+        ' postRestore=' + JSON.stringify(textOf('postRestore')) +
+        ' spans2=' + spanCount(2)));
+
+      // --- long single text node is split, not skipped ---
+      var sentence = 'Lorem ipsum dolor sit amet consectetur adipiscing elit. ';
+      var longText = '';
+      while (longText.length < 9000) { longText += sentence; }
+      var longHost = document.createElement('p');
+      longHost.id = 'longHost';
+      longHost.textContent = longText;
+      var charHost = document.createElement('p');
+      charHost.id = 'charHost';
+      charHost.textContent = 'char original text';
+      var extraHost = document.getElementById('dynamicHost');
+      extraHost.appendChild(longHost);
+      extraHost.appendChild(charHost);
+
+      window.__miruPageTranslator.start(3);
+
+      var longOk = await waitFor(function () {
+        var spans = longHost.querySelectorAll('span[data-miru-tr="3"]');
+        if (spans.length < 2) { return false; }
+        var joined = '';
+        for (var i = 0; i < spans.length; i++) {
+          joined += spans[i].getAttribute('data-miru-orig') || '';
+        }
+        return joined === longText;
+      }, 10000);
+
+      var longSpans = longHost.querySelectorAll('span[data-miru-tr="3"]');
+      var longJoined = '';
+      var longMax = 0;
+      var longAllTranslated = longSpans.length > 0;
+      for (var li = 0; li < longSpans.length; li++) {
+        var longOrig = longSpans[li].getAttribute('data-miru-orig') || '';
+        longJoined += longOrig;
+        if (longOrig.length > longMax) { longMax = longOrig.length; }
+        if (longSpans[li].textContent.trim().indexOf('RU:') !== 0) {
+          longAllTranslated = false;
+        }
+      }
+      results.push(result('long >8000-char node becomes multiple translated spans without loss',
+        longOk && longSpans.length > 1 && longJoined === longText &&
+        longMax <= 4000 && longAllTranslated,
+        'spans=' + longSpans.length + ' max=' + longMax +
+        ' len=' + longJoined.length + '/' + longText.length));
+
+      // --- one failed batch must not stop the rest ---
+      var failHost = document.createElement('div');
+      failHost.id = 'failHost';
+      for (var fi = 0; fi < 30; fi++) {
+        var failP = document.createElement('p');
+        failP.id = 'fail' + fi;
+        var failBody = (fi === 0 ? 'FAILME ' : '') +
+          'Fail batch paragraph ' + fi + '. ';
+        while (failBody.length < 1000) {
+          failBody += 'Padding words for one long batch paragraph. ';
+        }
+        failP.textContent = failBody;
+        failHost.appendChild(failP);
+      }
+      extraHost.appendChild(failHost);
+
+      var failSeen = await waitFor(function () {
+        var late = textOf('fail29');
+        return window.__miruTestState.failedBatches >= 1 &&
+          late !== null && late.indexOf('RU:') === 0;
+      }, 10000);
+
+      var afterFail = document.createElement('p');
+      afterFail.id = 'afterFail';
+      afterFail.textContent = 'after failure text';
+      extraHost.appendChild(afterFail);
+      var afterFailOk = await waitFor(function () {
+        return textOf('afterFail') === 'RU:after failure text';
+      }, 8000);
+
+      results.push(result('one failed batch does not stop other batches or later nodes',
+        failSeen && afterFailOk &&
+        (textOf('fail0') || '').indexOf('RU:') !== 0,
+        'failedBatches=' + window.__miruTestState.failedBatches +
+        ' fail0=' + JSON.stringify((textOf('fail0') || '').slice(0, 12)) +
+        ' fail29=' + JSON.stringify((textOf('fail29') || '').slice(0, 12)) +
+        ' afterFail=' + JSON.stringify(textOf('afterFail'))));
+
+      // --- characterData inside a translated span ---
+      var charReady = await waitFor(function () {
+        var span = charHost.querySelector('span[data-miru-tr="3"]');
+        return !!span && span.getAttribute('data-miru-orig') === 'char original text';
+      }, 10000);
+      var charSpan = charHost.querySelector('span[data-miru-tr="3"]');
+      var charTextNode = charSpan && charSpan.firstChild;
+      if (charTextNode) { charTextNode.nodeValue = 'site updated text'; }
+
+      var charRetranslated = await waitFor(function () {
+        var span = charHost.querySelector('span[data-miru-tr="3"]');
+        return !!span &&
+          span.getAttribute('data-miru-orig') === 'site updated text' &&
+          span.textContent.trim() === 'RU:site updated text';
+      }, 10000);
+
+      window.__miruPageTranslator.restore();
+      var charRestored = await waitFor(function () {
+        return spanCount() === 0 && textOf('charHost') === 'site updated text';
+      }, 3000);
+
+      results.push(result(
+        'characterData inside translated span is re-translated and restore keeps new text',
+        charReady && charRetranslated && charRestored,
+        'ready=' + charReady + ' retranslated=' + charRetranslated +
+        ' restored=' + charRestored +
+        ' text=' + JSON.stringify(textOf('charHost'))));
+    } catch (error) {
+      results.push(result('runner completed without exception', false,
+        String((error && error.message) || error)));
+    }
+    TestBridge.report(JSON.stringify(results));
+  };
+})();
+</script>
+</body>
+</html>

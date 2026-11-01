@@ -1,0 +1,603 @@
+package dev.mirutime.app.design.components
+
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import dev.mirutime.uikit.R as UiKitR
+import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.AppBottomSheet
+import dev.mirutime.uikit.MiruSpace
+import dev.mirutime.app.design.PresetBackground
+import dev.mirutime.app.design.dedupeBackgroundPaths
+import dev.mirutime.app.design.dedupePresets
+import dev.mirutime.app.design.importPresetBackground
+import dev.mirutime.app.design.loadPresetBackgrounds
+import dev.mirutime.app.design.rememberPresetPreview
+import dev.mirutime.uikit.MiruTheme
+import dev.mirutime.uikit.ThemeMode
+import dev.mirutime.app.design.importBackground
+import dev.mirutime.app.design.rememberBackgroundBitmap
+import dev.mirutime.uikit.title
+import kotlinx.coroutines.launch
+
+// Rail 1: every palette theme (Miru originals + NoveLA mirrors). Rail 2: the
+// ready-made backgrounds listed from the app's GitHub folder (BackgroundPresets.kt);
+// tapping one downloads it into app storage and makes it the active
+// background. Rail 3 holds the user's own backgrounds: a "+" tile to add one (file or link) followed by
+// every saved picture, each with a small cross to delete it. Pictures are
+// stored in app storage and de-duplicated (see ThemeStorage.kt).
+private val ClassicThemes = ThemeMode.entries.filter { it != ThemeMode.Custom }
+
+// Two horizontal rails: same vertical space as ~4 rows, every theme
+// reachable by sideways scroll, each with a live mini-library preview in
+// its own palette.
+@Composable
+fun ThemePickerRails(
+    selected: ThemeMode,
+    customBg: String?,
+    bgLibrary: List<String>,
+    onSelect: (ThemeMode) -> Unit,
+    onCustomBg: (String?) -> Unit,
+    onRemoveBg: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var addOpen by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<String?>(null) }
+
+    // Ready-made backgrounds from GitHub: null = loading, empty = failed.
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var presets by remember { mutableStateOf<List<PresetBackground>?>(null) }
+    var presetsReload by remember { mutableIntStateOf(0) }
+    var importingUrl by remember { mutableStateOf<String?>(null) }
+    val importFailed = stringResource(UiKitR.string.theme_custom_failed)
+    LaunchedEffect(presetsReload) {
+        presets = null
+        presets = loadPresetBackgrounds(context, force = presetsReload > 0)
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(UiKitR.string.theme_rail_classic),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(modifier = Modifier.height(MiruSpace.S))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.M)) {
+            items(ClassicThemes, key = { it.name }) { mode ->
+                ThemeTile(
+                    mode = mode,
+                    selected = mode == selected,
+                    onClick = { onSelect(mode) },
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(MiruSpace.L))
+        Text(
+            text = stringResource(UiKitR.string.theme_rail_presets),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(modifier = Modifier.height(MiruSpace.S))
+        val presetList = presets?.let(::dedupePresets)
+        when {
+            presetList == null -> LazyRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.M)) {
+                items(3) { PresetPlaceholderTile() }
+            }
+            presetList.isEmpty() -> Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(UiKitR.string.theme_presets_failed),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalMiruExtraColors.current.muted,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { presetsReload++ }) {
+                    Text(text = stringResource(UiKitR.string.theme_presets_retry))
+                }
+            }
+            else -> LazyRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.M)) {
+                itemsIndexed(presetList, key = { _, preset -> preset.url }) { index, preset ->
+                    PresetTile(
+                        preset = preset,
+                        label = stringResource(UiKitR.string.theme_custom_item_fmt, index + 1),
+                        activeSavedPath = if (selected == ThemeMode.Custom) customBg else null,
+                        busy = importingUrl == preset.url,
+                        onClick = {
+                            if (importingUrl != null) return@PresetTile
+                            importingUrl = preset.url
+                            scope.launch {
+                                val local = importPresetBackground(context, preset)
+                                importingUrl = null
+                                if (local != null) {
+                                    onCustomBg(local)
+                                    onSelect(ThemeMode.Custom)
+                                } else {
+                                    Toast.makeText(context, importFailed, Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(MiruSpace.L))
+        Text(
+            text = stringResource(UiKitR.string.theme_rail_background),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(modifier = Modifier.height(MiruSpace.S))
+        val backgrounds = remember(bgLibrary) { dedupeBackgroundPaths(bgLibrary) }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.M)) {
+            item(key = "add-bg") {
+                AddBackgroundTile(onClick = { addOpen = true })
+            }
+            itemsIndexed(backgrounds, key = { _, source -> source }) { index, source ->
+                BackgroundTile(
+                    source = source,
+                    label = stringResource(UiKitR.string.theme_custom_item_fmt, index + 1),
+                    selected = selected == ThemeMode.Custom && source == customBg,
+                    onClick = {
+                        onCustomBg(source)
+                        onSelect(ThemeMode.Custom)
+                    },
+                    onRemove = { pendingDelete = source },
+                )
+            }
+        }
+    }
+    if (addOpen) {
+        AddBackgroundSheet(
+            onClose = { addOpen = false },
+            onPick = {
+                onCustomBg(it)
+                onSelect(ThemeMode.Custom)
+                addOpen = false
+            },
+        )
+    }
+    pendingDelete?.let { source ->
+        AppBottomSheet(
+            title = stringResource(UiKitR.string.theme_bg_delete_title),
+            description = stringResource(UiKitR.string.theme_bg_delete_desc),
+            onClose = { pendingDelete = null },
+            doneLabel = stringResource(UiKitR.string.theme_bg_delete),
+            doneDanger = true,
+            onDone = {
+                onRemoveBg(source)
+                pendingDelete = null
+            },
+        ) {}
+    }
+}
+
+// Tile: live mini-library preview in the theme's own palette + localized
+// name; selected tile gets the accent ring. No Color() literals anywhere —
+// the preview reads the nested theme's scheme and extra tokens only.
+@Composable
+private fun ThemeTile(
+    mode: ThemeMode,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val ring = LocalMiruExtraColors.current.accent
+    Column(
+        modifier = Modifier
+            .width(132.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) {
+                    ring
+                } else {
+                    MaterialTheme.colorScheme.outlineVariant
+                },
+                shape = RoundedCornerShape(12.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        MiruTheme(mode = mode) {
+            MiniLibrary()
+        }
+        Spacer(modifier = Modifier.height(MiruSpace.Xs))
+        Text(
+            text = mode.title(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+// Two abstract mini cards in the preview theme: cover block + title bar +
+// gold progress bar. Same visual language as LibraryCard, zero literals.
+@Composable
+private fun MiniLibrary() {
+    val extra = LocalMiruExtraColors.current
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Row(
+            modifier = Modifier.padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            repeat(2) {
+                Column(
+                    modifier = Modifier.width(52.dp),
+                    horizontalAlignment = Alignment.Start,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(52.dp)
+                            .height(58.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(4.dp)
+                                .size(width = 18.dp, height = 8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(extra.accent),
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(MiruSpace.Xs))
+                    Box(
+                        modifier = Modifier
+                            .width(44.dp)
+                            .height(5.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                            ),
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(52.dp)
+                            .height(3.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f),
+                            ),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(30.dp)
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(extra.accent),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// "+" tile that opens the add-background sheet.
+@Composable
+private fun AddBackgroundTile(onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(132.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                shape = RoundedCornerShape(12.dp),
+            )
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(116.dp)
+                .height(104.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outline,
+                    shape = RoundedCornerShape(10.dp),
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "+",
+                style = MaterialTheme.typography.displaySmall,
+                color = LocalMiruExtraColors.current.muted,
+            )
+        }
+        Spacer(modifier = Modifier.height(MiruSpace.S))
+        Text(
+            text = stringResource(UiKitR.string.theme_custom_add),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+// A saved background: the picture itself as the preview, accent ring when it
+// is the active one, a small cross in the corner to delete it. The cross has
+// a 40dp hit box over a 24dp scrim disc so it reads on any picture.
+@Composable
+private fun BackgroundTile(
+    source: String,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val ring = LocalMiruExtraColors.current.accent
+    val bitmap = rememberBackgroundBitmap(source)
+    Column(
+        modifier = Modifier
+            .width(132.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) ring else MaterialTheme.colorScheme.outlineVariant,
+                shape = RoundedCornerShape(12.dp),
+            )
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(116.dp)
+                .height(104.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .clickable(role = Role.Button, onClick = onRemove),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = stringResource(UiKitR.string.theme_bg_delete),
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(MiruSpace.S))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+// Ready-made background tile: GitHub picture as the preview, accent ring when
+// it is the active background (matched by the path it is saved under), a
+// progress ring over the picture while it is being imported. No delete cross —
+// a preset is not the user's file; once picked it also lives in "My
+// backgrounds", where it can be removed.
+@Composable
+private fun PresetTile(
+    preset: PresetBackground,
+    label: String,
+    activeSavedPath: String?,
+    busy: Boolean,
+    onClick: () -> Unit,
+) {
+    val ring = LocalMiruExtraColors.current.accent
+    val preview = rememberPresetPreview(preset)
+    val selected = preview != null && preview.savedPath == activeSavedPath
+    Column(
+        modifier = Modifier
+            .width(132.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) ring else MaterialTheme.colorScheme.outlineVariant,
+                shape = RoundedCornerShape(12.dp),
+            )
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(MiruSpace.S),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(116.dp)
+                .height(104.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (preview != null) {
+                Image(
+                    bitmap = preview.thumb,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            if (busy || preview == null) {
+                CircularProgressIndicator(
+                    strokeWidth = 2.dp,
+                    color = ring,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(MiruSpace.Xs))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+// Same footprint as PresetTile while the folder listing loads, so the rail
+// does not jump when the pictures arrive.
+@Composable
+private fun PresetPlaceholderTile() {
+    Column(
+        modifier = Modifier
+            .width(132.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+            .padding(MiruSpace.S),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(116.dp)
+                .height(104.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        )
+        Spacer(modifier = Modifier.height(MiruSpace.Xs))
+        Spacer(modifier = Modifier.height(17.dp))
+    }
+}
+
+// File (SAF image picker) or link (http/https). The picture is copied into
+// app storage first (importBackground): unreadable files, dead links and
+// non-images are refused with a toast instead of being set as the theme.
+@Composable
+private fun AddBackgroundSheet(
+    onClose: () -> Unit,
+    onPick: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var link by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    val failed = stringResource(UiKitR.string.theme_custom_failed)
+
+    fun startImport(source: String) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            val local = importBackground(context, source)
+            busy = false
+            if (local != null) {
+                onPick(local)
+            } else {
+                Toast.makeText(context, failed, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> if (uri != null) startImport(uri.toString()) }
+
+    AppBottomSheet(
+        title = stringResource(UiKitR.string.theme_custom_bg),
+        description = stringResource(UiKitR.string.theme_custom_desc),
+        onClose = onClose,
+        doneLabel = stringResource(UiKitR.string.theme_custom_ok),
+        doneEnabled = !busy && link.isNotBlank(),
+        onDone = { startImport(link.trim()) },
+    ) {
+        OutlinedTextField(
+            value = link,
+            onValueChange = { link = it },
+            placeholder = { Text(text = stringResource(UiKitR.string.theme_custom_link_hint)) },
+            singleLine = true,
+            enabled = !busy,
+            shape = MaterialTheme.shapes.small,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        // Sheet action buttons ride the one size grid: 36dp.
+        OutlinedButton(
+            onClick = { filePicker.launch(arrayOf("image/*")) },
+            enabled = !busy,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+        ) {
+            Text(text = stringResource(UiKitR.string.theme_custom_file))
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+    }
+}

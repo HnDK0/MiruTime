@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Debug-only SAF provider used by instrumentation tests. -->
+        <provider
+            android:name="dev.mirutime.app.features.settings.backup.TestDocumentsProvider"
+            android:authorities="${applicationId}.test.documents"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS" />
+    </application>
+</manifest>

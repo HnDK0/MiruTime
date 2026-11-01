@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ярлыки выбора глав: короткие подписи вместо действий-иконок без текста. -->
+<resources>
+    <string name="book_sel_action_translate">Перевести</string>
+    <string name="book_sel_action_download">Скачать</string>
+    <string name="book_sel_action_mark_read">Отметить прочитанным</string>
+    <string name="book_sel_action_mark_unread">Отметить непрочитанным</string>
+    <string name="book_sel_action_delete_translations">Удалить переводы</string>
+    <string name="book_sel_action_delete_downloads">Удалить загрузки</string>
+    <string name="book_ch_size_cd">Размер главы: %1$s</string>
+    <plurals name="book_sel_delete_translations_desc_plural">
+        <item quantity="one">Удалить сохранённый перевод для %1$d выбранной главы?</item>
+        <item quantity="few">Удалить сохранённые переводы для %1$d выбранных глав?</item>
+        <item quantity="many">Удалить сохранённые переводы для %1$d выбранных глав?</item>
+    </plurals>
+    <string name="book_continue_title_fmt">Продолжить · %1$s</string>
+    <string name="book_read_again_title_fmt">Перечитать · %1$s</string>
+</resources>

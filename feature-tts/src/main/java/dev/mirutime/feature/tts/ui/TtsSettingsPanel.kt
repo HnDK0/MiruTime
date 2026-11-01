@@ -1,0 +1,1718 @@
+package dev.mirutime.feature.tts.ui
+
+import android.speech.tts.Voice
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.CenterFocusWeak
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.Bookmarks
+import androidx.compose.material.icons.outlined.RecordVoiceOver
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import dev.mirutime.feature.tts.R
+import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.MiruSpace
+import dev.mirutime.uikit.AppBottomSheet
+import dev.mirutime.uikit.MiruRowDivider
+import dev.mirutime.uikit.MiruSlider
+import dev.mirutime.uikit.SettingsSwitchRow
+import dev.mirutime.feature.tts.TtsCapabilities
+import dev.mirutime.feature.tts.TtsMaxPitch
+import dev.mirutime.feature.tts.TtsMaxSpeed
+import dev.mirutime.feature.tts.TtsMinPitch
+import dev.mirutime.feature.tts.TtsMinSpeed
+import dev.mirutime.feature.tts.TtsPitchStep
+import dev.mirutime.feature.tts.TtsSavedVoice
+import dev.mirutime.feature.tts.TtsSettings
+import dev.mirutime.feature.tts.TtsSpeedStep
+import dev.mirutime.feature.tts.TtsStatus
+import dev.mirutime.feature.tts.TtsVoice
+import dev.mirutime.feature.tts.applySavedVoice
+import dev.mirutime.feature.tts.ttsAddSavedVoice
+import dev.mirutime.feature.tts.ttsFilterSavedVoices
+import dev.mirutime.feature.tts.ttsFilterVoices
+import dev.mirutime.feature.tts.ttsGroupSavedVoices
+import dev.mirutime.feature.tts.ttsGroupVoicesByEngine
+import dev.mirutime.feature.tts.ttsIsVoiceFavorite
+import dev.mirutime.feature.tts.ttsSliderSteps
+import dev.mirutime.feature.tts.ttsSortVoices
+import dev.mirutime.feature.tts.ttsToggleVoiceFavorite
+import dev.mirutime.feature.tts.ttsVoiceLabel
+import kotlinx.coroutines.delay
+
+private val TtsSpeedSliderSteps = ttsSliderSteps(TtsMinSpeed..TtsMaxSpeed, TtsSpeedStep)
+private val TtsPitchSliderSteps = ttsSliderSteps(TtsMinPitch..TtsMaxPitch, TtsPitchStep)
+private const val VoiceSearchDebounceMs = 220L
+
+private enum class TtsSettingSection { Engine, AutoNext, Highlight, TestReset }
+
+// Secondary TTS surfaces. They replace the settings sheet instead of stacking
+// a second ModalBottomSheet on top of it (one sheet window at a time).
+private enum class TtsOverlay { Voices, SavedVoices, DeleteSavedVoice }
+
+/**
+ * Compact player pinned above a reader settings sheet. It is hosted by the
+ * sheet itself (not the page behind it) so the scrim can never cover it.
+ * Stop clears the TTS session; the settings sheet stays usable underneath.
+ */
+@Composable
+fun TtsMiniPlayer(
+    status: TtsStatus,
+    chapterTitle: String,
+    sentencePreview: String?,
+    sentenceNumber: Int,
+    chunkCount: Int,
+    chapterNumber: Int,
+    chapterCount: Int,
+    chapterPercent: Int,
+    atEnd: Boolean,
+    onToggle: () -> Unit,
+    onStop: () -> Unit,
+    onStartHere: () -> Unit,
+    onFocus: () -> Unit,
+    modifier: Modifier = Modifier,
+    showSentence: Boolean = true,
+    sentenceMaxLines: Int = 1,
+) {
+    val playing = status == TtsStatus.Playing || status == TtsStatus.Loading
+    val session = playing || status == TtsStatus.Paused
+    val statusLabel = ttsStatusLabel(status, atEnd)
+    val progress = if (chunkCount > 0) {
+        (sentenceNumber.toFloat() / chunkCount).coerceIn(0f, 1f)
+    } else {
+        chapterPercent / 100f
+    }
+    val shape = RoundedCornerShape(18.dp)
+    val accent = MaterialTheme.colorScheme.primary
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.surfaceContainerHigh,
+                        MaterialTheme.colorScheme.surfaceContainer,
+                    ),
+                ),
+            )
+            .border(1.dp, accent.copy(alpha = 0.16f), shape)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TtsPlayPauseButton(
+                playing = playing,
+                onClick = onToggle,
+                size = 44.dp,
+                iconSize = 24.dp,
+            )
+            Spacer(Modifier.width(MiruSpace.M))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val chapterPosition = ttsChapterLabel(chapterNumber, chapterCount)
+                    if (chapterPosition.isNotEmpty()) {
+                        Text(
+                            text = chapterPosition,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                    Text(
+                        text = if (chapterPosition.isEmpty()) statusLabel else " · $statusLabel",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (status == TtsStatus.Failed) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            accent
+                        },
+                        maxLines = 1,
+                    )
+                }
+                Text(
+                    text = chapterTitle.ifBlank { stringResource(R.string.rd_tts_chapter_unknown) },
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (showSentence) {
+                    Text(
+                        text = sentencePreview ?: stringResource(R.string.rd_tts_preparing),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = sentenceMaxLines,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Spacer(Modifier.width(MiruSpace.S))
+            MiniStopButton(onStop = onStop)
+        }
+        Spacer(Modifier.height(MiruSpace.S))
+        TtsProgressBar(progress = progress, height = 4.dp)
+        Spacer(Modifier.height(MiruSpace.S))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            MiniAction(
+                icon = Icons.Filled.CenterFocusWeak,
+                label = stringResource(R.string.rd_tts_start_here),
+                enabled = session,
+                onClick = onStartHere,
+            )
+            Spacer(Modifier.width(MiruSpace.S))
+            MiniAction(
+                icon = Icons.Filled.CenterFocusStrong,
+                label = stringResource(R.string.rd_tts_focus),
+                enabled = session,
+                onClick = onFocus,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = if (chunkCount > 0) {
+                    stringResource(
+                        R.string.rd_tts_mini_progress_fmt,
+                        sentenceNumber,
+                        chunkCount,
+                        ttsProgressPercentValue(sentenceNumber, chunkCount),
+                    )
+                } else {
+                    stringResource(R.string.rd_tts_progress_fmt, chapterPercent)
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MiniStopButton(onStop: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .clickable(role = Role.Button, onClick = onStop)
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Stop,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(15.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text = stringResource(R.string.rd_tts_stop),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun MiniAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .clip(RoundedCornerShape(50))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (enabled) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+            },
+            modifier = Modifier.size(15.dp),
+        )
+        Spacer(Modifier.width(5.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (enabled) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            },
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * The single TTS surface in the reader. A compact player comes first; voice,
+ * speed, pitch and engine live in accordions so the sheet never opens as a
+ * wall of controls. Only one accordion is open at a time.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun TtsSettingsPanel(
+    settings: TtsSettings,
+    capabilities: TtsCapabilities,
+    status: TtsStatus,
+    message: String?,
+    atEnd: Boolean,
+    canPreviousChapter: Boolean,
+    canNextChapter: Boolean,
+    highlight: Boolean,
+    highlightColor: Long,
+    highlightColors: List<Long>,
+    onSettingsChange: (TtsSettings) -> Unit,
+    onTest: (String) -> Unit,
+    onReset: () -> Unit,
+    onRetry: () -> Unit,
+    onToggle: () -> Unit,
+    onStartHere: () -> Unit,
+    onFocus: () -> Unit,
+    onPreviousChunk: () -> Unit,
+    onNextChunk: () -> Unit,
+    onPreviousChapter: () -> Unit,
+    onNextChapter: () -> Unit,
+    onHighlightChange: (Boolean) -> Unit,
+    onHighlightColorChange: (Long) -> Unit,
+    onDismiss: () -> Unit,
+    onDiscoverVoices: () -> Unit = {},
+) {
+    val ready = capabilities.ready
+    val failed = status == TtsStatus.Failed
+    val playing = status == TtsStatus.Playing || status == TtsStatus.Loading
+    val session = playing || status == TtsStatus.Paused
+    val testText = stringResource(R.string.rd_tts_test_text)
+    var section by rememberSaveable { mutableStateOf<TtsSettingSection?>(null) }
+    var overlay by rememberSaveable { mutableStateOf<TtsOverlay?>(null) }
+    var deleteIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    // The engine accordion must also see engines installed after app start.
+    LaunchedEffect(Unit) { onDiscoverVoices() }
+
+    when (overlay) {
+        TtsOverlay.Voices -> {
+            TtsVoicePickerSheet(
+                capabilities = capabilities,
+                settings = settings,
+                onSettingsChange = onSettingsChange,
+                currentVoiceId = settings.voiceId,
+                currentEngineId = settings.engineId ?: capabilities.currentEngineId,
+                failed = failed,
+                onSelect = { voiceId, voiceEngineId ->
+                    onSettingsChange(
+                        settings.copy(voiceId = voiceId, engineId = voiceEngineId),
+                    )
+                    overlay = null
+                },
+                onDismiss = { overlay = null },
+                onDiscover = onDiscoverVoices,
+            )
+            return
+        }
+        TtsOverlay.SavedVoices -> {
+            TtsSavedVoicesSheet(
+                settings = settings,
+                capabilities = capabilities,
+                onSettingsChange = onSettingsChange,
+                onDeleteRequest = { index ->
+                    deleteIndex = index
+                    overlay = TtsOverlay.DeleteSavedVoice
+                },
+                onDismiss = { overlay = null },
+            )
+            return
+        }
+        TtsOverlay.DeleteSavedVoice -> {
+            TtsDeleteSavedVoiceSheet(
+                voice = deleteIndex?.let(settings.savedVoices::getOrNull),
+                onDelete = {
+                    val index = deleteIndex
+                    if (index != null) {
+                        onSettingsChange(
+                            settings.copy(
+                                savedVoices = settings.savedVoices
+                                    .filterIndexed { i, _ -> i != index },
+                            ),
+                        )
+                    }
+                    deleteIndex = null
+                    overlay = TtsOverlay.SavedVoices
+                },
+                onDismiss = {
+                    deleteIndex = null
+                    overlay = TtsOverlay.SavedVoices
+                },
+            )
+            return
+        }
+        null -> Unit
+    }
+
+    AppBottomSheet(
+        title = stringResource(R.string.rd_tts_panel_title),
+        description = stringResource(R.string.rd_tts_panel_desc),
+        onClose = onDismiss,
+    ) {
+        if (!ready) {
+            if (failed) {
+                Text(
+                    text = stringResource(R.string.rd_tts_unavailable),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            } else {
+                TtsInlineLoading(stringResource(R.string.rd_tts_voices_loading))
+            }
+        } else if (failed) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = MiruSpace.S),
+            ) {
+                Text(
+                    text = message ?: stringResource(R.string.rd_tts_failed),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onRetry) {
+                    Text(stringResource(R.string.rd_tts_retry))
+                }
+            }
+        }
+
+        // Compact player: the two live parameters stay visible, the rest is
+        // one chip row and one transport row (NoveLA's settings dialog).
+        // Drag updates the draft only; the controller stops/re-queues the
+        // current chunk once, on release.
+        var speedDraft by remember(settings.speed) { mutableStateOf(settings.speed) }
+        var pitchDraft by remember(settings.pitch) { mutableStateOf(settings.pitch) }
+        TtsCompactSlider(
+            label = stringResource(R.string.rd_tts_speed),
+            value = stringResource(R.string.rd_tts_speed_value, speedDraft),
+        ) {
+            MiruSlider(
+                value = speedDraft,
+                onValueChange = { speedDraft = it },
+                valueRange = TtsMinSpeed..TtsMaxSpeed,
+                steps = TtsSpeedSliderSteps,
+                enabled = ready,
+                contentDescription = stringResource(R.string.rd_tts_speed_desc),
+                onValueChangeFinished = {
+                    if (speedDraft != settings.speed) {
+                        onSettingsChange(settings.copy(speed = speedDraft))
+                    }
+                },
+            )
+        }
+        TtsCompactSlider(
+            label = stringResource(R.string.rd_tts_pitch),
+            value = stringResource(R.string.rd_tts_pitch_value, pitchDraft),
+        ) {
+            MiruSlider(
+                value = pitchDraft,
+                onValueChange = { pitchDraft = it },
+                valueRange = TtsMinPitch..TtsMaxPitch,
+                steps = TtsPitchSliderSteps,
+                enabled = ready,
+                contentDescription = stringResource(R.string.rd_tts_pitch_desc),
+                onValueChangeFinished = {
+                    if (pitchDraft != settings.pitch) {
+                        onSettingsChange(settings.copy(pitch = pitchDraft))
+                    }
+                },
+            )
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(vertical = MiruSpace.Xs),
+        ) {
+            TtsChip(
+                label = stringResource(R.string.rd_tts_start_here),
+                icon = Icons.Filled.CenterFocusWeak,
+                enabled = ready,
+                onClick = onStartHere,
+            )
+            TtsChip(
+                label = stringResource(R.string.rd_tts_focus),
+                icon = Icons.Filled.CenterFocusStrong,
+                onClick = onFocus,
+            )
+            TtsChip(
+                label = stringResource(R.string.rd_tts_voices),
+                icon = Icons.Outlined.RecordVoiceOver,
+                enabled = ready,
+                onClick = { overlay = TtsOverlay.Voices },
+            )
+            TtsChip(
+                label = stringResource(R.string.rd_tts_saved_voices),
+                icon = Icons.Outlined.Bookmarks,
+                onClick = { overlay = TtsOverlay.SavedVoices },
+            )
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = MiruSpace.S),
+        ) {
+            TtsIconButton(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = stringResource(R.string.tts_action_prev_chapter),
+                tint = MaterialTheme.colorScheme.onSurface,
+                enabled = canPreviousChapter,
+                onClick = onPreviousChapter,
+            )
+            TtsIconButton(
+                icon = Icons.Filled.SkipPrevious,
+                contentDescription = stringResource(R.string.rd_tts_prev_chunk),
+                tint = MaterialTheme.colorScheme.onSurface,
+                enabled = session,
+                onClick = onPreviousChunk,
+            )
+            TtsPlayPauseButton(
+                playing = playing,
+                onClick = onToggle,
+                size = 48.dp,
+                iconSize = 24.dp,
+            )
+            TtsIconButton(
+                icon = Icons.Filled.SkipNext,
+                contentDescription = stringResource(R.string.rd_tts_next_chunk),
+                tint = MaterialTheme.colorScheme.onSurface,
+                enabled = session && !atEnd,
+                onClick = onNextChunk,
+            )
+            TtsIconButton(
+                icon = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = stringResource(R.string.tts_action_next_chapter),
+                tint = MaterialTheme.colorScheme.onSurface,
+                enabled = canNextChapter,
+                onClick = onNextChapter,
+            )
+        }
+
+        MiruRowDivider()
+        SettingsSwitchRow(
+            title = stringResource(R.string.rd_tts_floating_player),
+            subtitle = stringResource(R.string.rd_tts_floating_desc),
+            checked = settings.floatingPlayer,
+            onChange = { onSettingsChange(settings.copy(floatingPlayer = it)) },
+            horizontalPadding = 0.dp,
+        )
+        MiruRowDivider()
+
+        if (capabilities.engines.size > 1) {
+            TtsAccordion(
+                title = stringResource(R.string.rd_tts_engine),
+                value = capabilities.engines.firstOrNull {
+                    it.id == (settings.engineId ?: capabilities.currentEngineId)
+                }?.label.orEmpty(),
+                expanded = section == TtsSettingSection.Engine,
+                onToggle = {
+                    section = if (section == TtsSettingSection.Engine) {
+                        null
+                    } else {
+                        TtsSettingSection.Engine
+                    }
+                },
+            ) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    capabilities.engines.forEach { engine ->
+                        FilterChip(
+                            selected = (settings.engineId ?: capabilities.currentEngineId) ==
+                                engine.id,
+                            // Switching away from a failed engine is how the
+                            // user recovers, so this must not wait for ready.
+                            onClick = { onSettingsChange(settings.copy(engineId = engine.id)) },
+                            label = {
+                                Text(
+                                    text = if (engine.isDefault) {
+                                        "${engine.label} · ${stringResource(R.string.rd_tts_engine_default)}"
+                                    } else {
+                                        engine.label
+                                    },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        TtsAccordion(
+            title = stringResource(R.string.rd_tts_auto_next),
+            value = stringResource(if (settings.autoNextChapter) R.string.tts_state_on else R.string.tts_state_off),
+            expanded = section == TtsSettingSection.AutoNext,
+            onToggle = {
+                section = if (section == TtsSettingSection.AutoNext) {
+                    null
+                } else {
+                    TtsSettingSection.AutoNext
+                }
+            },
+        ) {
+            SettingsSwitchRow(
+                title = stringResource(R.string.rd_tts_auto_next),
+                subtitle = stringResource(R.string.rd_tts_auto_next_desc),
+                checked = settings.autoNextChapter,
+                onChange = { onSettingsChange(settings.copy(autoNextChapter = it)) },
+                horizontalPadding = 0.dp,
+            )
+        }
+
+        TtsAccordion(
+            title = stringResource(R.string.rd_tts_highlight),
+            value = stringResource(if (highlight) R.string.tts_state_on else R.string.tts_state_off),
+            expanded = section == TtsSettingSection.Highlight,
+            onToggle = {
+                section = if (section == TtsSettingSection.Highlight) {
+                    null
+                } else {
+                    TtsSettingSection.Highlight
+                }
+            },
+        ) {
+            SettingsSwitchRow(
+                title = stringResource(R.string.rd_tts_highlight),
+                subtitle = stringResource(R.string.rd_tts_highlight_desc),
+                checked = highlight,
+                onChange = onHighlightChange,
+                horizontalPadding = 0.dp,
+            )
+            Text(
+                text = stringResource(R.string.tts_highlight_color),
+                style = MaterialTheme.typography.labelSmall,
+                color = LocalMiruExtraColors.current.muted,
+                modifier = Modifier.padding(top = MiruSpace.S),
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                verticalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = MiruSpace.Xs),
+            ) {
+                highlightColors.forEach { color ->
+                    TtsHighlightDot(
+                        color = color,
+                        selected = highlightColor == color,
+                        onClick = { onHighlightColorChange(color) },
+                    )
+                }
+            }
+        }
+
+        TtsAccordion(
+            title = stringResource(R.string.rd_tts_test_reset),
+            value = "",
+            expanded = section == TtsSettingSection.TestReset,
+            onToggle = {
+                section = if (section == TtsSettingSection.TestReset) {
+                    null
+                } else {
+                    TtsSettingSection.TestReset
+                }
+            },
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                OutlinedButton(
+                    onClick = { onTest(testText) },
+                    enabled = ready,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.rd_tts_test))
+                }
+                OutlinedButton(
+                    onClick = onReset,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.rd_tts_reset))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TtsChip(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .heightIn(min = 32.dp)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (enabled) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                },
+                modifier = Modifier.size(14.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                },
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TtsCompactSlider(
+    label: String,
+    value: String,
+    content: @Composable () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = MiruSpace.Xs),
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = value,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        content()
+    }
+}
+
+/**
+ * Voice list as its own sheet surface. It replaces the settings sheet while
+ * open (the panel renders one sheet at a time) instead of stacking a second
+ * ModalBottomSheet window on top: that ordering breaks back/dismiss handling.
+ * Close or a selection returns to the settings sheet.
+ *
+ * Hierarchy follows LanguagePickerSheet: current voice first, saved voices
+ * grouped per engine, then the full catalog grouped per engine. A star on a
+ * catalog row saves/removes an auto-named favorite (voice + current rate and
+ * pitch); user-renamed presets are only editable in the Saved voices sheet.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TtsVoicePickerSheet(
+    capabilities: TtsCapabilities,
+    settings: TtsSettings,
+    onSettingsChange: (TtsSettings) -> Unit,
+    currentVoiceId: String?,
+    currentEngineId: String?,
+    failed: Boolean,
+    onSelect: (String?, String?) -> Unit,
+    onDismiss: () -> Unit,
+    onDiscover: () -> Unit,
+) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var debouncedQuery by rememberSaveable { mutableStateOf("") }
+    // Engines installed after app start are only visible after a fresh system
+    // query; do it when the picker opens instead of requiring a restart.
+    LaunchedEffect(Unit) { onDiscover() }
+    // Typing stays immediate; filtering waits briefly so a large all-engine
+    // catalog is not searched on every keystroke.
+    LaunchedEffect(query) {
+        if (query.isNotBlank()) delay(VoiceSearchDebounceMs)
+        debouncedQuery = query
+    }
+    val engineLabels = remember(capabilities.engines) {
+        capabilities.engines.associate { it.id to it.label }
+    }
+    val engineOrder = remember(capabilities.engines) { capabilities.engines.map { it.id } }
+    val systemEngineLabel = stringResource(R.string.rd_tts_voice_system)
+    val unknownEngineLabel = stringResource(R.string.rd_tts_voice_engine_unknown)
+    val labelOf: (String?) -> String = { id ->
+        id?.let { engineLabels[it] ?: it } ?: systemEngineLabel
+    }
+    val currentVoice = remember(capabilities.voices, currentVoiceId, currentEngineId) {
+        currentVoiceId?.let { id ->
+            capabilities.voices.firstOrNull {
+                it.id == id && (currentEngineId == null || it.engineId == currentEngineId)
+            }
+        }
+    }
+    val filtered = remember(
+        capabilities.voices,
+        capabilities.currentEngineId,
+        debouncedQuery,
+        currentVoiceId,
+        currentEngineId,
+        engineLabels,
+        systemEngineLabel,
+    ) {
+        ttsSortVoices(
+            voices = ttsFilterVoices(
+                voices = capabilities.voices,
+                query = debouncedQuery,
+                engineId = null,
+                engineLabel = labelOf,
+            ),
+            voiceId = currentVoiceId,
+            engineId = currentEngineId,
+            currentEngineId = capabilities.currentEngineId,
+        )
+    }
+    // An engine with zero voices must still be visible; only during a search
+    // does an empty section become noise instead of information.
+    val emptyEngineIds = remember(capabilities.engines, debouncedQuery) {
+        if (debouncedQuery.isBlank()) capabilities.engines.map { it.id } else emptyList()
+    }
+    val voiceGroups = remember(
+        filtered,
+        engineOrder,
+        engineLabels,
+        systemEngineLabel,
+        emptyEngineIds,
+    ) {
+        ttsGroupVoicesByEngine(
+            voices = filtered,
+            engineOrder = engineOrder,
+            emptyEngineIds = emptyEngineIds,
+            engineLabel = { id ->
+                id?.let { engineLabels[it] ?: it } ?: systemEngineLabel
+            },
+        )
+    }
+    val savedFiltered = remember(
+        settings.savedVoices,
+        debouncedQuery,
+        engineLabels,
+        unknownEngineLabel,
+    ) {
+        ttsFilterSavedVoices(
+            voices = settings.savedVoices,
+            query = debouncedQuery,
+            engineId = null,
+        ) { id ->
+            id?.let { engineLabels[it] ?: it } ?: unknownEngineLabel
+        }
+    }
+    val savedGroups = remember(savedFiltered, engineOrder, engineLabels, unknownEngineLabel) {
+        ttsGroupSavedVoices(savedFiltered, engineOrder) { id ->
+            id?.let { engineLabels[it] ?: it } ?: unknownEngineLabel
+        }
+    }
+
+    AppBottomSheet(
+        title = stringResource(R.string.rd_tts_voices),
+        description = stringResource(R.string.rd_tts_voices_desc),
+        onClose = onDismiss,
+        // The LazyColumn below owns scrolling; wrapping it in the sheet's
+        // verticalScroll would measure it with an infinite height.
+        contentScrollable = false,
+    ) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = { Text(stringResource(R.string.rd_tts_voice_search)) },
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { query = "" }) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = stringResource(R.string.rd_tts_voice_search_clear),
+                        )
+                    }
+                }
+            },
+            singleLine = true,
+            enabled = capabilities.voices.isNotEmpty(),
+            shape = MaterialTheme.shapes.small,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (!capabilities.ready) {
+            if (failed) {
+                Text(
+                    text = stringResource(R.string.rd_tts_unavailable),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(vertical = MiruSpace.S),
+                )
+            } else {
+                TtsInlineLoading(stringResource(R.string.rd_tts_voices_loading))
+            }
+            // The selected engine is down and no other engine reported a
+            // usable catalog: there is nothing to list, but the error above
+            // explains why instead of a fake empty list.
+            if (capabilities.voices.isEmpty()) return@AppBottomSheet
+        }
+        Spacer(Modifier.height(MiruSpace.S))
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
+            item(key = "current-header") {
+                TtsPickerHeader(stringResource(R.string.rd_tts_voice_current))
+            }
+            item(key = "system-default") {
+                TtsVoiceRow(
+                    title = stringResource(R.string.rd_tts_voice_system),
+                    subtitle = stringResource(R.string.rd_tts_voice_system_desc),
+                    voiceId = null,
+                    selected = currentVoiceId == null,
+                    enabled = true,
+                    onClick = { onSelect(null, null) },
+                )
+            }
+            if (currentVoiceId != null) {
+                item(key = "current-voice") {
+                    if (currentVoice != null) {
+                        TtsVoiceRow(
+                            title = ttsVoiceLabel(currentVoice),
+                            subtitle = voiceMetaLabel(currentVoice, labelOf),
+                            voiceId = currentVoice.id,
+                            selected = true,
+                            enabled = true,
+                            onClick = { onSelect(currentVoice.id, currentVoice.engineId) },
+                        )
+                    } else {
+                        // The saved voice was removed by the engine; keep the
+                        // row honest and let the user pick another one below.
+                        TtsVoiceRow(
+                            title = stringResource(R.string.rd_tts_voice_missing),
+                            subtitle = labelOf(currentEngineId),
+                            voiceId = currentVoiceId,
+                            selected = true,
+                            enabled = false,
+                            onClick = {},
+                        )
+                    }
+                }
+            }
+            if (savedGroups.isNotEmpty()) {
+                item(key = "saved-divider") { TtsPickerDivider() }
+                item(key = "saved-header") {
+                    TtsPickerHeader(stringResource(R.string.rd_tts_saved_voices))
+                }
+                savedGroups.forEach { group ->
+                    item(key = "saved-engine-${group.engineId ?: "unknown"}") {
+                        TtsGroupHeader(group.label)
+                    }
+                    items(
+                        items = group.voices,
+                        key = { preset ->
+                            "saved-${preset.engineId}\u0000${preset.voiceId}\u0000" +
+                                "${preset.name}\u0000${preset.speed}\u0000${preset.pitch}"
+                        },
+                    ) { preset ->
+                        val voiceLabel = if (preset.voiceId == null) {
+                            stringResource(R.string.rd_tts_voice_system)
+                        } else {
+                            capabilities.voices.firstOrNull {
+                                it.id == preset.voiceId &&
+                                    (preset.engineId == null || it.engineId == preset.engineId)
+                            }?.let(::ttsVoiceLabel)
+                                ?: stringResource(R.string.rd_tts_voice_missing)
+                        }
+                        val detail = listOfNotNull(
+                            voiceLabel.takeIf { it != preset.name },
+                            stringResource(
+                                R.string.rd_tts_saved_detail_fmt,
+                                preset.speed,
+                                preset.pitch,
+                            ),
+                        ).joinToString(" · ")
+                        TtsSavedVoiceRow(
+                            preset = preset,
+                            detail = detail,
+                            onClick = {
+                                onSettingsChange(settings.applySavedVoice(preset))
+                                onDismiss()
+                            },
+                        )
+                    }
+                }
+            }
+            if (voiceGroups.isNotEmpty()) {
+                item(key = "all-divider") { TtsPickerDivider() }
+                item(key = "all-header") {
+                    TtsPickerHeader(stringResource(R.string.rd_tts_voice_all))
+                }
+                voiceGroups.forEach { group ->
+                    item(key = "all-engine-${group.engineId ?: "unknown"}") {
+                        TtsGroupHeader(group.label)
+                    }
+                    if (group.voices.isEmpty()) {
+                        item(key = "all-engine-empty-${group.engineId ?: "unknown"}") {
+                            Text(
+                                text = stringResource(R.string.rd_tts_voice_empty),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(
+                                    start = MiruSpace.S,
+                                    bottom = MiruSpace.Xs,
+                                ),
+                            )
+                        }
+                    }
+                    items(
+                        items = group.voices,
+                        key = { voice -> "voice-${voice.engineId}\u0000${voice.id}" },
+                    ) { voice ->
+                        val selected = currentVoiceId == voice.id &&
+                            (currentEngineId == null || voice.engineId == currentEngineId)
+                        val favorite = ttsIsVoiceFavorite(settings.savedVoices, voice)
+                        TtsVoiceRow(
+                            title = ttsVoiceLabel(voice),
+                            // The group header already names the engine.
+                            subtitle = voiceMetaLabel(voice, labelOf, includeEngine = false),
+                            voiceId = voice.id,
+                            selected = selected,
+                            enabled = true,
+                            favorite = favorite,
+                            onToggleFavorite = {
+                                onSettingsChange(
+                                    settings.copy(
+                                        savedVoices = ttsToggleVoiceFavorite(
+                                            settings.savedVoices,
+                                            voice,
+                                            settings.speed,
+                                            settings.pitch,
+                                        ),
+                                    ),
+                                )
+                            },
+                            onClick = { onSelect(voice.id, voice.engineId) },
+                        )
+                    }
+                }
+            }
+            if (voiceGroups.isEmpty() && savedGroups.isEmpty()) {
+                item(key = "empty") {
+                    Text(
+                        text = if (capabilities.voices.isEmpty()) {
+                            stringResource(R.string.rd_tts_voice_empty)
+                        } else {
+                            stringResource(R.string.rd_tts_voice_no_match)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = MiruSpace.S),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TtsPickerHeader(text: String) {
+    Text(
+        text = text.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        color = LocalMiruExtraColors.current.muted,
+        modifier = Modifier.padding(top = MiruSpace.M, bottom = MiruSpace.Xxs),
+    )
+}
+
+@Composable
+private fun TtsGroupHeader(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = MiruSpace.S, bottom = MiruSpace.Xxs, start = MiruSpace.S),
+    )
+}
+
+@Composable
+private fun TtsPickerDivider() {
+    HorizontalDivider(Modifier.padding(vertical = MiruSpace.S))
+}
+
+@Composable
+private fun TtsSavedVoiceRow(
+    preset: TtsSavedVoice,
+    detail: String,
+    onClick: () -> Unit,
+) {
+    val extra = LocalMiruExtraColors.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(start = MiruSpace.S, top = MiruSpace.Xs, bottom = MiruSpace.Xs),
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Star,
+            contentDescription = null,
+            tint = extra.accent,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(MiruSpace.S))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = preset.name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TtsSavedVoicesSheet(
+    settings: TtsSettings,
+    capabilities: TtsCapabilities,
+    onSettingsChange: (TtsSettings) -> Unit,
+    onDeleteRequest: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var presetName by rememberSaveable { mutableStateOf("") }
+    val currentVoiceName = capabilities.voices.firstOrNull {
+        it.id == settings.voiceId &&
+            (settings.engineId == null || it.engineId == settings.engineId)
+    }?.locale?.displayName ?: stringResource(R.string.rd_tts_voice_system)
+    val engineLabels = remember(capabilities.engines) {
+        capabilities.engines.associate { it.id to it.label }
+    }
+    val unknownEngine = stringResource(R.string.rd_tts_voice_engine_unknown)
+    val engineLabelOf: (String?) -> String = { id ->
+        id?.let { engineLabels[it] ?: it } ?: unknownEngine
+    }
+    val newPreset = TtsSavedVoice(
+        name = presetName.trim().ifEmpty { currentVoiceName },
+        voiceId = settings.voiceId,
+        speed = settings.speed,
+        pitch = settings.pitch,
+        engineId = settings.engineId,
+    )
+    val duplicate = ttsAddSavedVoice(settings.savedVoices, newPreset)
+        .size == settings.savedVoices.size
+    val grouped = remember(settings.savedVoices, engineLabels, unknownEngine) {
+        settings.savedVoices.withIndex()
+            .groupBy { it.value.engineId }
+            .entries
+            .sortedBy { engineLabelOf(it.key) }
+    }
+
+    AppBottomSheet(
+        title = stringResource(R.string.rd_tts_saved_voices),
+        description = currentVoiceName,
+        onClose = onDismiss,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            OutlinedTextField(
+                value = presetName,
+                onValueChange = { presetName = it },
+                placeholder = { Text(stringResource(R.string.rd_tts_saved_name)) },
+                singleLine = true,
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier.weight(1f),
+            )
+            Button(
+                onClick = {
+                    onSettingsChange(
+                        settings.copy(
+                            savedVoices = ttsAddSavedVoice(
+                                settings.savedVoices,
+                                newPreset,
+                            ),
+                        ),
+                    )
+                    presetName = ""
+                },
+                enabled = !duplicate,
+            ) {
+                Text(stringResource(R.string.rd_tts_saved_save))
+            }
+        }
+        if (settings.savedVoices.isEmpty()) {
+            Text(
+                text = stringResource(R.string.rd_tts_saved_empty),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = MiruSpace.M),
+            )
+        } else {
+            grouped.forEach { (engineId, presets) ->
+                Text(
+                    text = engineLabelOf(engineId),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LocalMiruExtraColors.current.muted,
+                    modifier = Modifier.padding(top = MiruSpace.S),
+                )
+                presets.forEach { indexed ->
+                    val preset = indexed.value
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .clickable {
+                                // One write: engine, voice, speed and pitch.
+                                onSettingsChange(settings.applySavedVoice(preset))
+                                onDismiss()
+                            },
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = preset.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = stringResource(
+                                    R.string.rd_tts_saved_detail_fmt,
+                                    preset.speed,
+                                    preset.pitch,
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        IconButton(
+                            onClick = { onDeleteRequest(indexed.index) },
+                            modifier = Modifier.size(48.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Delete,
+                                contentDescription = stringResource(
+                                    R.string.rd_tts_saved_delete,
+                                ),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TtsDeleteSavedVoiceSheet(
+    voice: TtsSavedVoice?,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val voiceName = voice?.name.orEmpty()
+    AppBottomSheet(
+        title = stringResource(R.string.rd_tts_saved_delete_title),
+        description = if (voiceName.isBlank()) {
+            ""
+        } else {
+            stringResource(R.string.rd_tts_saved_delete_desc, voiceName)
+        },
+        onClose = onDismiss,
+        closeLabel = stringResource(R.string.rd_tts_cancel),
+        doneLabel = stringResource(R.string.rd_tts_saved_delete_confirm),
+        onDone = onDelete,
+        doneDanger = true,
+    ) {}
+}
+
+@Composable
+private fun TtsAccordion(
+    title: String,
+    value: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(180),
+        label = "tts-accordion-arrow",
+    )
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(role = Role.Button, onClick = onToggle)
+                .padding(vertical = 10.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.width(MiruSpace.S))
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = Icons.Filled.ExpandMore,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(18.dp)
+                    .rotate(rotation),
+            )
+        }
+        AnimatedVisibility(
+            visible = expanded,
+            enter = fadeIn(tween(160)) + expandVertically(tween(180)),
+            exit = fadeOut(tween(120)) + shrinkVertically(tween(160)),
+        ) {
+            Column(Modifier.padding(bottom = MiruSpace.S)) { content() }
+        }
+    }
+    MiruRowDivider()
+}
+
+
+@Composable
+private fun TtsIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    tint: Color,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(48.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = if (enabled) tint else tint.copy(alpha = 0.35f),
+            modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
+@Composable
+private fun TtsHighlightDot(
+    color: Long,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val borderColor = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.outline
+    }
+    Box(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(Color(color))
+            .border(if (selected) 2.dp else 1.dp, borderColor, CircleShape)
+            .clickable(role = Role.RadioButton, onClick = onClick),
+    )
+}
+
+@Composable
+private fun TtsStatusPill(status: TtsStatus, atEnd: Boolean) {
+    val color = when (status) {
+        TtsStatus.Playing, TtsStatus.Loading -> MaterialTheme.colorScheme.primary
+        TtsStatus.Paused -> MaterialTheme.colorScheme.tertiary
+        TtsStatus.Failed -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = color.copy(alpha = 0.14f),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+        ) {
+            Box(
+                Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(color),
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                text = ttsStatusLabel(status, atEnd),
+                style = MaterialTheme.typography.labelSmall,
+                color = color,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TtsProgressBar(progress: Float, height: androidx.compose.ui.unit.Dp) {
+    val animated by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = tween(280),
+        label = "tts-progress",
+    )
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth(animated)
+                .height(height)
+                .clip(RoundedCornerShape(50))
+                .background(MaterialTheme.colorScheme.primary),
+        )
+    }
+}
+
+@Composable
+private fun StopTtsButton(onStop: () -> Unit, enabled: Boolean) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.9f))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onStop),
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Stop,
+            contentDescription = stringResource(R.string.rd_tts_stop),
+            tint = if (enabled) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+            },
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+@Composable
+private fun TtsPlayPauseButton(
+    playing: Boolean,
+    onClick: () -> Unit,
+    size: androidx.compose.ui.unit.Dp = 56.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 28.dp,
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .size(size)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary)
+            .clickable(role = Role.Button, onClick = onClick),
+    ) {
+        Icon(
+            imageVector = if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+            contentDescription = stringResource(
+                if (playing) R.string.rd_tts_action_pause else R.string.rd_tts_action_play,
+            ),
+            tint = MaterialTheme.colorScheme.onPrimary,
+            modifier = Modifier.size(iconSize),
+        )
+    }
+}
+
+@Composable
+private fun TtsVoiceRow(
+    title: String,
+    subtitle: String?,
+    voiceId: String?,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    favorite: Boolean? = null,
+    onToggleFavorite: (() -> Unit)? = null,
+) {
+    val extra = LocalMiruExtraColors.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .then(
+                if (selected) {
+                    Modifier
+                        .clip(MaterialTheme.shapes.small)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                } else {
+                    Modifier
+                },
+            )
+            .selectable(
+                selected = selected,
+                enabled = enabled,
+                role = Role.RadioButton,
+                onClick = onClick,
+            )
+            .padding(start = MiruSpace.S, top = MiruSpace.Xs, bottom = MiruSpace.Xs),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = when {
+                    !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    selected -> extra.accent
+                    else -> MaterialTheme.colorScheme.onSurface
+                },
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (voiceId != null) {
+                Text(
+                    text = stringResource(R.string.rd_tts_voice_id_fmt, voiceId),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LocalMiruExtraColors.current.muted,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        // The star is a separate 48dp target; selection stays on the row.
+        if (favorite != null && onToggleFavorite != null) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clickable(role = Role.Button, onClick = onToggleFavorite),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (favorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                    contentDescription = stringResource(
+                        if (favorite) {
+                            R.string.rd_tts_voice_favorite_remove
+                        } else {
+                            R.string.rd_tts_voice_favorite_add
+                        },
+                    ),
+                    tint = if (favorite) extra.accent else extra.muted,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TtsInlineLoading(label: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = MiruSpace.S),
+    ) {
+        CircularProgressIndicator(
+            strokeWidth = 2.dp,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(MiruSpace.S))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun ttsStatusLabel(status: TtsStatus, atEnd: Boolean): String = when (status) {
+    TtsStatus.Playing -> stringResource(R.string.rd_tts_playing)
+    TtsStatus.Loading -> stringResource(R.string.rd_tts_loading)
+    TtsStatus.Paused -> stringResource(R.string.rd_tts_paused)
+    TtsStatus.Failed -> stringResource(R.string.rd_tts_status_failed)
+    else -> if (atEnd) {
+        stringResource(R.string.rd_tts_finished_short)
+    } else {
+        stringResource(R.string.rd_tts_ready)
+    }
+}
+
+@Composable
+private fun ttsChapterLabel(chapterNumber: Int, chapterCount: Int): String =
+    if (chapterNumber > 0 && chapterCount > 0) {
+        stringResource(R.string.rd_tts_chapter_position_fmt, chapterNumber, chapterCount)
+    } else {
+        ""
+    }
+
+private fun ttsProgressPercentValue(sentenceNumber: Int, chunkCount: Int): Int =
+    if (chunkCount <= 0) {
+        0
+    } else {
+        ((sentenceNumber.toFloat() / chunkCount) * 100f).toInt().coerceIn(0, 100)
+    }
+
+@Composable
+private fun voiceMetaLabel(
+    voice: TtsVoice,
+    engineLabel: (String?) -> String,
+    includeEngine: Boolean = true,
+): String {
+    val quality = when {
+        voice.quality >= Voice.QUALITY_HIGH -> R.string.rd_tts_quality_high
+        voice.quality >= Voice.QUALITY_NORMAL -> R.string.rd_tts_quality_normal
+        else -> R.string.rd_tts_quality_basic
+    }
+    val connection = if (voice.needsInternet) {
+        R.string.rd_tts_voice_online
+    } else {
+        R.string.rd_tts_voice_offline
+    }
+    return buildList {
+        // A null engine id means "the live engine"; do not mislabel it as the
+        // System default voice in a row that is an actual voice.
+        if (includeEngine && voice.engineId != null) add(engineLabel(voice.engineId))
+        add(stringResource(R.string.rd_tts_quality_fmt, stringResource(quality)))
+        add(stringResource(connection))
+    }.filter { it.isNotBlank() }.joinToString(" · ")
+}

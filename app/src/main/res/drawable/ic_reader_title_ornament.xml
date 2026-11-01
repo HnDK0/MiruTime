@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Decorative flourish for the chapter header. Tinted at the call site with
+     the effective reader text colour, so it follows every reader theme. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="26dp"
+    android:height="26dp"
+    android:viewportWidth="26"
+    android:viewportHeight="26">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M13,10.4 L15.6,13 L13,15.6 L10.4,13 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="1.5"
+        android:pathData="M13,2.8 L23.2,13 L13,23.2 L2.8,13 Z" />
+</vector>

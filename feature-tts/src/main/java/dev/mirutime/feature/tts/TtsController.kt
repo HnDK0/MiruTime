@@ -1,0 +1,646 @@
+package dev.mirutime.feature.tts
+
+import dev.mirutime.app.features.reader.document.BlockId
+import dev.mirutime.app.features.reader.document.ReaderDocument
+import dev.mirutime.core.log.MiruLog
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+enum class TtsStatus { Idle, Loading, Playing, Paused, Failed }
+
+/** Chapter hand-off the reader must resolve; the controller has no chapter list. */
+enum class TtsChapterDirection { Next, Previous }
+
+data class TtsState(
+    val status: TtsStatus = TtsStatus.Idle,
+    val currentChunk: Int = 0,
+    val chunkCount: Int = 0,
+    val blockId: BlockId? = null,
+    val sentenceIndex: Int = 0,
+    val rangeStart: Int = 0,
+    val rangeEnd: Int = 0,
+    val translated: Boolean = false,
+    val atEnd: Boolean = false,
+    /** NoveLA-style estimate; zero until the chunk text is loaded. */
+    val estimatedTotalSeconds: Int = 0,
+    val estimatedRemainingSeconds: Int = 0,
+    val message: String? = null,
+)
+
+/**
+ * Small in-app TTS player. It uses the platform engine, speaks stable
+ * TtsChunker units, and exposes the current chunk/range for highlight.
+ * The cursor is persisted so a process death restores a paused position.
+ * Foreground playback/MediaSession/floating overlay are a later layer.
+ */
+class TtsController(
+    private val engine: TtsEngine,
+    private val scope: CoroutineScope,
+    private val sessions: TtsSessionStore = InMemoryTtsSessionStore(),
+    private val settingsStore: TtsSettingsStore = InMemoryTtsSettingsStore(),
+) {
+    private val _state = MutableStateFlow(TtsState())
+    val state: StateFlow<TtsState> = _state.asStateFlow()
+
+    private val _settings = MutableStateFlow(settingsStore.load().sanitized())
+    val settings: StateFlow<TtsSettings> = _settings.asStateFlow()
+
+    private val _capabilities = MutableStateFlow(TtsCapabilities())
+    val capabilities: StateFlow<TtsCapabilities> = _capabilities.asStateFlow()
+
+    private val _chapterRequests = MutableSharedFlow<TtsChapterDirection>(extraBufferCapacity = 1)
+
+    /**
+     * Emitted when playback needs the reader to open another chapter (manual
+     * skip or auto-next). The reader owns the chapter list, loads the document
+     * and calls [play] so the controller never guesses what comes next.
+     */
+    val chapterRequests: SharedFlow<TtsChapterDirection> = _chapterRequests.asSharedFlow()
+
+    private var ready = false
+    private var pending: (() -> Unit)? = null
+    private var chunks: List<TtsChunk> = emptyList()
+    // Suffix sums of chunk text lengths: suffix[i] is "characters from chunk i
+    // to the end". Rebuilt only when chunks change, so the timer estimate is
+    // O(1) on every chunk/range update.
+    private var chunkCharSuffix: IntArray = IntArray(0)
+    private var current = 0
+    private var active = false
+    // Platform utterance ids are unique per queue (not chunk indexes), so a
+    // late callback from a stopped queue cannot be mistaken for the current
+    // one. Cleared whenever the queue is paused/skipped/replaced.
+    private val utteranceChunks = HashMap<Int, Int>()
+    private var nextUtteranceId = 0
+    private var bookUrl = ""
+    private var chapterIndex = 0
+    private var voiceId: String? = _settings.value.voiceId
+    private var speed = _settings.value.speed
+    private var pitch = _settings.value.pitch
+
+    fun play(document: ReaderDocument, translations: Map<Int, String> = emptyMap()) {
+        playFrom(document, translations, blockIndex = null)
+    }
+
+    /**
+     * Starts at the first spoken chunk at or after [blockIndex]. The reader
+     * passes its visible anchor, so "Start here" never jumps back to the
+     * chapter top. A null blockIndex keeps the ordinary chapter start.
+     */
+    fun playFrom(
+        document: ReaderDocument,
+        translations: Map<Int, String> = emptyMap(),
+        blockIndex: Int?,
+        charOffset: Int = 0,
+    ) {
+        applySavedSettings()
+        val next = TtsChunker.chunks(document, translations)
+        if (next.isEmpty()) {
+            setState(TtsState(status = TtsStatus.Failed, message = "Nothing to read"))
+            return
+        }
+        stopInternal(keepStatus = true)
+        chunks = next
+        rebuildChunkCharStats()
+        bookUrl = document.bookUrl
+        chapterIndex = document.chapterIndex
+        current = if (blockIndex == null) 0 else ttsStartIndex(next, blockIndex, charOffset)
+        active = true
+        MiruLog.event(
+            "tts",
+            "play",
+            "chunks" to next.size,
+            "chapter" to document.chapterIndex,
+            "block" to blockIndex,
+            "startChunk" to current,
+        )
+        persist(wasPlaying = true)
+        if (!ready) {
+            setState(chunkState(current, TtsStatus.Loading))
+            pending = { speakFrom(current) }
+        } else {
+            speakFrom(current)
+        }
+    }
+
+    /**
+     * Rebuilds chunks from the current document/translation state and restores
+     * a paused cursor. Never starts speech, even if the session was playing.
+     */
+    fun restore(
+        document: ReaderDocument,
+        translations: Map<Int, String> = emptyMap(),
+        session: TtsSession,
+    ): Boolean {
+        if (document.chapterUrl != session.chapterUrl) return false
+        if (document.chapterIndex != session.chapterIndex) return false
+        val next = TtsChunker.chunks(document, translations)
+        val cursor = resolveTtsCursor(next, session) ?: return false
+        stopInternal(keepStatus = true)
+        pending = null
+        chunks = next
+        rebuildChunkCharStats()
+        bookUrl = document.bookUrl.ifBlank { session.bookUrl }
+        chapterIndex = document.chapterIndex
+        current = cursor
+        active = false
+        applyEngine(_settings.value.engineId)
+        voiceId = session.voiceId ?: _settings.value.voiceId
+        speed = clampTtsSpeed(session.speed)
+        pitch = clampTtsPitch(session.pitch)
+        applyPlaybackSettings()
+        setState(chunkState(cursor, TtsStatus.Paused))
+        persist(wasPlaying = false, immediate = true)
+        return true
+    }
+
+    fun pause() {
+        if (!active && _state.value.status != TtsStatus.Loading) return
+        pending = null
+        invalidateUtterances()
+        engine.stop()
+        active = false
+        setState(_state.value.copy(status = TtsStatus.Paused))
+        persist(wasPlaying = false, immediate = true)
+    }
+
+    fun resume() {
+        if (chunks.isEmpty()) return
+        active = true
+        applyPlaybackSettings()
+        persist(wasPlaying = true)
+        if (!ready) {
+            setState(chunkState(current, TtsStatus.Loading))
+            pending = { speakFrom(current) }
+            return
+        }
+        speakFrom(current)
+    }
+
+    /**
+     * Stops the platform queue and resumes at the neighbouring chunk. While
+     * paused the cursor still moves (and persists) without speaking; at an
+     * edge the current chunk is restarted only when speech is already active.
+     */
+    fun skipNextChunk() = skipChunkBy(1)
+
+    fun skipPreviousChunk() = skipChunkBy(-1)
+
+    /**
+     * Stops the current utterance immediately and asks the reader to load the
+     * next/previous chapter. The reader calls [play] on the new document, so a
+     * failed navigation can never leave the old chapter speaking in parallel.
+     */
+    fun skipNextChapter() = requestChapter(TtsChapterDirection.Next)
+
+    fun skipPreviousChapter() = requestChapter(TtsChapterDirection.Previous)
+
+    private fun skipChunkBy(delta: Int) {
+        if (chunks.isEmpty()) return
+        invalidateUtterances()
+        val target = (current + delta).coerceIn(0, chunks.lastIndex)
+        if (target == current) {
+            if (active && ready) speakFrom(current)
+            return
+        }
+        current = target
+        if (active) {
+            if (ready) {
+                speakFrom(target)
+            } else {
+                setState(chunkState(target, TtsStatus.Loading))
+                pending = { speakFrom(target) }
+            }
+        } else {
+            setState(chunkState(target, TtsStatus.Paused))
+            persist(wasPlaying = false, immediate = true)
+        }
+    }
+
+    private fun requestChapter(direction: TtsChapterDirection) {
+        if (chunks.isEmpty()) return
+        active = false
+        pending = null
+        invalidateUtterances()
+        engine.stop()
+        // Keep the old cursor paused so a rejected request can resume it.
+        setState(chunkState(current, TtsStatus.Paused))
+        persist(wasPlaying = false, immediate = true)
+        _chapterRequests.tryEmit(direction)
+    }
+
+    fun toggle(document: ReaderDocument, translations: Map<Int, String> = emptyMap()) {
+        when (_state.value.status) {
+            TtsStatus.Playing, TtsStatus.Loading -> pause()
+            TtsStatus.Paused -> resume()
+            else -> play(document, translations)
+        }
+    }
+
+    fun stop() {
+        active = false
+        pending = null
+        invalidateUtterances()
+        engine.stop()
+        chunks = emptyList()
+        chunkCharSuffix = IntArray(0)
+        current = 0
+        bookUrl = ""
+        chapterIndex = 0
+        sessions.clear(immediate = true)
+        setState(TtsState())
+    }
+
+    fun close() {
+        active = false
+        pending = null
+        invalidateUtterances()
+        engine.stop()
+        engine.shutdown()
+        ready = false
+        publishCapabilities()
+    }
+
+    /**
+     * Persists and applies immediately; a restored session still wins later.
+     * The UI calls this on release, so voice/rate/pitch changes stop and
+     * re-queue the current chunk while appearance-only fields never interrupt
+     * speech. An engine switch re-initializes and resumes the same chunk.
+     */
+    fun updateSettings(settings: TtsSettings) {
+        val previous = _settings.value
+        val sanitized = settings.sanitized()
+        val playbackChanged = ttsPlaybackChanged(previous, sanitized)
+        val engineChanged = previous.sanitized().engineId != sanitized.engineId
+        _settings.value = sanitized
+        settingsStore.save(sanitized)
+        voiceId = sanitized.voiceId
+        speed = sanitized.speed
+        pitch = sanitized.pitch
+
+        if (engineChanged) {
+            val wasActive = active
+            invalidateUtterances()
+            engine.stop()
+            if (wasActive) {
+                setState(chunkState(current, TtsStatus.Loading))
+                pending = { speakFrom(current) }
+            }
+            val reinitializing = applyEngine(sanitized.engineId)
+            if (!reinitializing) {
+                // Already on the requested engine (e.g. explicit default id);
+                // no readiness callback will arrive, so resume now.
+                pending = null
+                applyPlaybackSettings()
+                if (wasActive) speakFrom(current)
+            }
+        } else if (playbackChanged) {
+            applyPlaybackSettings()
+            if (active && ready && _state.value.status == TtsStatus.Playing) {
+                speakFrom(current)
+            }
+        }
+        refreshTimeEstimate()
+        publishCapabilities()
+    }
+
+    fun resetSettings() {
+        updateSettings(TtsSettings())
+    }
+
+    /**
+     * Re-discovers installed engines (including ones installed while the app
+     * is running). The voice picker calls this on open, so the catalog never
+     * needs an app restart or a hardcoded engine list.
+     */
+    fun refreshEngines() {
+        engine.refreshEngines()
+        publishCapabilities()
+    }
+
+    /** Short sample with the current voice/rate/pitch; pauses a live reading. */
+    fun testUtterance(text: String) {
+        if (!ready) {
+            setState(
+                _state.value.copy(
+                    status = TtsStatus.Failed,
+                    message = "TTS unavailable",
+                ),
+            )
+            return
+        }
+        if (active) pause()
+        applyPlaybackSettings()
+        engine.preview(text)
+    }
+
+    /** Retries after a failure; re-creates the engine when it never came up. */
+    fun retry() {
+        if (chunks.isEmpty()) {
+            setState(TtsState())
+            return
+        }
+        applySavedSettings()
+        invalidateUtterances()
+        setState(chunkState(current, TtsStatus.Loading))
+        if (ready) {
+            speakFrom(current)
+        } else {
+            pending = { speakFrom(current) }
+            engine.restart()
+        }
+    }
+
+    private fun speakFrom(index: Int) {
+        if (!ready || chunks.isEmpty()) return
+        invalidateUtterances()
+        current = index.coerceIn(0, chunks.lastIndex)
+        active = true
+        setState(chunkState(current, TtsStatus.Playing))
+        // Persist before the platform callback so skipping cannot lose the
+        // cursor if speech never starts (engine race, process death).
+        persist(wasPlaying = true)
+        engine.stop()
+        for (i in current until chunks.size) {
+            val utteranceId = ++nextUtteranceId
+            utteranceChunks[utteranceId] = i
+            if (!engine.speak(chunks[i].text, utteranceId)) {
+                setState(
+                    _state.value.copy(
+                        status = TtsStatus.Failed,
+                        message = "TTS speak failed",
+                    ),
+                )
+                active = false
+                return
+            }
+        }
+    }
+
+    // Status/chunk transitions only; never the spoken text.
+    private fun setState(next: TtsState) {
+        val previous = _state.value
+        _state.value = next
+        if (previous.status != next.status || previous.currentChunk != next.currentChunk) {
+            MiruLog.event("tts", "state", "status" to next.status, "chunk" to next.currentChunk)
+        }
+    }
+
+    private fun chunkState(index: Int, status: TtsStatus): TtsState {
+        val chunk = chunks.getOrNull(index) ?: return TtsState(status = status)
+        val totalSeconds = ttsEstimatedSeconds(chunkCharSuffix.getOrElse(0) { 0 }, speed)
+        val remainingSeconds = ttsEstimatedSeconds(
+            chunkCharSuffix.getOrElse(index) { 0 },
+            speed,
+        )
+        return TtsState(
+            status = status,
+            currentChunk = index,
+            chunkCount = chunks.size,
+            blockId = chunk.blockId,
+            sentenceIndex = chunk.sentenceIndex,
+            // Do not paint the whole sentence before the platform reports its
+            // first word range; that looked like a full-sentence flash.
+            rangeStart = chunk.startOffset,
+            rangeEnd = if (status == TtsStatus.Playing || status == TtsStatus.Loading) {
+                chunk.startOffset
+            } else {
+                chunk.endOffset
+            },
+            translated = chunk.translated,
+            atEnd = index >= chunks.lastIndex,
+            estimatedTotalSeconds = totalSeconds,
+            estimatedRemainingSeconds = remainingSeconds,
+        )
+    }
+
+    private fun rebuildChunkCharStats() {
+        chunkCharSuffix = IntArray(chunks.size + 1)
+        for (index in chunks.indices.reversed()) {
+            chunkCharSuffix[index] = chunkCharSuffix[index + 1] + chunks[index].text.length
+        }
+    }
+
+    /** Speed is live; a changed rate must not leave the old estimate behind. */
+    private fun refreshTimeEstimate() {
+        if (chunks.isEmpty()) return
+        val total = ttsEstimatedSeconds(chunkCharSuffix.getOrElse(0) { 0 }, speed)
+        val remaining = ttsEstimatedSeconds(chunkCharSuffix.getOrElse(current) { 0 }, speed)
+        val state = _state.value
+        if (state.estimatedTotalSeconds == total &&
+            state.estimatedRemainingSeconds == remaining
+        ) {
+            return
+        }
+        setState(
+            state.copy(
+                estimatedTotalSeconds = total,
+                estimatedRemainingSeconds = remaining,
+            ),
+        )
+    }
+
+    private fun stopInternal(keepStatus: Boolean) {
+        active = false
+        invalidateUtterances()
+        engine.stop()
+        if (!keepStatus) setState(TtsState())
+    }
+
+    private fun invalidateUtterances() {
+        utteranceChunks.clear()
+    }
+
+    private fun onEngineReady() {
+        ready = true
+        applyPlaybackSettings()
+        publishCapabilities()
+        pending?.invoke()
+        pending = null
+    }
+
+    private fun applySavedSettings() {
+        val saved = settingsStore.load().sanitized()
+        _settings.value = saved
+        voiceId = saved.voiceId
+        speed = saved.speed
+        pitch = saved.pitch
+        applyEngine(saved.engineId)
+        applyPlaybackSettings()
+        publishCapabilities()
+    }
+
+    /** Returns true when the platform engine is being re-initialized. */
+    private fun applyEngine(id: String?): Boolean {
+        val target = id ?: engine.defaultEngineId
+        if (target != null && target != engine.currentEngineId) {
+            ready = false
+            engine.selectEngine(target)
+            return true
+        }
+        return false
+    }
+
+    private fun applyPlaybackSettings() {
+        if (!ready) return
+        speed = clampTtsSpeed(speed)
+        pitch = clampTtsPitch(pitch)
+        engine.setRate(speed)
+        engine.setPitch(pitch)
+        if (!engine.setVoice(voiceId)) {
+            // A saved engine voice may be gone after an engine switch.
+            voiceId = null
+            engine.setVoice(null)
+        }
+    }
+
+    private fun publishCapabilities() {
+        _capabilities.value = TtsCapabilities(
+            ready = ready,
+            // Auxiliary engine scans can still provide a usable catalog while
+            // the selected engine is down; the picker must offer another
+            // engine instead of a dead "unavailable" wall.
+            voices = engine.voices,
+            engines = engine.engines,
+            currentEngineId = engine.currentEngineId,
+            defaultEngineId = engine.defaultEngineId,
+        )
+    }
+
+    private fun persist(wasPlaying: Boolean, immediate: Boolean = false) {
+        val chunk = chunks.getOrNull(current) ?: return
+        if (bookUrl.isBlank()) return
+        sessions.save(
+            TtsSession(
+                bookUrl = bookUrl,
+                chapterIndex = chapterIndex,
+                chapterUrl = chunk.blockId.chapterUrl,
+                blockIndex = chunk.blockId.index,
+                sentenceIndex = chunk.sentenceIndex,
+                charOffset = chunk.startOffset,
+                voiceId = voiceId,
+                speed = speed,
+                pitch = pitch,
+                wasPlaying = wasPlaying,
+                translated = chunk.translated,
+                textHash = "${chunk.text.length}:${chunk.text.hashCode()}",
+                updatedAt = System.currentTimeMillis(),
+            ),
+            immediate,
+        )
+    }
+
+    private val listener = object : TtsEngineListener {
+        override fun onReady(ok: Boolean) {
+            if (ok) {
+                onEngineReady()
+            } else {
+                active = false
+                setState(TtsState(status = TtsStatus.Failed, message = "TTS unavailable"))
+                pending = null
+            }
+        }
+
+        override fun onVoicesChanged() {
+            publishCapabilities()
+        }
+
+        override fun onStart(utteranceId: Int) {
+            // Only utterances queued by the current speakFrom call are known;
+            // a stopped/replaced queue no longer has any valid ids.
+            val index = utteranceChunks[utteranceId] ?: return
+            if (!active || index < current) return
+            current = index
+            setState(chunkState(index, TtsStatus.Playing))
+            persist(wasPlaying = true)
+        }
+
+        override fun onDone(utteranceId: Int) {
+            val index = utteranceChunks[utteranceId] ?: return
+            if (index < chunks.lastIndex || !active) return
+            active = false
+            persist(wasPlaying = false, immediate = true)
+            if (_settings.value.autoNextChapter) {
+                // Keep the status active across the chapter load so the
+                // foreground service is not torn down between chapters.
+                setState(
+                    _state.value.copy(
+                        status = TtsStatus.Loading,
+                        atEnd = true,
+                        estimatedRemainingSeconds = 0,
+                    ),
+                )
+                _chapterRequests.tryEmit(TtsChapterDirection.Next)
+            } else {
+                setState(
+                    _state.value.copy(
+                        status = TtsStatus.Idle,
+                        atEnd = true,
+                        estimatedRemainingSeconds = 0,
+                    ),
+                )
+            }
+        }
+
+        override fun onError() {
+            setState(_state.value.copy(status = TtsStatus.Failed, message = "TTS error"))
+            active = false
+            persist(wasPlaying = false, immediate = true)
+        }
+
+        override fun onRangeStart(utteranceId: Int, start: Int, end: Int) {
+            val index = utteranceChunks[utteranceId] ?: return
+            val state = _state.value
+            // Late callbacks from a paused/skipped/replaced queue are not in
+            // the map (or no longer match the live chunk); never move the
+            // highlight for them.
+            if (!active || index != current || state.currentChunk != index) return
+            val chunk = chunks.getOrNull(index) ?: return
+            if (state.blockId != chunk.blockId) return
+            val base = chunk.startOffset
+            val consumed = start.coerceIn(0, chunk.text.length)
+            val remainingChars = (chunkCharSuffix.getOrElse(index) { 0 } - consumed)
+                .coerceAtLeast(0)
+            setState(
+                state.copy(
+                    rangeStart = base + start,
+                    rangeEnd = base + end,
+                    estimatedRemainingSeconds = ttsEstimatedSeconds(remainingChars, speed),
+                ),
+            )
+        }
+    }
+
+    init {
+        engine.listener = listener
+        publishCapabilities()
+        if (engine.isReady) onEngineReady()
+    }
+}
+
+/**
+ * First chunk at or after the reader's visible block. Chunks are ordered by
+ * block, so a heading/image without speech is skipped rather than failing.
+ * [charOffset] only matters when the anchor points inside a spoken block.
+ */
+internal fun ttsStartIndex(
+    chunks: List<TtsChunk>,
+    blockIndex: Int,
+    charOffset: Int,
+): Int {
+    if (chunks.isEmpty()) return 0
+    if (charOffset > 0) {
+        chunks.indexOfFirst { chunk ->
+            chunk.blockId.index == blockIndex &&
+                charOffset >= chunk.startOffset &&
+                charOffset < chunk.endOffset
+        }.takeIf { it >= 0 }?.let { return it }
+    }
+    return chunks.indexOfFirst { it.blockId.index >= blockIndex }
+        .takeIf { it >= 0 }
+        ?: chunks.lastIndex
+}

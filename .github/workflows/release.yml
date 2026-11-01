@@ -1,0 +1,140 @@
+name: Release by tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Signed release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6.3.0
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+          gradle-home-cache-cleanup: true
+
+      - name: Set up signing
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          ALIAS: ${{ secrets.ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$SIGNING_KEY"
+          printf '%s' "$SIGNING_KEY" | base64 --decode > app/storeFile.jks
+          cat > "$GITHUB_WORKSPACE/custom.properties" <<EOF
+          storeFile=$GITHUB_WORKSPACE/app/storeFile.jks
+          storePassword=$KEY_STORE_PASSWORD
+          keyAlias=$ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
+      - name: Build release
+        run: |
+          chmod +x gradlew
+          # Same full gate as CI (AGENTS §1) before the release build.
+          ./gradlew --no-daemon --build-cache --parallel \
+            :core-reader-model:test \
+            :ui-kit:testDebugUnitTest :ui-kit:lintDebug \
+            :core-log:testDebugUnitTest :core-log:lintDebug \
+            :feature-tts:testDebugUnitTest :feature-tts:lintDebug \
+            :feature-reader:testDebugUnitTest :feature-reader:lintDebug \
+            :mirutime-core:jvmTest :mirutime-data:jvmTest :translator:jvmTest \
+            :image-loader:testDebugUnitTest :image-loader:lintDebug \
+            :app:testDebugUnitTest :app:lintDebug \
+            :app:assembleRelease \
+            -PabiSplits=true \
+            -PlocalPropertiesFilePath="$GITHUB_WORKSPACE/custom.properties"
+
+      - name: Collect artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          cp app/build/outputs/apk/release/app-arm64-v8a-release.apk \
+            "release-artifacts/MiruTime-${GITHUB_REF_NAME}-arm64-v8a.apk"
+          cp app/build/outputs/apk/release/app-universal-release.apk \
+            "release-artifacts/MiruTime-${GITHUB_REF_NAME}-universal.apk"
+          mapping=app/build/outputs/mapping/release/mapping.txt
+          if [ -f "$mapping" ]; then
+            gzip -9 -c "$mapping" > "release-artifacts/mapping-${GITHUB_SHA::7}.txt.gz"
+          else
+            echo "::warning::R8 mapping.txt is missing; this release ships without a deobfuscation mapping"
+          fi
+          ls release-artifacts
+
+      - name: Verify APKs
+        run: |
+          set -euo pipefail
+          # Release build-tools only: an installed rc/preview sorts above the
+          # stable version and would otherwise be picked here.
+          build_tools=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -mindepth 1 -maxdepth 1 -type d | grep -vE -- '-(rc|beta|alpha|preview)' | sort -V | tail -1)
+          apks=$(find release-artifacts -maxdepth 1 -name 'MiruTime-*.apk' | sort)
+          test "$(printf '%s\n' "$apks" | wc -l)" -eq 2
+          # Pinned release certificate (DN O=Haokin Code) behind SIGNING_KEY;
+          # do not rotate it silently: a re-signed app cannot update an
+          # installed one.
+          expected_sha256=d7a5a988519c725e61fcad57c2b3c969f8277c8ce58893f61559c489691ed21d
+          for spec in "arm64-v8a:arm64-v8a" "universal:arm64-v8a armeabi-v7a x86 x86_64"; do
+            name=${spec%%:*}
+            expected_abis=${spec#*:}
+            apk=$(printf '%s\n' "$apks" | grep -E -- "-${name}\.apk$")
+            test -n "$apk"
+            certs=$("$build_tools/apksigner" verify --print-certs "$apk")
+            printf '%s\n' "$certs"
+            # apksigner prints either "Signer #1 certificate SHA-256 digest: ..."
+            # or "V2 Signer: certificate SHA-256 digest: ..." depending on version.
+            actual_sha256=$(printf '%s\n' "$certs" \
+              | sed -n 's/^.*certificate SHA-256 digest: //p' \
+              | head -1 | tr -d '\r' | tr '[:upper:]' '[:lower:]' \
+              | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            if [ -z "$actual_sha256" ]; then
+              echo "::error::$apk: could not read the certificate digest from apksigner output"
+              exit 1
+            fi
+            if [ "$actual_sha256" != "$expected_sha256" ]; then
+              echo "::error::$apk certificate does not match the expected release certificate (SHA-256 $expected_sha256)"
+              exit 1
+            fi
+            native_abis=$(unzip -Z1 "$apk" | sed -n 's|^lib/\([^/]*\)/.*|\1|p' | sort -u | tr '\n' ' ')
+            if [ "$native_abis" != "$expected_abis " ]; then
+              echo "::error::$apk has ABIs '$native_abis', expected '$expected_abis '"
+              exit 1
+            fi
+          done
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: MiruTime ${{ github.ref_name }}
+          draft: true
+          prerelease: false
+          files: release-artifacts/*
+          body: |
+            Release build from tag `${{ github.ref_name }}`.
+
+            - `MiruTime-${{ github.ref_name }}-arm64-v8a.apk` — for modern 64-bit devices (most phones); this is the normal download.
+            - `MiruTime-${{ github.ref_name }}-universal.apk` — for x86_64 targets (Android emulators, Chromebooks, Windows Subsystem for Android) and 32-bit-only devices; it contains all four ABIs, so it is larger.
+            - R8 mapping and both APKs are attached.
+            - Please back up the library before upgrading; Room migrations are one-way.

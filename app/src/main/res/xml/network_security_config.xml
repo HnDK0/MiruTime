@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cleartext is allowed globally (NoveLA parity): user-run translation
+servers (Ollama/LM Studio over HTTP) and HTTP-only plugin sources have no
+TLS. This file is the single source of truth; the manifest must not also set
+android:usesCleartextTraffic. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

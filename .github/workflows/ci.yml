@@ -1,0 +1,49 @@
+name: CI
+
+# Pull requests and manual dispatch only. Pushes (including main) do not
+# trigger this suite: it costs 8-10 min per commit. A full gate on demand
+# is the manual workflow; releases run on v* tags.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Tests and debug build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6.3.0
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+          gradle-home-cache-cleanup: true
+
+      - name: Build and test
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --build-cache --parallel \
+            :core-reader-model:test \
+            :ui-kit:testDebugUnitTest :ui-kit:lintDebug \
+            :core-log:testDebugUnitTest :core-log:lintDebug \
+            :feature-tts:testDebugUnitTest :feature-tts:lintDebug \
+            :feature-reader:testDebugUnitTest :feature-reader:lintDebug \
+            :mirutime-core:jvmTest :mirutime-data:jvmTest :translator:jvmTest \
+            :image-loader:testDebugUnitTest :image-loader:lintDebug \
+            :app:testDebugUnitTest :app:lintDebug :app:assembleDebug

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Book/chapter labels: short, labeled actions instead of icon-only
+     affordances. -->
+<resources>
+    <string name="book_sel_action_translate">Translate</string>
+    <string name="book_sel_action_download">Download</string>
+    <string name="book_sel_action_mark_read">Mark read</string>
+    <string name="book_sel_action_mark_unread">Mark unread</string>
+    <string name="book_sel_action_delete_translations">Delete translations</string>
+    <string name="book_sel_action_delete_downloads">Delete downloads</string>
+    <string name="book_ch_size_cd">Chapter size: %1$s</string>
+    <plurals name="book_sel_delete_translations_desc_plural">
+        <item quantity="one">Remove the saved translation for %1$d selected chapter?</item>
+        <item quantity="other">Remove saved translations for %1$d selected chapters?</item>
+    </plurals>
+    <string name="book_continue_title_fmt">Continue · %1$s</string>
+    <string name="book_read_again_title_fmt">Read again · %1$s</string>
+</resources>

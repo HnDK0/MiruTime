@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Book with bookmark for the chapter header. Tinted at the call site with
+     the effective reader text colour, so it follows every reader theme. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="26dp"
+    android:height="26dp"
+    android:viewportWidth="32"
+    android:viewportHeight="32">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M11.988,8 L19.98,8 L19.98,12.031 L11.988,12.031 Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M27.973,8.047 L32,4.016 L27.973,4.016 L27.973,0 L3.996,0 C1.789,0 0,1.789 0,4 L0,28 C0,30.211 1.789,32 3.996,32 L27.973,32 L27.973,12.047 L31.969,12.047 Z M23.977,28 L7.992,28 L7.992,4 L23.976,4 Z" />
+</vector>
