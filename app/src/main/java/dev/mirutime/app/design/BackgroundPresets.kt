@@ -307,7 +307,7 @@ private fun migrateLegacyPresetDir(context: Context) {
     legacy.delete()
 }
 
-private fun presetFile(context: Context, preset: PresetBackground) =
+internal fun presetFile(context: Context, preset: PresetBackground) =
     File(presetBgDir(context).apply { mkdirs() }, preset.name.replace(Regex("[^A-Za-z0-9._-]"), "_"))
 
 // JPEG / PNG / WebP magic bytes. A valid signature is enough to treat a cached

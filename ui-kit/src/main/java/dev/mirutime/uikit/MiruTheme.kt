@@ -1179,14 +1179,26 @@ fun MiruTheme(
             typography = MiruTypography,
             shapes = MiruShapes,
         ) {
-            // The full-bleed layer exists only with a real bitmap: an
-            // unconditional fillMaxSize Box would also stretch size-wrapping
-            // hosts (theme preview tiles nest MiruTheme inside LazyRow items).
-            // A requested image that is still loading or failed to decode
-            // falls back to the flat palette so transparent chrome never
-            // floats over the window background.
-            if (bgBitmap != null) {
-                Box(Modifier.fillMaxSize()) {
+            // One stable wrapper for the lifetime of this theme: switching
+            // between a photo background and a flat palette must not dispose
+            // the caller's subtree (it would drop the shell's sheet/nav state).
+            // The layers are conditional, the content slot is not.
+            Box(
+                modifier = when {
+                    bgBitmap != null -> Modifier.fillMaxSize()
+                    background is ThemeBackground.Image -> Modifier
+                        .fillMaxSize()
+                        .background(colors.scheme.background)
+                    else -> Modifier
+                },
+            ) {
+                // The full-bleed layer exists only with a real bitmap: an
+                // unconditional fillMaxSize Box would also stretch size-wrapping
+                // hosts (theme preview tiles nest MiruTheme inside LazyRow items).
+                // A requested image that is still loading or failed to decode
+                // falls back to the flat palette so transparent chrome never
+                // floats over the window background.
+                if (bgBitmap != null) {
                     Image(
                         bitmap = bgBitmap,
                         contentDescription = null,
@@ -1202,17 +1214,7 @@ fun MiruTheme(
                             .matchParentSize()
                             .background(veilBrush),
                     )
-                    content()
                 }
-            } else if (background is ThemeBackground.Image) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(colors.scheme.background),
-                ) {
-                    content()
-                }
-            } else {
                 content()
             }
         }

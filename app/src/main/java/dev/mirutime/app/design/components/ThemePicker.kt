@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -64,6 +65,7 @@ import dev.mirutime.app.design.dedupeBackgroundPaths
 import dev.mirutime.app.design.dedupePresets
 import dev.mirutime.app.design.applyPreset
 import dev.mirutime.app.design.loadCachedPresetBackgrounds
+import dev.mirutime.app.design.presetFile
 import dev.mirutime.app.design.refreshPresetBackgrounds
 import dev.mirutime.app.design.rememberCachedPresetPreview
 import dev.mirutime.uikit.MiruTheme
@@ -110,6 +112,56 @@ fun ThemePickerRails(
     var importFailed by remember { mutableStateOf(false) }
     var previewRevision by remember { mutableIntStateOf(0) }
 
+    // Each rail opens on its active tile: the selected theme, the active
+    // preset, or the active library background (behind the leading Add tile).
+    // First placement jumps; later selection changes animate.
+    val themeState = rememberLazyListState()
+    val presetState = rememberLazyListState()
+    val bgState = rememberLazyListState()
+    var themeScrolled by remember { mutableStateOf(false) }
+    var presetScrolled by remember { mutableStateOf(false) }
+    var bgScrolled by remember { mutableStateOf(false) }
+    val presetList = presets?.let(::dedupePresets)
+    val backgrounds = remember(bgLibrary) { dedupeBackgroundPaths(bgLibrary) }
+    val activeThemeIndex = ClassicThemes.indexOf(selected)
+    val activePresetIndex = remember(presets, customBg, selected) {
+        if (selected != ThemeMode.Custom || customBg == null) {
+            -1
+        } else {
+            presets?.let(::dedupePresets)
+                ?.indexOfFirst { presetFile(context, it).absolutePath == customBg }
+                ?: -1
+        }
+    }
+    val activeBgIndex = remember(backgrounds, customBg, selected) {
+        if (selected != ThemeMode.Custom || customBg == null) {
+            -1
+        } else {
+            backgrounds.indexOf(customBg).takeIf { it >= 0 }?.plus(1) ?: -1
+        }
+    }
+    LaunchedEffect(activeThemeIndex) {
+        if (activeThemeIndex < 0) return@LaunchedEffect
+        if (themeScrolled) themeState.animateScrollToItem(activeThemeIndex) else {
+            themeState.scrollToItem(activeThemeIndex)
+            themeScrolled = true
+        }
+    }
+    LaunchedEffect(activePresetIndex) {
+        if (activePresetIndex < 0) return@LaunchedEffect
+        if (presetScrolled) presetState.animateScrollToItem(activePresetIndex) else {
+            presetState.scrollToItem(activePresetIndex)
+            presetScrolled = true
+        }
+    }
+    LaunchedEffect(activeBgIndex) {
+        if (activeBgIndex < 0) return@LaunchedEffect
+        if (bgScrolled) bgState.animateScrollToItem(activeBgIndex) else {
+            bgState.scrollToItem(activeBgIndex)
+            bgScrolled = true
+        }
+    }
+
     LaunchedEffect(Unit) {
         presets = loadCachedPresetBackgrounds(context)
     }
@@ -135,7 +187,10 @@ fun ThemePickerRails(
             color = MaterialTheme.colorScheme.onSurface,
         )
         Spacer(modifier = Modifier.height(MiruSpace.S))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.M)) {
+        LazyRow(
+            state = themeState,
+            horizontalArrangement = Arrangement.spacedBy(MiruSpace.M),
+        ) {
             items(ClassicThemes, key = { it.name }) { mode ->
                 ThemeTile(
                     mode = mode,
@@ -165,7 +220,6 @@ fun ThemePickerRails(
             }
         }
         Spacer(modifier = Modifier.height(MiruSpace.Xs))
-        val presetList = presets?.let(::dedupePresets)
         when {
             presetList == null -> LazyRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.M)) {
                 items(3) { PresetPlaceholderTile() }
@@ -181,7 +235,10 @@ fun ThemePickerRails(
                     Text(text = stringResource(UiKitR.string.theme_presets_retry))
                 }
             }
-            else -> LazyRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.M)) {
+            else -> LazyRow(
+                state = presetState,
+                horizontalArrangement = Arrangement.spacedBy(MiruSpace.M),
+            ) {
                 itemsIndexed(presetList, key = { _, preset -> preset.url }) { index, preset ->
                     PresetTile(
                         preset = preset,
@@ -246,8 +303,10 @@ fun ThemePickerRails(
             color = MaterialTheme.colorScheme.onSurface,
         )
         Spacer(modifier = Modifier.height(MiruSpace.S))
-        val backgrounds = remember(bgLibrary) { dedupeBackgroundPaths(bgLibrary) }
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.M)) {
+        LazyRow(
+            state = bgState,
+            horizontalArrangement = Arrangement.spacedBy(MiruSpace.M),
+        ) {
             item(key = "add-bg") {
                 AddBackgroundTile(onClick = { addOpen = true })
             }
