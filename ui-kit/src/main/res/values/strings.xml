@@ -54,6 +54,9 @@
     <string name="theme_rail_presets">Ready-made backgrounds</string>
     <string name="theme_presets_failed">Could not load backgrounds from GitHub. Check the connection.</string>
     <string name="theme_presets_retry">Retry</string>
+    <string name="theme_presets_refresh">Refresh</string>
+    <string name="theme_presets_downloaded_fmt">Downloaded %1$d of %2$d</string>
+    <string name="theme_preset_download_failed">Could not download this background</string>
     <string name="theme_rail_background">My backgrounds</string>
     <string name="theme_custom_bg">Custom background</string>
     <string name="theme_custom_desc">A file from the device or a link. The picture is saved in the app (the same picture is never added twice) and lies under the content with a veil.</string>
@@ -62,6 +65,7 @@
     <string name="theme_custom_link_hint">https://…</string>
     <string name="theme_custom_add">Add</string>
     <string name="theme_custom_item_fmt">Background %1$d</string>
+    <string name="theme_preset_item_fmt">Preset %1$d</string>
     <string name="theme_custom_failed">Could not use this picture. Check the file or link.</string>
     <string name="theme_bg_delete_title">Delete background?</string>
     <string name="theme_bg_delete_desc">The saved picture will be removed from the app. If it is active now, the theme switches back to Paper.</string>

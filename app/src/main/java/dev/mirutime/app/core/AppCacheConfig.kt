@@ -9,7 +9,6 @@ object AppCacheConfig {
     const val CATALOG_CACHE_TTL_MS = 15L * 60 * 1000
     const val REPO_CACHE_TTL_MS = 15L * 60 * 1000
     const val CATALOG_CACHE_MAX_ENTRIES = 20
-    const val BACKGROUND_PRESET_TTL_MS = 12L * 60 * 60 * 1000
 
     fun isFresh(storedAt: Long, ttlMs: Long, now: Long = System.currentTimeMillis()): Boolean =
         now >= storedAt && now - storedAt < ttlMs

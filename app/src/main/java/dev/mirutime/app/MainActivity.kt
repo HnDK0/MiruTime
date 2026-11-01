@@ -23,6 +23,7 @@ import dev.mirutime.uikit.MiruTheme
 import dev.mirutime.uikit.ThemeBackground
 import dev.mirutime.uikit.ThemeMode
 import dev.mirutime.app.design.deleteBackgroundFile
+import dev.mirutime.app.design.isPresetBackgroundPath
 import dev.mirutime.app.design.loadBgLibrary
 import dev.mirutime.app.design.loadThemePrefs
 import dev.mirutime.app.design.rememberBackgroundBitmap
@@ -162,7 +163,12 @@ class MainActivity : ComponentActivity() {
                         customBg = customBg,
                         bgLibrary = bgLibrary,
                         onCustomBg = { source ->
-                            if (source != null && source !in bgLibrary) {
+                            // Presets are applied in place and never join the library.
+                            if (
+                                source != null &&
+                                !isPresetBackgroundPath(applicationContext, source) &&
+                                source !in bgLibrary
+                            ) {
                                 bgLibrary = bgLibrary + source
                                 saveBgLibrary(applicationContext, bgLibrary)
                             }

@@ -63,46 +63,77 @@ fun saveThemePrefs(context: Context, modeName: String, customBg: String?) {
 // saved background survives a revoked picker permission or a dead link, and
 // picking the same picture twice resolves to the same file (no duplicates).
 // The library itself is a JSON array of sources in SharedPreferences.
+// Ready-made presets live in their own durable folder (filesDir/preset_
+// backgrounds) and are applied in place: they are NOT library members.
 private const val KEY_BG_LIBRARY = "bg_library"
 private const val BG_DIR = "backgrounds"
+internal const val PRESET_BG_DIR = "preset_backgrounds"
 private const val BG_MAX_BYTES = 25 * 1024 * 1024
 private const val BG_STORE_SIDE = 1920
 
-fun loadBgLibrary(context: Context, active: String?): List<String> {
-    val prefs = context.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
-    val stored = prefs.getString(KEY_BG_LIBRARY, null)
-    val items = try {
+internal fun presetBgDir(context: Context) = File(context.filesDir, PRESET_BG_DIR)
+
+internal fun isPresetBackgroundPath(context: Context, source: String): Boolean {
+    if (!isLocalBg(source)) return false
+    val file = runCatching { File(source).canonicalFile }.getOrNull() ?: return false
+    return runCatching { file.parentFile == presetBgDir(context).canonicalFile }.getOrDefault(false)
+}
+
+// Raw saved list; callers that show it filter presets out via loadBgLibrary.
+internal fun storedBgLibrary(context: Context): List<String> {
+    val stored = context.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
+        .getString(KEY_BG_LIBRARY, null)
+    return try {
         stored?.let { json ->
             JSONArray(json).let { arr -> List(arr.length()) { arr.getString(it) } }
         }.orEmpty()
     } catch (_: JSONException) {
         emptyList()
     }
+}
+
+fun loadBgLibrary(context: Context, active: String?): List<String> {
     // Drop local files that vanished; pull in an active background saved
-    // before the library existed.
+    // before the library existed. Presets stay outside "My backgrounds".
+    val items = storedBgLibrary(context)
     val alive = items.filter { !isLocalBg(it) || File(it).exists() }
-    return (alive + listOfNotNull(active?.takeIf { it !in alive })).distinct()
+    return (alive + listOfNotNull(active?.takeIf { it !in alive }))
+        .filterNot { isPresetBackgroundPath(context, it) }
+        .distinct()
 }
 
 fun saveBgLibrary(context: Context, items: List<String>) {
+    val kept = items.filterNot { isPresetBackgroundPath(context, it) }
     context.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
         .edit()
-        .putString(KEY_BG_LIBRARY, JSONArray(items).toString())
+        .putString(KEY_BG_LIBRARY, JSONArray(kept).toString())
         .apply()
 }
 
 private fun bgDir(context: Context) = File(context.filesDir, BG_DIR)
 
 // Stored name = hash of the ORIGINAL bytes (same picture -> same file).
-private fun bgFileName(bytes: ByteArray): String {
-    val digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
-    return digest.take(8).joinToString("") { "%02x".format(it) } + ".jpg"
-}
+private fun bgFileName(digest: ByteArray): String =
+    digest.take(8).joinToString("") { "%02x".format(it) } + ".jpg"
 
-// Where importBackground WOULD store these bytes. Lets a ready-made preset
-// tile know it is the active background without importing it first.
-internal fun savedBackgroundPath(context: Context, bytes: ByteArray): String =
-    File(bgDir(context), bgFileName(bytes)).absolutePath
+// Where importBackground stored a picture whose ORIGINAL bytes' SHA-256 is
+// known (used to recognise preset copies made by older builds).
+internal fun savedBackgroundPathForDigest(context: Context, digest: ByteArray): String =
+    File(bgDir(context), bgFileName(digest)).absolutePath
+
+// SHA-256 of an original picture (streamed; never loads the whole file).
+internal fun fileDigest(file: File): ByteArray? = runCatching {
+    val md = java.security.MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input ->
+        val buf = ByteArray(64 * 1024)
+        while (true) {
+            val n = input.read(buf)
+            if (n < 0) break
+            md.update(buf, 0, n)
+        }
+    }
+    md.digest()
+}.getOrNull()
 
 private fun isLocalBg(source: String) =
     !source.startsWith("http", ignoreCase = true) && !source.startsWith("content:")

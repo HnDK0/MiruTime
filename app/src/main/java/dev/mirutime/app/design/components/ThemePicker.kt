@@ -50,18 +50,22 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.uikit.R as UiKitR
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.AppBottomSheet
+import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.app.design.PresetBackground
+import dev.mirutime.app.design.PresetRefreshResult
 import dev.mirutime.app.design.dedupeBackgroundPaths
 import dev.mirutime.app.design.dedupePresets
-import dev.mirutime.app.design.importPresetBackground
-import dev.mirutime.app.design.loadPresetBackgrounds
-import dev.mirutime.app.design.rememberPresetPreview
+import dev.mirutime.app.design.applyPreset
+import dev.mirutime.app.design.loadCachedPresetBackgrounds
+import dev.mirutime.app.design.refreshPresetBackgrounds
+import dev.mirutime.app.design.rememberCachedPresetPreview
 import dev.mirutime.uikit.MiruTheme
 import dev.mirutime.uikit.ThemeMode
 import dev.mirutime.app.design.importBackground
@@ -93,16 +97,35 @@ fun ThemePickerRails(
     var addOpen by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<String?>(null) }
 
-    // Ready-made backgrounds from GitHub: null = loading, empty = failed.
+    // Ready-made backgrounds from GitHub: null = cached list still reading,
+    // empty = nothing cached and the last refresh failed. Opening reads the
+    // cache only; Refresh downloads the listing and every picture, a tile tap
+    // downloads just that one missing picture.
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var presets by remember { mutableStateOf<List<PresetBackground>?>(null) }
-    var presetsReload by remember { mutableIntStateOf(0) }
+    var refreshing by remember { mutableStateOf(false) }
+    var refreshResult by remember { mutableStateOf<PresetRefreshResult?>(null) }
     var importingUrl by remember { mutableStateOf<String?>(null) }
-    val importFailed = stringResource(UiKitR.string.theme_custom_failed)
-    LaunchedEffect(presetsReload) {
-        presets = null
-        presets = loadPresetBackgrounds(context, force = presetsReload > 0)
+    var importFailed by remember { mutableStateOf(false) }
+    var previewRevision by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        presets = loadCachedPresetBackgrounds(context)
+    }
+
+    fun refreshPresets() {
+        if (refreshing) return
+        refreshing = true
+        importFailed = false
+        refreshResult = null
+        scope.launch {
+            val result = refreshPresetBackgrounds(context)
+            presets = result.presets
+            refreshResult = result
+            previewRevision++
+            refreshing = false
+        }
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
@@ -122,12 +145,26 @@ fun ThemePickerRails(
             }
         }
         Spacer(modifier = Modifier.height(MiruSpace.L))
-        Text(
-            text = stringResource(UiKitR.string.theme_rail_presets),
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Spacer(modifier = Modifier.height(MiruSpace.S))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(UiKitR.string.theme_rail_presets),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { refreshPresets() }, enabled = !refreshing) {
+                if (refreshing) {
+                    CircularProgressIndicator(
+                        strokeWidth = MiruSize.Stroke * 2,
+                        color = LocalMiruExtraColors.current.accent,
+                        modifier = Modifier.size(MiruSize.Indicator),
+                    )
+                } else {
+                    Text(text = stringResource(UiKitR.string.theme_presets_refresh))
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(MiruSpace.Xs))
         val presetList = presets?.let(::dedupePresets)
         when {
             presetList == null -> LazyRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.M)) {
@@ -140,7 +177,7 @@ fun ThemePickerRails(
                     color = LocalMiruExtraColors.current.muted,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { presetsReload++ }) {
+                TextButton(onClick = { refreshPresets() }, enabled = !refreshing) {
                     Text(text = stringResource(UiKitR.string.theme_presets_retry))
                 }
             }
@@ -148,26 +185,59 @@ fun ThemePickerRails(
                 itemsIndexed(presetList, key = { _, preset -> preset.url }) { index, preset ->
                     PresetTile(
                         preset = preset,
-                        label = stringResource(UiKitR.string.theme_custom_item_fmt, index + 1),
+                        label = stringResource(UiKitR.string.theme_preset_item_fmt, index + 1),
+                        previewRevision = previewRevision,
                         activeSavedPath = if (selected == ThemeMode.Custom) customBg else null,
                         busy = importingUrl == preset.url,
                         onClick = {
                             if (importingUrl != null) return@PresetTile
                             importingUrl = preset.url
+                            importFailed = false
                             scope.launch {
-                                val local = importPresetBackground(context, preset)
+                                // Applied in place; never copied into bgLibrary.
+                                val local = applyPreset(context, preset)
                                 importingUrl = null
                                 if (local != null) {
+                                    previewRevision++
                                     onCustomBg(local)
                                     onSelect(ThemeMode.Custom)
                                 } else {
-                                    Toast.makeText(context, importFailed, Toast.LENGTH_SHORT).show()
+                                    importFailed = true
                                 }
                             }
                         },
                     )
                 }
             }
+        }
+        if (importFailed) {
+            Spacer(modifier = Modifier.height(MiruSpace.Xs))
+            Text(
+                text = stringResource(UiKitR.string.theme_preset_download_failed),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        val refreshed = refreshResult
+        if (refreshed != null && !presetList.isNullOrEmpty()) {
+            Spacer(modifier = Modifier.height(MiruSpace.Xs))
+            Text(
+                text = if (refreshed.listingFetched) {
+                    stringResource(
+                        UiKitR.string.theme_presets_downloaded_fmt,
+                        refreshed.downloaded,
+                        refreshed.presets.size,
+                    )
+                } else {
+                    stringResource(UiKitR.string.theme_presets_failed)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (!refreshed.listingFetched || refreshed.failed > 0) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    LocalMiruExtraColors.current.muted
+                },
+            )
         }
         Spacer(modifier = Modifier.height(MiruSpace.L))
         Text(
@@ -449,21 +519,22 @@ private fun BackgroundTile(
     }
 }
 
-// Ready-made background tile: GitHub picture as the preview, accent ring when
-// it is the active background (matched by the path it is saved under), a
-// progress ring over the picture while it is being imported. No delete cross —
-// a preset is not the user's file; once picked it also lives in "My
-// backgrounds", where it can be removed.
+// Ready-made background tile: the preset label while nothing is cached, the
+// already-downloaded picture when it exists (local read only), a progress ring
+// while it is being applied. Accent ring when it is the active background
+// (matched by the in-place preset path). No delete cross — a preset stays in
+// its own folder and never joins "My backgrounds".
 @Composable
 private fun PresetTile(
     preset: PresetBackground,
     label: String,
+    previewRevision: Int,
     activeSavedPath: String?,
     busy: Boolean,
     onClick: () -> Unit,
 ) {
     val ring = LocalMiruExtraColors.current.accent
-    val preview = rememberPresetPreview(preset)
+    val preview = rememberCachedPresetPreview(preset, previewRevision)
     val selected = preview != null && preview.savedPath == activeSavedPath
     Column(
         modifier = Modifier
@@ -493,8 +564,19 @@ private fun PresetTile(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                 )
+            } else {
+                // Text-only placeholder: no source/plugin icon.
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LocalMiruExtraColors.current.muted,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = MiruSpace.Xs),
+                )
             }
-            if (busy || preview == null) {
+            if (busy) {
                 CircularProgressIndicator(
                     strokeWidth = 2.dp,
                     color = ring,

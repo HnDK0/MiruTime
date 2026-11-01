@@ -54,6 +54,9 @@
     <string name="theme_rail_presets">Готовые фоны</string>
     <string name="theme_presets_failed">Не удалось загрузить фоны с GitHub. Проверьте соединение.</string>
     <string name="theme_presets_retry">Повторить</string>
+    <string name="theme_presets_refresh">Обновить</string>
+    <string name="theme_presets_downloaded_fmt">Загружено %1$d из %2$d</string>
+    <string name="theme_preset_download_failed">Не удалось скачать этот фон</string>
     <string name="theme_rail_background">Мои фоны</string>
     <string name="theme_custom_bg">Свой фон</string>
     <string name="theme_custom_desc">Файл с устройства или ссылка. Картинка сохраняется в приложении (одна и та же дважды не добавится) и ложится под контент с вуалью.</string>
@@ -62,6 +65,7 @@
     <string name="theme_custom_link_hint">https://…</string>
     <string name="theme_custom_add">Добавить</string>
     <string name="theme_custom_item_fmt">Фон %1$d</string>
+    <string name="theme_preset_item_fmt">Пресет %1$d</string>
     <string name="theme_custom_failed">Не удалось использовать картинку. Проверьте файл или ссылку.</string>
     <string name="theme_bg_delete_title">Удалить фон?</string>
     <string name="theme_bg_delete_desc">Сохранённая картинка будет удалена из приложения. Если она сейчас активна, тема вернётся на «Бумагу».</string>

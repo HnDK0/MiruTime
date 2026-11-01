@@ -541,8 +541,8 @@ class BackupService(
         val file: File,
     )
 
-    // Only user-owned, flat asset folders. Downloaded preset previews live in
-    // cacheDir and are deliberately absent.
+    // Only user-owned, flat asset folders. Ready-made preset pictures live in
+    // filesDir/preset_backgrounds and are deliberately absent.
     private fun collectReaderAssets(): List<ReaderAssetCandidate> {
         val assets = READER_ASSET_DIRS.flatMap { (dirName, bucket) ->
             val dir = File(filesDir, dirName)
