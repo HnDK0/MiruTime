@@ -11,18 +11,18 @@ import dev.mirutime.translator.internal.ProviderRequest
 import dev.mirutime.translator.internal.ProviderResult
 import dev.mirutime.translator.internal.TextChunk
 import dev.mirutime.translator.internal.TranslationProvider
-import dev.mirutime.translator.internal.applyChunkTranslations
+import dev.mirutime.translator.internal.applyChunkWithFallback
 import dev.mirutime.translator.internal.boundedMap
 import dev.mirutime.translator.internal.cappedMaxChars
 import dev.mirutime.translator.internal.chunkUnits
 import dev.mirutime.translator.internal.htmlUnescape
 import dev.mirutime.translator.internal.splitToBudget
+import dev.mirutime.translator.internal.throttledTranslator
 import dev.mirutime.translator.internal.validateChunkLines
 import dev.mirutime.translator.internal.withProviderTimeout
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
-import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -55,6 +55,18 @@ private fun decodeGooglePaKey(): String {
     }.decodeToString()
 }
 
+/**
+ * Paragraph boundary of a translateHtml response. The endpoint keeps `<p>`
+ * blocks but drops `<br>` and raw newlines (verified for CJK), so blocks are
+ * the only separator that maps one translated line back to one unit.
+ */
+internal val PA_PARAGRAPH_END = Regex("</p\\s*>", RegexOption.IGNORE_CASE)
+
+private val LEADING_PARAGRAPH_OPEN = Regex("^\\s*<p\\b[^>]*>", RegexOption.IGNORE_CASE)
+
+internal fun stripParagraphMarkup(block: String): String =
+    htmlUnescape(block.replace(LEADING_PARAGRAPH_OPEN, "")).trim()
+
 internal class GooglePaProvider(
     private val http: TranslationHttpClient,
     config: TranslationProviderConfig,
@@ -76,25 +88,45 @@ internal class GooglePaProvider(
 
     override suspend fun translate(request: ProviderRequest): ProviderResult {
         val plan = splitToBudget(request.units, maxChars, id)
-        val chunks = chunkUnits(plan.units, maxChars, "<br>")
-        // Sequential mode keeps the 400ms spacing that reduces rate limiting.
-        val translated = if (concurrency == 1) {
-            chunks.mapIndexed { index, chunk ->
-                if (index > 0) delay(400)
-                translateChunk(chunk, request)
+        // Paragraph blocks, not <br>: this endpoint drops <br> and newlines
+        // (especially for CJK), which used to break the unit count and push the
+        // whole batch into per-unit requests. </p> markers survive one per unit
+        // (verified on 500 CJK titles), so the batch stays one request.
+        val chunks = chunkUnits(plan.units, maxChars, PA_PARAGRAPH_JOIN)
+        val translate: suspend (TextChunk) -> String = throttledTranslator(concurrency, 400) { chunk ->
+            translateChunk(chunk, request)
+        }
+        // A mismatched line count bisects the chunk instead of re-requesting
+        // every unit, so one awkward (e.g. CJK) chunk cannot fail the batch and
+        // cannot explode into hundreds of small requests either.
+        val merged = if (concurrency == 1) {
+            buildMap {
+                chunks.forEach { chunk ->
+                    putAll(
+                        applyChunkWithFallback(
+                            chunk = chunk,
+                            units = plan.units,
+                            provider = id,
+                            separatorRegex = PA_PARAGRAPH_END,
+                            transformLine = ::stripParagraphMarkup,
+                            translateChunk = translate,
+                        ),
+                    )
+                }
             }
         } else {
-            boundedMap(chunks, concurrency) { chunk -> translateChunk(chunk, request) }
+            val results = boundedMap(chunks, concurrency) { chunk ->
+                applyChunkWithFallback(
+                    chunk = chunk,
+                    units = plan.units,
+                    provider = id,
+                    separatorRegex = PA_PARAGRAPH_END,
+                    transformLine = ::stripParagraphMarkup,
+                    translateChunk = translate,
+                )
+            }
+            buildMap { results.forEach { putAll(it) } }
         }
-
-        val merged = applyChunkTranslations(
-            units = plan.units,
-            chunks = chunks,
-            translatedChunks = translated,
-            provider = id,
-            separatorRegex = BR_OR_NEWLINE,
-            transformLine = ::htmlUnescape,
-        )
         return ProviderResult(plan.restore(merged), model = null)
     }
 
@@ -117,9 +149,12 @@ internal class GooglePaProvider(
         },
         parse = { response ->
             val raw = parseHtml(response.bodyAsText())
-            validateChunkLines(raw, chunk, id, BR_OR_NEWLINE)
+            validateChunkLines(raw, chunk, id, PA_PARAGRAPH_END)
             raw
         },
+        // The caller bisects a mismatched chunk, so a retry here would only
+        // repeat the same deterministic body and multiply the request count.
+        retryTruncated = false,
     )
 
     private fun payload(chunk: TextChunk, request: ProviderRequest): String =
@@ -149,6 +184,6 @@ internal class GooglePaProvider(
 
     private companion object {
         const val MAX_CHARS = 8_000
-        val BR_OR_NEWLINE = Regex("<br\\s*/?>|\\r?\\n", RegexOption.IGNORE_CASE)
+        const val PA_PARAGRAPH_JOIN = "</p><p>"
     }
 }

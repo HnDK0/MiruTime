@@ -12,13 +12,14 @@ import dev.mirutime.translator.internal.ProviderRequest
 import dev.mirutime.translator.internal.ProviderResult
 import dev.mirutime.translator.internal.TextChunk
 import dev.mirutime.translator.internal.TranslationProvider
-import dev.mirutime.translator.internal.applyChunkTranslations
+import dev.mirutime.translator.internal.applyChunkWithFallback
 import dev.mirutime.translator.internal.boundedMap
 import dev.mirutime.translator.internal.cappedMaxChars
 import dev.mirutime.translator.internal.chunkUnits
 import dev.mirutime.translator.internal.formUrlEncode
 import dev.mirutime.translator.internal.isQuotaBody
 import dev.mirutime.translator.internal.splitToBudget
+import dev.mirutime.translator.internal.throttledTranslator
 import dev.mirutime.translator.internal.urlWithQuery
 import dev.mirutime.translator.internal.validateChunkLines
 import dev.mirutime.translator.internal.withProviderTimeout
@@ -28,7 +29,6 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -55,24 +55,37 @@ internal class GoogleFreeProvider(
     override suspend fun translate(request: ProviderRequest): ProviderResult {
         val plan = splitToBudget(request.units, maxChars, id)
         val chunks = chunkUnits(plan.units, maxChars, "\n")
-        // The free endpoint tolerates parallel calls, but the sequential path keeps
-        // its 1s spacing because that is what avoids rate limiting for single-run use.
-        val translated = if (concurrency == 1) {
-            chunks.mapIndexed { index, chunk ->
-                if (index > 0) delay(1_000)
-                translateChunk(chunk, request)
+        val translate: suspend (TextChunk) -> String = throttledTranslator(concurrency, 1_000) { chunk ->
+            translateChunk(chunk, request)
+        }
+        // A chunk whose line count does not match is bisected, so one malformed
+        // (e.g. CJK) chunk cannot fail the whole batch.
+        val merged = if (concurrency == 1) {
+            buildMap {
+                chunks.forEach { chunk ->
+                    putAll(
+                        applyChunkWithFallback(
+                            chunk = chunk,
+                            units = plan.units,
+                            provider = id,
+                            separatorRegex = NEWLINE,
+                            translateChunk = translate,
+                        ),
+                    )
+                }
             }
         } else {
-            boundedMap(chunks, concurrency) { chunk -> translateChunk(chunk, request) }
+            val results = boundedMap(chunks, concurrency) { chunk ->
+                applyChunkWithFallback(
+                    chunk = chunk,
+                    units = plan.units,
+                    provider = id,
+                    separatorRegex = NEWLINE,
+                    translateChunk = translate,
+                )
+            }
+            buildMap { results.forEach { putAll(it) } }
         }
-
-        val merged = applyChunkTranslations(
-            units = plan.units,
-            chunks = chunks,
-            translatedChunks = translated,
-            provider = id,
-            separatorRegex = NEWLINE,
-        )
         return ProviderResult(plan.restore(merged), model = null)
     }
 
@@ -94,6 +107,9 @@ internal class GoogleFreeProvider(
             validateChunkLines(raw, chunk, id, NEWLINE)
             raw
         },
+        // The caller bisects a mismatched chunk, so a retry here would only
+        // repeat the same deterministic body and multiply the request count.
+        retryTruncated = false,
     )
 
     override suspend fun detect(text: String): LanguageCode? {

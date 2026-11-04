@@ -25,6 +25,13 @@ internal class KeyedHttpExecutor(
     suspend fun <T> execute(
         request: suspend (key: String?) -> HttpResponse,
         parse: suspend (HttpResponse) -> T,
+        /**
+         * A line-count mismatch is deterministic for HTML providers: the same
+         * body yields the same count. Those callers recover by bisecting the
+         * chunk, so retrying here would multiply requests (maxAttempts per
+         * bisection node) before the fallback even starts.
+         */
+        retryTruncated: Boolean = true,
     ): T {
         var lastError: TranslationError? = null
         var attempt = 0
@@ -65,7 +72,7 @@ internal class KeyedHttpExecutor(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: TranslationFailure) {
-                    if (e.error !is TranslationError.Truncated) throw e
+                    if (!retryTruncated || e.error !is TranslationError.Truncated) throw e
                     lastError = e.error
                 } catch (e: Throwable) {
                     throw TranslationFailure(

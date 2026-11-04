@@ -13,6 +13,9 @@ internal const val LLM_UNIT_OVERHEAD = 32
 internal data class TextChunk(
     val indices: List<Int>,
     val text: String,
+    // Kept so a chunk can be bisected without re-joining units with a
+    // different separator than the request used (<br>, <p>, newline).
+    val separator: String = "\n",
 )
 
 internal fun cappedMaxChars(configured: Int?, hardLimit: Int): Int {
@@ -269,7 +272,7 @@ internal fun chunkUnits(
 
     fun flush() {
         if (parts.isEmpty()) return
-        chunks += TextChunk(indices.toList(), parts.joinToString(separator))
+        chunks += TextChunk(indices.toList(), parts.joinToString(separator), separator)
         indices.clear()
         parts.clear()
         length = 0
@@ -337,43 +340,78 @@ internal fun validateChunkLines(
     }
 }
 
-internal fun applyChunkTranslations(
+/** True when a failure is a recoverable chunk line-count mismatch. */
+internal fun TranslationFailure.isTruncated(): Boolean =
+    error is TranslationError.Truncated
+
+/**
+ * Applies one chunk's translation. A provider that merges or drops the line
+ * separators (common for CJK, where `<br>`/newlines vanish) must not turn every
+ * unit into a separate request: that is what made one 8k batch explode into
+ * hundreds of tiny calls. Instead the chunk is bisected, so a mismatch costs
+ * only O(log n) extra requests around the damaged units and the batch
+ * architecture stays intact. Returns unitId -> translation.
+ */
+internal suspend fun applyChunkWithFallback(
+    chunk: TextChunk,
     units: List<TranslationUnit>,
-    chunks: List<TextChunk>,
-    translatedChunks: List<String>,
     provider: ProviderId,
     separatorRegex: Regex,
     transformLine: (String) -> String = { it },
+    translateChunk: suspend (TextChunk) -> String,
 ): Map<String, String> {
-    if (translatedChunks.size != chunks.size) {
-        throw TranslationFailure(
-            TranslationError.InvalidResponse(
-                provider,
-                "expected ${chunks.size} chunks, got ${translatedChunks.size}",
-            ),
-        )
+    val raw = try {
+        translateChunk(chunk)
+    } catch (failure: TranslationFailure) {
+        if (!failure.isTruncated()) throw failure
+        return bisectChunk(
+            chunk, units, provider, separatorRegex, transformLine, translateChunk,
+        ) ?: throw failure
     }
-
-    val result = mutableMapOf<String, String>()
-    chunks.forEachIndexed { chunkIndex, chunk ->
-        val lines = translatedChunks[chunkIndex]
-            .split(separatorRegex)
-            .map { transformLine(it.trim()) }
-            .filter { it.isNotBlank() }
-
-        if (lines.size != chunk.indices.size) {
-            throw TranslationFailure(
-                TranslationError.Truncated(
-                    provider = provider,
-                    expected = chunk.indices.size,
-                    actual = lines.size,
-                ),
-            )
-        }
-
-        chunk.indices.forEachIndexed { lineIndex, unitIndex ->
-            result[units[unitIndex].id] = lines[lineIndex]
-        }
+    val lines = raw.split(separatorRegex).map { transformLine(it).trim() }.filter { it.isNotBlank() }
+    if (lines.size == chunk.indices.size) {
+        return chunk.indices.mapIndexed { index, unitIndex ->
+            units[unitIndex].id to lines[index]
+        }.toMap()
     }
-    return result
+    return bisectChunk(
+        chunk, units, provider, separatorRegex, transformLine, translateChunk,
+    ) ?: throw TranslationFailure(
+        TranslationError.Truncated(provider, chunk.indices.size, lines.size),
+    )
+}
+
+/** Halves an unmatched chunk; null when a single unit still does not map. */
+private suspend fun bisectChunk(
+    chunk: TextChunk,
+    units: List<TranslationUnit>,
+    provider: ProviderId,
+    separatorRegex: Regex,
+    transformLine: (String) -> String,
+    translateChunk: suspend (TextChunk) -> String,
+): Map<String, String>? {
+    if (chunk.indices.size <= 1) return null
+    val middle = chunk.indices.size / 2
+    val left = applyChunkWithFallback(
+        chunk = chunk.slice(0, middle, units),
+        units = units,
+        provider = provider,
+        separatorRegex = separatorRegex,
+        transformLine = transformLine,
+        translateChunk = translateChunk,
+    )
+    val right = applyChunkWithFallback(
+        chunk = chunk.slice(middle, chunk.indices.size, units),
+        units = units,
+        provider = provider,
+        separatorRegex = separatorRegex,
+        transformLine = transformLine,
+        translateChunk = translateChunk,
+    )
+    return left + right
+}
+
+private fun TextChunk.slice(from: Int, to: Int, units: List<TranslationUnit>): TextChunk {
+    val slice = indices.subList(from, to)
+    return TextChunk(slice, slice.joinToString(separator) { units[it].text }, separator)
 }
