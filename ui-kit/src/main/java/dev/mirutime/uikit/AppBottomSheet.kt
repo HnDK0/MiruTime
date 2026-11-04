@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -43,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -111,7 +113,12 @@ fun AppBottomSheet(
         onDismissRequest = onClose,
         modifier = modifier
             .widthIn(max = MiruSize.ContentMaxWidth)
-            .padding(start = MiruSpace.M, end = MiruSpace.M, bottom = MiruSpace.M),
+            .padding(start = MiruSpace.M, end = MiruSpace.M, bottom = MiruSpace.M)
+            // Lift the whole sheet above the on-screen keyboard so a focused
+            // field and the footer stay visible (FR-129/FR-130). This also
+            // shrinks BoxWithConstraints.maxHeight, so the 70% cap is computed
+            // against the keyboard-reduced height.
+            .imePadding(),
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         sheetMaxWidth = MiruSize.ContentMaxWidth,
         shape = RoundedCornerShape(SheetCorner),
@@ -138,12 +145,13 @@ fun AppBottomSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = contentMaxHeight)
-                    .padding(horizontal = MiruSpace.L),
+                    .heightIn(max = contentMaxHeight),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = MiruSpace.L),
                 ) {
                     Text(
                         text = title,
@@ -162,25 +170,44 @@ fun AppBottomSheet(
                         text = description,
                         style = MaterialTheme.typography.bodySmall,
                         color = LocalMiruExtraColors.current.muted,
+                        modifier = Modifier.padding(horizontal = MiruSpace.L),
                     )
                 }
                 Spacer(modifier = Modifier.height(MiruSpace.L))
                 if (contentScrollable) {
                     val scroll = rememberScrollState()
-                    Column(
+                    // The thumb lives in the sheet's side gutter, outside the
+                    // content padding, so it never paints over rows or text and
+                    // never competes with the fade at the content edges.
+                    Box(
                         modifier = Modifier
                             .weight(1f, fill = false)
-                            .fillMaxWidth()
-                            .fadeScrollEdges(scroll, MaterialTheme.colorScheme.surface)
-                            .verticalScroll(scroll),
+                            .fillMaxWidth(),
                     ) {
-                        content()
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = MiruSpace.L)
+                                .fadeScrollEdges(scroll, MaterialTheme.colorScheme.surface)
+                                .verticalScroll(scroll),
+                        ) {
+                            content()
+                        }
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .sheetScrollIndicator(
+                                    scroll = scroll,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
+                                ),
+                        )
                     }
                 } else {
                     Column(
                         modifier = Modifier
                             .weight(1f)
-                            .fillMaxWidth(),
+                            .fillMaxWidth()
+                            .padding(horizontal = MiruSpace.L),
                     ) {
                         content()
                     }
@@ -188,6 +215,7 @@ fun AppBottomSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .padding(horizontal = MiruSpace.L)
                         .padding(top = MiruSpace.L)
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         .padding(bottom = MiruSpace.L),
@@ -258,6 +286,30 @@ fun SheetSection(
         }
     }
 }
+
+// A thin thumb in the sheet's side gutter tells the user there is more below:
+// a sheet whose content ends mid-row looks finished, so the affordance must be
+// visible without scrolling first. It tracks [scroll] directly in the draw
+// phase, so it never recomposes the sheet content; nothing is drawn when the
+// content fits.
+private fun Modifier.sheetScrollIndicator(scroll: ScrollState, color: Color): Modifier =
+    drawWithContent {
+        drawContent()
+        if (scroll.maxValue <= 0) return@drawWithContent
+        val width = MiruSpace.Xs.toPx()
+        val track = size.height
+        val content = track + scroll.maxValue
+        val thumb = (track * (track / content))
+            .coerceIn(MiruSpace.Xl.toPx(), track)
+        val travel = track - thumb
+        val top = travel * (scroll.value.toFloat() / scroll.maxValue)
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(size.width - width - MiruSpace.Xxs.toPx(), top),
+            size = Size(width, thumb),
+            cornerRadius = CornerRadius(width / 2f),
+        )
+    }
 
 // Content scrolls under the sheet title and into the footer; short fades on
 // both edges hide the hard cut of a row crossing the viewport (a sliced line
