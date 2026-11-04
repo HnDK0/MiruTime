@@ -54,9 +54,6 @@ fun ReaderPanelHost(
     ttsCapabilities: TtsCapabilities = TtsCapabilities(),
     ttsStatus: TtsStatus = TtsStatus.Idle,
     ttsMessage: String? = null,
-    ttsAtEnd: Boolean = false,
-    ttsCanPreviousChapter: Boolean = true,
-    ttsCanNextChapter: Boolean = true,
     ttsHighlight: Boolean = false,
     highlightColor: Long = ReaderStyle.Default.highlightColor,
     onTtsSettingsChange: (TtsSettings) -> Unit = {},
@@ -64,12 +61,6 @@ fun ReaderPanelHost(
     onTtsReset: () -> Unit = {},
     onTtsRetry: () -> Unit = {},
     onTtsToggle: () -> Unit = {},
-    onTtsStartHere: () -> Unit = {},
-    onTtsFocus: () -> Unit = {},
-    onTtsPreviousChunk: () -> Unit = {},
-    onTtsNextChunk: () -> Unit = {},
-    onTtsPreviousChapter: () -> Unit = {},
-    onTtsNextChapter: () -> Unit = {},
     onTtsHighlightChange: (Boolean) -> Unit = {},
     onHighlightColorChange: (Long) -> Unit = {},
     onTtsDiscoverVoices: () -> Unit = {},
@@ -80,7 +71,13 @@ fun ReaderPanelHost(
 ) {
     when (panel) {
         ReaderPanel.Style -> if (manga) {
-            MangaStylePanel(mangaStyle, onMangaStyleChange, onDismiss)
+            MangaStylePanel(
+                style = mangaStyle,
+                onStyleChange = onMangaStyleChange,
+                readerStyle = style,
+                onReaderStyleChange = onStyleChange,
+                onDismiss = onDismiss,
+            )
         } else {
             ReaderStylePanel(
                 style = style,
@@ -114,9 +111,6 @@ fun ReaderPanelHost(
                 capabilities = ttsCapabilities,
                 status = ttsStatus,
                 message = ttsMessage,
-                atEnd = ttsAtEnd,
-                canPreviousChapter = ttsCanPreviousChapter,
-                canNextChapter = ttsCanNextChapter,
                 highlight = ttsHighlight,
                 highlightColor = highlightColor,
                 highlightColors = ReaderPalette.highlightColors,
@@ -125,12 +119,6 @@ fun ReaderPanelHost(
                 onReset = onTtsReset,
                 onRetry = onTtsRetry,
                 onToggle = onTtsToggle,
-                onStartHere = onTtsStartHere,
-                onFocus = onTtsFocus,
-                onPreviousChunk = onTtsPreviousChunk,
-                onNextChunk = onTtsNextChunk,
-                onPreviousChapter = onTtsPreviousChapter,
-                onNextChapter = onTtsNextChapter,
                 onHighlightChange = onTtsHighlightChange,
                 onHighlightColorChange = onHighlightColorChange,
                 onDismiss = onDismiss,
@@ -145,6 +133,8 @@ fun ReaderPanelHost(
 private fun MangaStylePanel(
     style: MangaReaderStyle,
     onStyleChange: (MangaReaderStyle) -> Unit,
+    readerStyle: ReaderStyle,
+    onReaderStyleChange: (ReaderStyle) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var draft by remember(style) { mutableStateOf(style) }
@@ -164,6 +154,17 @@ private fun MangaStylePanel(
             onStyleChange = { draft = it },
             onReset = { draft = MangaReaderStyle.Default },
         )
+        // Reader-wide and applied at once: fullscreen is a screen mode, not a
+        // manga style value, so it does not wait for the sheet's Save.
+        SheetSection(title = stringResource(R.string.rd_screen)) {
+            SettingsSwitchRow(
+                title = stringResource(R.string.rd_fullscreen),
+                subtitle = stringResource(R.string.rd_fullscreen_desc),
+                checked = readerStyle.fullscreen,
+                onChange = { onReaderStyleChange(readerStyle.copy(fullscreen = it)) },
+                horizontalPadding = 0.dp,
+            )
+        }
     }
 }
 

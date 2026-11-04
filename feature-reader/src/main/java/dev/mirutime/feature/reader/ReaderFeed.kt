@@ -4,6 +4,7 @@ import dev.mirutime.app.features.reader.document.ReaderBlock
 import dev.mirutime.app.features.reader.document.ReaderChapter
 import dev.mirutime.app.features.reader.document.ReaderDocument
 import dev.mirutime.app.features.reader.document.ReadingAnchor
+import dev.mirutime.app.features.reader.document.mangaPages
 
 data class ReaderError(val message: String)
 
@@ -157,4 +158,60 @@ object FeedPlanner {
         ahead: Int = 2,
     ): Map<Int, ReaderDocument> =
         documents.filterKeys { it in (anchorChapter - back)..(anchorChapter + ahead) }
+}
+
+/** One page of the continuous manga strip; chapters are stitched in order. */
+data class MangaFeedPage(
+    val id: String,
+    val chapterIndex: Int,
+    val chapterUrl: String,
+    val pageIndex: Int,
+    val page: ReaderBlock,
+    val chapterTitle: String,
+    val chapterStart: Boolean,
+    val chapterPageCount: Int,
+)
+
+/**
+ * The manga webtoon is one endless strip: the loaded chapters around the active
+ * one are laid out in reading order, so scrolling forward continues into the
+ * next chapter and scrolling back returns into the previous one instead of
+ * hitting a boundary card and jumping.
+ */
+object MangaFeedPlanner {
+    fun plan(
+        chapters: List<ReaderChapter>,
+        documents: Map<Int, ReaderDocument>,
+        activeIndex: Int,
+        window: Int = 1,
+    ): List<MangaFeedPage> {
+        if (chapters.isEmpty()) return emptyList()
+        val titles = chapters.associate { it.index to it.title }
+        return documents.keys
+            .filter { it in (activeIndex - window)..(activeIndex + window) }
+            .sorted()
+            .flatMap { index -> pagesOf(documents.getValue(index), titles[index]) }
+    }
+
+    /** A single chapter as a strip; used until a neighbour is loaded. */
+    fun single(document: ReaderDocument, title: String = document.title): List<MangaFeedPage> =
+        pagesOf(document, title)
+
+    private fun pagesOf(document: ReaderDocument, title: String?): List<MangaFeedPage> {
+        val pages = document.mangaPages()
+        if (pages.isEmpty()) return emptyList()
+        val resolvedTitle = title ?: document.title
+        return pages.mapIndexed { pageIndex, block ->
+            MangaFeedPage(
+                id = "m:${document.chapterIndex}:${block.id.index}",
+                chapterIndex = document.chapterIndex,
+                chapterUrl = document.chapterUrl,
+                pageIndex = pageIndex,
+                page = block,
+                chapterTitle = resolvedTitle,
+                chapterStart = pageIndex == 0,
+                chapterPageCount = pages.size,
+            )
+        }
+    }
 }

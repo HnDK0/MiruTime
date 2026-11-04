@@ -335,6 +335,8 @@ private fun DockAction(
     Column(
         modifier = Modifier
             .width(72.dp)
+            // Keep the interactive box at the 48dp touch minimum (D2-03).
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(16.dp))
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(vertical = 4.dp),

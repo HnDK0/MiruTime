@@ -52,6 +52,7 @@ import dev.mirutime.app.features.reader.document.BlockId
 import dev.mirutime.app.features.reader.document.ReadingAnchor
 import dev.mirutime.app.features.reader.document.mangaPages
 import dev.mirutime.feature.reader.ChapterLoadStatus
+import dev.mirutime.feature.reader.MangaFeedPlanner
 import dev.mirutime.feature.reader.R
 import dev.mirutime.feature.reader.ReaderMode
 import dev.mirutime.feature.reader.ReaderPalette
@@ -93,6 +94,9 @@ fun ReaderScreen(
     bookUrl: String,
     startChapterIndex: Int,
     restoreSaved: Boolean,
+    // True when the composable is restored after process death: the saved
+    // anchor then wins over the chapter the route was first opened on.
+    reopened: Boolean = false,
     onBack: () -> Unit,
     onOpenRegex: (String) -> Unit,
     onOpenWebView: (url: String, title: String) -> Unit,
@@ -194,6 +198,7 @@ fun ReaderScreen(
             bookUrl = bookUrl,
             requestedChapterIndex = startChapterIndex,
             restoreSaved = restoreSaved,
+            reopened = reopened,
         )
     }
 
@@ -265,6 +270,15 @@ fun ReaderScreen(
     val isManga = state.book?.isManga == true
     val mangaPages = remember(activeDocument, isManga) {
         if (isManga) activeDocument?.mangaPages().orEmpty() else emptyList()
+    }
+    // The webtoon is one endless strip: the active chapter plus whatever
+    // neighbour is loaded, so scrolling continues across chapter seams.
+    val mangaFeed = remember(isManga, state.documents, state.chapters, state.activeChapterIndex) {
+        if (isManga) {
+            MangaFeedPlanner.plan(state.chapters, state.documents, state.activeChapterIndex)
+        } else {
+            emptyList()
+        }
     }
     // Chrome scrubber position and the bridge to whichever manga viewer is
     // active. Reset on chapter change so a stale counter never flashes.
@@ -408,20 +422,28 @@ fun ReaderScreen(
 
     // The controller has no chapter list: it asks the reader to load the
     // adjacent chapter, then speech restarts on the loaded document.
+    // The chapter the TTS session actually speaks, from its current block. It
+    // can differ from the visible chapter: the feed adopts the next one while
+    // speech is still playing the previous one.
+    fun ttsSessionChapter(): Int? = graph.tts.state.value.blockId?.chapterUrl?.let { url ->
+        store.state.value.chapters.firstOrNull { it.chapterUrl == url }?.index
+    }
+
     LaunchedEffect(Unit) {
         graph.tts.chapterRequests.collect { direction ->
-            val from = store.state.value.activeChapterIndex
-            val target = when (direction) {
-                TtsChapterDirection.Next -> store.nextChapterIndex(from)
-                TtsChapterDirection.Previous -> store.previousChapterIndex(from)
-            }
+            // A natural end-of-chapter marks the finished chapter read; a
+            // manual skip (skip buttons) must not (FR-082/FR-083). `atEnd` is
+            // true for any position on the last chunk, so the controller keeps
+            // the real reason of the request instead.
+            val naturalCompletion = graph.tts.chapterEndedNaturally
+            val sessionChapter = ttsSessionChapter() ?: store.state.value.activeChapterIndex
+            val target = store.onTtsChapterRequest(sessionChapter, direction, naturalCompletion)
             if (target == null) {
                 when (direction) {
                     // No previous chapter: stay where the cursor was.
                     TtsChapterDirection.Previous -> graph.tts.resume()
                     TtsChapterDirection.Next -> {
                         graph.tts.stop()
-                        store.onChapterFinished(from)
                         Toast.makeText(
                             context,
                             R.string.rd_tts_end_of_book,
@@ -449,6 +471,16 @@ fun ReaderScreen(
                 document,
                 available[document.chapterUrl]?.translations.orEmpty(),
             )
+        }
+    }
+
+    // Natural completion with auto-next off emits no chapter request, so the
+    // finished chapter is marked read here (exactly once). Pause/Stop leave the
+    // status Paused/Idle without atEnd, so they never reach this branch.
+    LaunchedEffect(ttsState.status, ttsState.atEnd) {
+        if (ttsState.status == TtsStatus.Idle && ttsState.atEnd) {
+            // The spoken chapter, not the visible one (see ttsSessionChapter).
+            ttsSessionChapter()?.let { store.onChapterFinished(it) }
         }
     }
 
@@ -483,6 +515,22 @@ fun ReaderScreen(
         }
     }
     val loadingSuffix = stringResource(R.string.rd_translation_loading)
+    // A wait with no numbers reads as a hang: the badge counts the seconds the
+    // active chapter has been translating, reset per chapter.
+    val activeChapterUrl = state.documents[state.activeChapterIndex]?.chapterUrl
+    val activeTranslating = activeChapterUrl
+        ?.let { visibleTranslations[it]?.status } == ReaderTranslationStatus.Loading
+    var translationElapsedSec by remember(activeChapterUrl) { mutableIntStateOf(0) }
+    LaunchedEffect(activeChapterUrl, activeTranslating) {
+        translationElapsedSec = 0
+        if (!activeTranslating) return@LaunchedEffect
+        while (true) {
+            delay(1_000)
+            translationElapsedSec++
+        }
+    }
+    val translationElapsedText =
+        stringResource(R.string.rd_translation_loading_seconds, translationElapsedSec)
     val failedSuffix = stringResource(R.string.rd_translation_failed)
     val localNetworkSuffix = stringResource(R.string.rd_translation_local_network)
     val cleartextSuffix = stringResource(R.string.rd_translation_cleartext)
@@ -491,7 +539,11 @@ fun ReaderScreen(
             val translation = state.documents[chapterIndex]?.chapterUrl
                 ?.let { visibleTranslations[it] }
             when (translation?.status) {
-                ReaderTranslationStatus.Loading -> "$base · $loadingSuffix"
+                ReaderTranslationStatus.Loading -> if (chapterIndex == state.activeChapterIndex && translationElapsedSec > 0) {
+                    "$base · $loadingSuffix $translationElapsedText"
+                } else {
+                    "$base · $loadingSuffix"
+                }
                 ReaderTranslationStatus.Failed -> "$base · " + when (translation.failure) {
                     ReaderTranslationFailure.LocalNetworkRequired -> localNetworkSuffix
                     ReaderTranslationFailure.CleartextNotAllowed -> cleartextSuffix
@@ -581,26 +633,39 @@ fun ReaderScreen(
         }
         ttsFocusToken += 1
     }
+    // Move speech to the neighbouring block (paragraph), not the next sentence.
+    // A paused session only moves its cursor; a playing one continues from the
+    // new block (FR-051).
+    val ttsAdjacentParagraph: (Int) -> Unit = { delta ->
+        val document = activeDocument
+        if (document != null && document.blocks.isNotEmpty()) {
+            val currentBlock = ttsState.blockId?.index ?: 0
+            val target = (currentBlock + delta).coerceIn(0, document.blocks.lastIndex)
+            if (target != currentBlock) {
+                graph.tts.seekToBlock(
+                    document = document,
+                    translations = visibleTranslations[document.chapterUrl]
+                        ?.translations.orEmpty(),
+                    blockIndex = target,
+                    charOffset = 0,
+                )
+            }
+        }
+    }
     // The persistent player belongs to the bottom reader menu, above the dock.
     // Settings sheets stay settings-only; they do not grow a second player.
     val ttsDockMini: (@Composable () -> Unit)? = if (ttsSessionActive) {
         {
             TtsMiniPlayer(
                 status = ttsState.status,
-                chapterTitle = chapterTitle,
-                sentencePreview = ttsPreview,
-                sentenceNumber = ttsSentenceNumber,
-                chunkCount = ttsChunkCount,
-                chapterNumber = state.activeChapterIndex,
-                chapterCount = chapterCount,
                 chapterPercent = chapterPercent,
-                atEnd = ttsState.atEnd,
                 onToggle = toggleTts,
                 onStop = stopTts,
                 onStartHere = startTtsHere,
                 onFocus = focusTtsBlock,
+                onPrevParagraph = { ttsAdjacentParagraph(-1) },
+                onNextParagraph = { ttsAdjacentParagraph(1) },
                 modifier = Modifier.fillMaxWidth(),
-                showSentence = false,
             )
         }
     } else {
@@ -796,6 +861,13 @@ fun ReaderScreen(
                         }
                     },
                     imageHeadersFor = mangaHeadersFor,
+                    feed = mangaFeed,
+                    onVisibleChapter = { index, chapterAnchor ->
+                        scope.launch { store.adoptVisibleChapter(index, chapterAnchor) }
+                    },
+                    onNearStart = { index ->
+                        scope.launch { store.ensurePrevious(index) }
+                    },
                     // A page that still fails after 2×/1s means the chapter's
                     // CDN tokens rotated: reuse the session retry, no second
                     // reader data path.
@@ -987,9 +1059,6 @@ fun ReaderScreen(
         ttsCapabilities = ttsCapabilities,
         ttsStatus = ttsState.status,
         ttsMessage = ttsErrorMessage,
-        ttsAtEnd = ttsState.atEnd,
-        ttsCanPreviousChapter = chapterPosition > 0,
-        ttsCanNextChapter = chapterPosition >= 0 && chapterPosition < chapterCount - 1,
         ttsHighlight = style.ttsHighlight,
         highlightColor = style.highlightColor,
         onTtsSettingsChange = graph.tts::updateSettings,
@@ -998,12 +1067,6 @@ fun ReaderScreen(
         onTtsDiscoverVoices = graph.tts::refreshEngines,
         onTtsRetry = graph.tts::retry,
         onTtsToggle = toggleTts,
-        onTtsStartHere = startTtsHere,
-        onTtsFocus = focusTtsBlock,
-        onTtsPreviousChunk = graph.tts::skipPreviousChunk,
-        onTtsNextChunk = graph.tts::skipNextChunk,
-        onTtsPreviousChapter = graph.tts::skipPreviousChapter,
-        onTtsNextChapter = graph.tts::skipNextChapter,
         onTtsHighlightChange = { enabled ->
             graph.config.setStyle(style.copy(ttsHighlight = enabled).sanitized())
         },

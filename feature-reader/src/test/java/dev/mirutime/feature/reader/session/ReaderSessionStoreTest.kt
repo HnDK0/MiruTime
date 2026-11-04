@@ -16,6 +16,7 @@ import dev.mirutime.feature.reader.ReaderStyle
 import dev.mirutime.feature.reader.SavedReading
 import dev.mirutime.feature.reader.api.ReaderContentSource
 import dev.mirutime.feature.reader.api.ReaderPositionStore
+import dev.mirutime.feature.tts.TtsChapterDirection
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -55,15 +56,32 @@ class ReaderSessionStoreTest {
         private val failOn: Pair<Int, Throwable>? = null,
     ) : ReaderContentSource {
         val marked = mutableListOf<Int>()
+        // The active chapter uses the history-touching path; prefetch and the
+        // previous-chapter load use the non-history path. Counted separately so
+        // a regression that moves history on prefetch is visible.
         val documentCalls = mutableListOf<Int>()
+        val prefetchCalls = mutableListOf<Int>()
 
-        fun calls(index: Int): Int = documentCalls.count { it == index }
+        fun calls(index: Int): Int =
+            documentCalls.count { it == index } + prefetchCalls.count { it == index }
 
         override suspend fun book(bookUrl: String): ReaderBook =
             ReaderBook(bookUrl, "Book", chapters)
 
         override suspend fun document(bookUrl: String, chapterIndex: Int): ReaderDocument? {
             documentCalls += chapterIndex
+            return load(chapterIndex)
+        }
+
+        override suspend fun documentForPrefetch(
+            bookUrl: String,
+            chapterIndex: Int,
+        ): ReaderDocument? {
+            prefetchCalls += chapterIndex
+            return load(chapterIndex)
+        }
+
+        private suspend fun load(chapterIndex: Int): ReaderDocument? {
             if (failOn?.first == chapterIndex) throw failOn.second
             if (gate?.first == chapterIndex) gate.second.await()
             return docs[chapterIndex]
@@ -456,5 +474,155 @@ class ReaderSessionStoreTest {
         advanceUntilIdle()
 
         assertTrue((positions.load("book")?.seq ?: 0) > 7)
+    }
+
+    @Test
+    fun `prefetch and previous loads never use the history-touching path`() = runTest {
+        val repository = TestRepository(chapters, docs)
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+        )
+
+        store.open("book", 2, restoreSaved = false)
+        advanceUntilIdle()
+
+        // The active chapter moved history; the prefetch of chapter 3 did not.
+        assertEquals(listOf(2), repository.documentCalls)
+        assertEquals(listOf(3), repository.prefetchCalls)
+
+        store.ensurePrevious(1)
+        advanceUntilIdle()
+
+        assertEquals(listOf(1, 3), repository.prefetchCalls.sorted())
+        assertTrue(
+            "previous load must not touch history",
+            repository.documentCalls.none { it == 1 },
+        )
+    }
+
+    @Test
+    fun `TTS natural completion marks the finished chapter read once`() = runTest {
+        val repository = TestRepository(chapters, docs)
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+
+        val target = store.onTtsChapterRequest(
+            sessionChapter = 1,
+            direction = TtsChapterDirection.Next,
+            naturalCompletion = true,
+        )
+
+        assertEquals(2, target)
+        assertEquals(listOf(1), repository.marked)
+
+        // A manual skip must not mark the chapter read.
+        store.onTtsChapterRequest(
+            sessionChapter = 1,
+            direction = TtsChapterDirection.Next,
+            naturalCompletion = false,
+        )
+        assertEquals(listOf(1), repository.marked)
+    }
+
+    @Test
+    fun `TTS completion marks the spoken chapter when the feed shows another`() = runTest {
+        val repository = TestRepository(chapters, docs)
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+        // The continuous feed adopted the next chapter while speech still plays
+        // the previous one; the completion belongs to the spoken chapter.
+        store.adoptVisibleChapter(2, anchor = null)
+        assertEquals(2, store.state.value.activeChapterIndex)
+
+        store.onTtsChapterRequest(
+            sessionChapter = 1,
+            direction = TtsChapterDirection.Next,
+            naturalCompletion = true,
+        )
+
+        assertEquals(listOf(1), repository.marked)
+    }
+
+    @Test
+    fun `TTS completion on the last chapter ends the book`() = runTest {
+        val repository = TestRepository(chapters, docs)
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+        )
+        store.open("book", 4, restoreSaved = false)
+        advanceUntilIdle()
+
+        val target = store.onTtsChapterRequest(
+            sessionChapter = 4,
+            direction = TtsChapterDirection.Next,
+            naturalCompletion = true,
+        )
+
+        assertEquals(null, target)
+        assertEquals(listOf(4), repository.marked)
+        assertTrue(store.state.value.endOfBook)
+    }
+
+    @Test
+    fun `re-entry restores the saved chapter and offset`() = runTest {
+        val positions = InMemoryPositionStore()
+        val anchor = ReadingAnchor("book#chapter=3", BlockId("book#chapter=3", 1), 0)
+        positions.save("book", SavedReading(anchor, offsetPx = 42, seq = 5, updatedAt = 0))
+        val store = ReaderSessionStore(
+            content = TestRepository(chapters, docs),
+            positions = positions,
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(TestRepository(chapters, docs)),
+            scope = this,
+        )
+
+        // The restored route still names chapter 1, but the reader had moved to
+        // chapter 3, so the saved anchor wins.
+        store.open("book", 1, restoreSaved = false, reopened = true)
+        advanceUntilIdle()
+
+        assertEquals(3, store.state.value.activeChapterIndex)
+        assertEquals(anchor, store.state.value.anchor)
+    }
+
+    @Test
+    fun `a fresh open keeps the requested chapter over the saved anchor`() = runTest {
+        val positions = InMemoryPositionStore()
+        val anchor = ReadingAnchor("book#chapter=3", BlockId("book#chapter=3", 1), 0)
+        positions.save("book", SavedReading(anchor, offsetPx = 42, seq = 5, updatedAt = 0))
+        val store = ReaderSessionStore(
+            content = TestRepository(chapters, docs),
+            positions = positions,
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(TestRepository(chapters, docs)),
+            scope = this,
+        )
+
+        store.open("book", 1, restoreSaved = false, reopened = false)
+        advanceUntilIdle()
+
+        assertEquals(1, store.state.value.activeChapterIndex)
     }
 }

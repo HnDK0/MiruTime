@@ -15,6 +15,7 @@ import dev.mirutime.feature.reader.ReaderLoadFailure
 import dev.mirutime.feature.reader.ReaderMode
 import dev.mirutime.feature.reader.ReaderOpenResolver
 import dev.mirutime.feature.reader.ReaderOpenTarget
+import dev.mirutime.feature.tts.TtsChapterDirection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -78,6 +79,7 @@ class ReaderSessionStore(
         bookUrl: String,
         requestedChapterIndex: Int?,
         restoreSaved: Boolean,
+        reopened: Boolean = false,
     ) {
         sessionTracker?.stop()
         // The store is app-scoped: markers left by a cancelled load of the
@@ -98,10 +100,12 @@ class ReaderSessionStore(
         val saved = positions.load(bookUrl)
         seq = maxOf(seq, saved?.seq ?: 0)
         _state.update { it.copy(book = book, chapters = book.chapters) }
-        val target = if (requestedChapterIndex == null) {
-            ReaderOpenResolver.forContinue(book, saved)
-        } else {
-            ReaderOpenResolver.forRequested(book, requestedChapterIndex, restoreSaved, saved)
+        val target = when {
+            requestedChapterIndex == null -> ReaderOpenResolver.forContinue(book, saved)
+            // Process-death re-entry: the restored route names the chapter the
+            // reader first opened on, so the saved anchor must win instead.
+            reopened -> ReaderOpenResolver.forReopened(book, requestedChapterIndex, saved)
+            else -> ReaderOpenResolver.forRequested(book, requestedChapterIndex, restoreSaved, saved)
         }
         MiruLog.event(
             "reader",
@@ -146,6 +150,34 @@ class ReaderSessionStore(
         _state.update {
             it.copy(restorePhase = RestorePhase.Ready, scrollToken = it.scrollToken + 1)
         }
+        sessionTracker?.start(bookUrl, index)
+        launchPrefetch()
+    }
+
+    /**
+     * Moves the active chapter while the user scrolls the continuous manga
+     * strip. Deliberately does not bump [ReaderSessionState.scrollToken] and
+     * does not touch restorePhase: the strip is already on screen, so the
+     * handoff must not jump or flash a loading state. Far chapters are pruned
+     * (the strip only keeps the active chapter and its neighbours).
+     */
+    suspend fun adoptVisibleChapter(index: Int, anchor: ReadingAnchor?) {
+        val current = _state.value
+        if (current.activeChapterIndex == index) return
+        val document = current.documents[index] ?: return
+        sessionTracker?.stop()
+        _state.update {
+            it.copy(
+                activeChapterIndex = index,
+                anchor = anchor?.takeIf { value -> value.chapterUrl == document.chapterUrl }
+                    ?: document.firstAnchor()
+                    ?: it.anchor,
+                offsetPx = 0,
+                documents = FeedPlanner.prune(it.documents, index),
+            )
+        }
+        rebuildFeed()
+        persistNow()
         sessionTracker?.start(bookUrl, index)
         launchPrefetch()
     }
@@ -251,6 +283,29 @@ class ReaderSessionStore(
         }
     }
 
+    /**
+     * Resolves a TTS chapter hand-off. A natural end-of-chapter marks the
+     * finished chapter read exactly once (auto-next or end of book); a manual
+     * skip or a hand-off after Pause/Stop ([naturalCompletion] = false) never
+     * marks read (FR-082/FR-083). Returns the target chapter index, or null at
+     * the book's edge so the caller keeps the cursor where it was.
+     *
+     * [sessionChapter] is the chapter the SESSION speaks, not the visible one:
+     * the feed may adopt the next chapter while speech still plays the
+     * previous one, and marking the visible one would be wrong.
+     */
+    suspend fun onTtsChapterRequest(
+        sessionChapter: Int,
+        direction: TtsChapterDirection,
+        naturalCompletion: Boolean,
+    ): Int? {
+        if (naturalCompletion) onChapterFinished(sessionChapter)
+        return when (direction) {
+            TtsChapterDirection.Next -> nextChapterIndex(sessionChapter)
+            TtsChapterDirection.Previous -> previousChapterIndex(sessionChapter)
+        }
+    }
+
     /** Next/previous chapter for TTS hand-off; null keeps the last chapter finite. */
     fun nextChapterIndex(
         from: Int = _state.value.activeChapterIndex,
@@ -311,7 +366,13 @@ class ReaderSessionStore(
         val startedAtMs = System.currentTimeMillis()
         var failure: ReaderLoadFailure? = null
         val document = try {
-            content.document(bookUrl, index)
+            // Prefetch/previous loads must not move "last read"; only the
+            // chapter the user is actually reading touches history.
+            if (makeActive) {
+                content.document(bookUrl, index)
+            } else {
+                content.documentForPrefetch(bookUrl, index)
+            }
         } catch (cancelled: CancellationException) {
             // Cancellation is not a chapter error; the outer guard resets the
             // Loading status so the gap can retry.

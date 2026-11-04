@@ -47,4 +47,32 @@ object ReaderOpenResolver {
             is ReaderOpenTarget.End -> target.chapterIndex
             ReaderOpenTarget.Empty -> 1
         }
+
+    /**
+     * Process-death re-entry. The restored route still names the chapter the
+     * reader was first opened on, but the reader may have moved since, so the
+     * saved anchor wins — even when its chapter is already marked read. A
+     * missing chapter-list entry falls back to the requested chapter, never to
+     * chapter 1 (FR-117/FR-118).
+     */
+    fun forReopened(
+        book: ReaderBook,
+        requestedIndex: Int,
+        saved: SavedReading?,
+    ): ReaderOpenTarget {
+        if (book.chapters.isEmpty()) return ReaderOpenTarget.Empty
+        val savedChapter = saved?.anchor?.chapterUrl?.let { url ->
+            book.chapters.firstOrNull { it.chapterUrl == url }
+        }
+        return if (savedChapter != null) {
+            ReaderOpenTarget.Chapter(savedChapter.index, restoreAnchor = true)
+        } else {
+            val requested = book.chapters.firstOrNull { it.index == requestedIndex }
+            if (requested != null) {
+                ReaderOpenTarget.Chapter(requested.index, restoreAnchor = false)
+            } else {
+                forContinue(book, null)
+            }
+        }
+    }
 }

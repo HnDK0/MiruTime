@@ -529,16 +529,7 @@ private fun ReaderPageContent(
                             Box(
                                 Modifier
                                     .fillMaxWidth()
-                                    .then(
-                                        if (ttsHighlight?.blockId == line.blockId) {
-                                            Modifier.background(
-                                                Color(ttsHighlight.colorArgb).copy(alpha = 0.10f),
-                                                RoundedCornerShape(6.dp),
-                                            )
-                                        } else {
-                                            Modifier
-                                        },
-                                    ),
+                                    .then(pagedLineHighlightModifier(line, style, ttsHighlight)),
                             ) {
                                 PagedSelection(
                                     style = style,
@@ -730,6 +721,28 @@ private fun PagedSelection(
         Modifier
     }
     SelectionContainer(state = state, modifier = modifier) { content() }
+}
+
+private fun pagedLineHighlightModifier(
+    line: PageLine,
+    style: ReaderStyle,
+    highlight: TtsHighlight?,
+): Modifier {
+    if (highlight == null || highlight.blockId != line.blockId) return Modifier
+    // With split on, one block is several visible paragraphs: tint only the one
+    // the cursor is in (FR-027). Without split the whole block stays tinted.
+    if (style.splitSentences) {
+        // A paired line slices the original by line.start/end and the translated
+        // text by its alt offsets, so the cursor is compared in its own space.
+        val alt = if (highlight.translated) line.alt else null
+        val start = alt?.start ?: line.start
+        val end = alt?.end ?: line.end
+        if (!containsCursor(start, end, highlight.start)) return Modifier
+    }
+    return Modifier.background(
+        Color(highlight.colorArgb).copy(alpha = 0.10f),
+        RoundedCornerShape(6.dp),
+    )
 }
 
 private fun lineText(block: ReaderBlock?, line: PageLine, translated: String?): String {

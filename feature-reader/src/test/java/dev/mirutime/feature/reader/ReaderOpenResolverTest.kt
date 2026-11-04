@@ -57,4 +57,26 @@ class ReaderOpenResolverTest {
             ReaderOpenResolver.forRequested(book(), 1, restoreSaved = true, saved = saved),
         )
     }
+
+    @Test
+    fun `re-entry restores the saved chapter even when read`() {
+        val anchor = ReadingAnchor("b#chapter=2", BlockId("b#chapter=2", 3), 0)
+        val saved = SavedReading(anchor, offsetPx = 480, seq = 7, updatedAt = 0)
+        val target = ReaderOpenResolver.forReopened(book(2), requestedIndex = 1, saved = saved)
+        assertEquals(ReaderOpenTarget.Chapter(2, restoreAnchor = true), target)
+    }
+
+    @Test
+    fun `re-entry without a saved chapter keeps the requested chapter`() {
+        val target = ReaderOpenResolver.forReopened(book(), requestedIndex = 3, saved = null)
+        assertEquals(ReaderOpenTarget.Chapter(3, restoreAnchor = false), target)
+    }
+
+    @Test
+    fun `re-entry never falls back to chapter one`() {
+        val anchor = ReadingAnchor("b#chapter=99", BlockId("b#chapter=99", 0), 0)
+        val saved = SavedReading(anchor, offsetPx = 0, seq = 1, updatedAt = 0)
+        val target = ReaderOpenResolver.forReopened(book(1), requestedIndex = 42, saved = saved)
+        assertEquals(ReaderOpenTarget.Chapter(2, restoreAnchor = false), target)
+    }
 }

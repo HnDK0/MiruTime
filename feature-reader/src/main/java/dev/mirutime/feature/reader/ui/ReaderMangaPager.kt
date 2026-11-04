@@ -1,6 +1,15 @@
 package dev.mirutime.feature.reader.ui
 
 import android.content.Context
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -79,7 +88,10 @@ import dev.mirutime.app.features.reader.document.ReadingAnchor
 import dev.mirutime.app.features.reader.document.pageIndexForAnchor
 import dev.mirutime.feature.reader.MangaColorFilter
 import dev.mirutime.feature.reader.MangaEndAction
+import dev.mirutime.feature.reader.MangaFeedPage
+import dev.mirutime.feature.reader.MangaFeedPlanner
 import dev.mirutime.feature.reader.MangaPageTurn
+import dev.mirutime.feature.reader.MangaPagedNavigation
 import dev.mirutime.feature.reader.MangaReaderStyle
 import dev.mirutime.feature.reader.MangaReadingDirection
 import dev.mirutime.feature.reader.MangaReadingMode
@@ -88,7 +100,6 @@ import dev.mirutime.feature.reader.MangaWebtoonPadding
 import dev.mirutime.feature.reader.mangaEndAction
 import dev.mirutime.feature.reader.mangaTapSide
 import dev.mirutime.feature.reader.tapTurn
-import dev.mirutime.feature.reader.webtoonAnchorIndex
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -131,6 +142,11 @@ internal fun ReaderMangaPager(
     onVisiblePage: (Int) -> Unit = {},
     nextChapterFirstPage: String? = null,
     onNearEnd: () -> Unit = {},
+    // Continuous webtoon strip: loaded chapters around the active one. Empty
+    // falls back to the active chapter's pages only.
+    feed: List<MangaFeedPage> = emptyList(),
+    onVisibleChapter: (Int, ReadingAnchor?) -> Unit = { _, _ -> },
+    onNearStart: (Int) -> Unit = {},
     imageHeadersFor: (String) -> Map<String, String> = { emptyMap() },
     // One chapter-pages refresh after a page exhausted its automatic retries.
     onRefreshPages: () -> Unit = {},
@@ -246,6 +262,10 @@ internal fun ReaderMangaPager(
                     retryPolicy = pageRetryPolicy,
                     onRefreshPages = onRefreshPages,
                     viewportSize = readerSize,
+                    feed = feed,
+                    onVisibleChapter = onVisibleChapter,
+                    onNearStart = onNearStart,
+                    onNearEnd = onNearEnd,
                 )
             }
 
@@ -289,6 +309,22 @@ internal fun ReaderMangaPager(
     }
 }
 
+private const val MangaChapterTransitionMs = 200
+
+/** Everything one chapter's pager needs; a new chapter is a new snapshot. */
+private data class MangaChapterSnapshot(
+    val chapterIndex: Int,
+    val document: ReaderDocument,
+    val pages: List<ReaderBlock>,
+    val anchor: ReadingAnchor?,
+    val scrollToken: Int,
+)
+
+/**
+ * Chapter handoff for paged manga: the outgoing chapter stays composed while
+ * the incoming one slides in, instead of a hard cut. Page indices are never
+ * shared between chapters, and only the newest chapter may write anchors.
+ */
 @Composable
 private fun MangaPagedView(
     document: ReaderDocument,
@@ -313,14 +349,99 @@ private fun MangaPagedView(
     onRefreshPages: () -> Unit,
     viewportSize: IntSize,
 ) {
+    // The newest chapter owns the session; the outgoing one keeps rendering
+    // for the transition but is not allowed to report or persist anything.
+    val latestChapterUrl by rememberUpdatedState(document.chapterUrl)
+    val rtl = style.direction == MangaReadingDirection.Rtl
+    AnimatedContent(
+        targetState = MangaChapterSnapshot(chapterIndex, document, pages, anchor, scrollToken),
+        contentKey = { it.document.chapterUrl },
+        transitionSpec = {
+            if (!style.pageTransition) {
+                EnterTransition.None togetherWith ExitTransition.None
+            } else {
+                // Chapter order, not page order: a later chapter arrives from the
+                // far edge, an earlier one from the near edge (mirrored for RTL).
+                val forward = targetState.chapterIndex >= initialState.chapterIndex
+                val sign = if (forward) 1 else -1
+                val edge = if (rtl) -sign else sign
+                (
+                    slideInHorizontally(tween(MangaChapterTransitionMs)) { edge * it / 5 } +
+                        fadeIn(tween(MangaChapterTransitionMs))
+                    ) togetherWith (
+                    slideOutHorizontally(tween(MangaChapterTransitionMs)) { -edge * it / 5 } +
+                        fadeOut(tween(MangaChapterTransitionMs))
+                    )
+            }
+        },
+        modifier = Modifier.fillMaxSize(),
+        label = "mangaChapter",
+    ) { chapter ->
+        MangaChapterPager(
+            document = chapter.document,
+            pages = chapter.pages,
+            chapterIndex = chapter.chapterIndex,
+            anchor = chapter.anchor,
+            scrollToken = chapter.scrollToken,
+            style = style,
+            colorFilter = colorFilter,
+            chromeVisible = chromeVisible,
+            canPrevChapter = canPrevChapter,
+            canNextChapter = canNextChapter,
+            onPrevChapter = onPrevChapter,
+            onNextChapter = onNextChapter,
+            onAnchor = onAnchor,
+            onChapterFinished = onChapterFinished,
+            onToggleChrome = onToggleChrome,
+            onVisiblePage = onVisiblePage,
+            scrubber = scrubber,
+            imageHeadersFor = imageHeadersFor,
+            retryPolicy = retryPolicy,
+            onRefreshPages = onRefreshPages,
+            viewportSize = viewportSize,
+            isActiveChapter = { latestChapterUrl == chapter.document.chapterUrl },
+        )
+    }
+}
+
+@Composable
+private fun MangaChapterPager(
+    document: ReaderDocument,
+    pages: List<ReaderBlock>,
+    chapterIndex: Int,
+    anchor: ReadingAnchor?,
+    scrollToken: Int,
+    style: MangaReaderStyle,
+    colorFilter: ColorFilter?,
+    chromeVisible: Boolean,
+    canPrevChapter: Boolean,
+    canNextChapter: Boolean,
+    onPrevChapter: () -> Unit,
+    onNextChapter: () -> Unit,
+    onAnchor: (ReadingAnchor, Int) -> Unit,
+    onChapterFinished: (Int) -> Unit,
+    onToggleChrome: () -> Unit,
+    onVisiblePage: (Int) -> Unit,
+    scrubber: MangaScrubberState,
+    imageHeadersFor: (String) -> Map<String, String>,
+    retryPolicy: MangaPageRetryPolicy,
+    onRefreshPages: () -> Unit,
+    viewportSize: IntSize,
+    // False while this chapter is the outgoing one of a transition: it must
+    // not write an anchor, which would switch the session back (applyAnchor
+    // sets activeChapterIndex from the anchor's chapter).
+    isActiveChapter: () -> Boolean = { true },
+) {
     val initialPage = remember(document, pages, anchor) {
         document.pageIndexForAnchor(anchor)
     }
     val context = LocalContext.current
-    val pagerState = rememberPagerState(
-        initialPage = initialPage,
-        pageCount = { pages.size },
-    )
+    // Keyed by chapter: a new chapter gets a pager created at the correct page
+    // (first page going forward, last page going back) instead of keeping the
+    // previous chapter's index (out of range) and jumping with scrollToPage(0).
+    val pagerState = key(document.chapterUrl) {
+        rememberPagerState(initialPage = initialPage, pageCount = { pages.size })
+    }
     val scope = rememberCoroutineScope()
     var scale by remember { mutableFloatStateOf(MinMangaScale) }
     var offset by remember { mutableStateOf(Offset.Zero) }
@@ -343,7 +464,9 @@ private fun MangaPagedView(
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }
             .distinctUntilChanged()
-            .collect { pageIndex -> currentOnVisiblePage(pageIndex) }
+            .collect { pageIndex ->
+                if (isActiveChapter()) currentOnVisiblePage(pageIndex)
+            }
     }
 
     LaunchedEffect(pagerState, pages, chapterIndex, document.chapterUrl, scrubber) {
@@ -351,6 +474,7 @@ private fun MangaPagedView(
             .distinctUntilChanged()
             .collect { (pageIndex, dragging) ->
                 if (dragging) return@collect
+                if (!isActiveChapter()) return@collect
                 val page = pages.getOrNull(pageIndex) ?: return@collect
                 onAnchor(ReadingAnchor(document.chapterUrl, page.id, 0), 0)
                 if (pageIndex == pages.lastIndex) onChapterFinished(chapterIndex)
@@ -378,14 +502,19 @@ private fun MangaPagedView(
     }
 
     fun turnTo(pageTurn: MangaPageTurn) {
+        // Transitions off means an instant page swap, not a shorter animation.
+        fun goTo(target: Int) = scope.launch {
+            if (style.pageTransition) pagerState.animateScrollToPage(target)
+            else pagerState.scrollToPage(target)
+        }
         when (pageTurn) {
             MangaPageTurn.Next -> if (pagerState.currentPage < pages.lastIndex) {
-                scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
+                goTo(pagerState.currentPage + 1)
             } else if (canNextChapter) {
                 onNextChapter()
             }
             MangaPageTurn.Previous -> if (pagerState.currentPage > 0) {
-                scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
+                goTo(pagerState.currentPage - 1)
             } else if (canPrevChapter) {
                 onPrevChapter()
             }
@@ -400,6 +529,7 @@ private fun MangaPagedView(
                 style.direction,
                 style.tapZoneInvert,
                 style.doubleTapZoom,
+                style.pagedNavigation,
                 canPrevChapter,
                 canNextChapter,
             ) {
@@ -413,7 +543,7 @@ private fun MangaPagedView(
                             val side = mangaTapSide(position.x, size.width.toFloat())
                             if (side == MangaTapSide.Center) {
                                 onToggleChrome()
-                            } else {
+                            } else if (style.pagedNavigation != MangaPagedNavigation.Swipe) {
                                 style.tapTurn(side)?.let { pageTurn -> turnTo(pageTurn) }
                             }
                         }
@@ -441,7 +571,8 @@ private fun MangaPagedView(
             modifier = Modifier.fillMaxSize(),
             reverseLayout = style.direction == MangaReadingDirection.Rtl,
             beyondViewportPageCount = 2,
-            userScrollEnabled = scale <= MinMangaScale + 0.01f,
+            userScrollEnabled = style.pagedNavigation != MangaPagedNavigation.TapEdges &&
+                scale <= MinMangaScale + 0.01f,
         ) { pageIndex ->
             val page = pages.getOrNull(pageIndex) ?: return@HorizontalPager
             Box(
@@ -515,53 +646,101 @@ private fun MangaWebtoonView(
     retryPolicy: MangaPageRetryPolicy,
     onRefreshPages: () -> Unit,
     viewportSize: IntSize,
+    feed: List<MangaFeedPage>,
+    onVisibleChapter: (Int, ReadingAnchor?) -> Unit,
+    onNearStart: (Int) -> Unit,
+    onNearEnd: () -> Unit,
 ) {
-    val initialPage = remember(document, pages, anchor) {
-        document.pageIndexForAnchor(anchor)
+    // One endless strip: the active chapter plus any neighbour already loaded.
+    val strip = remember(feed, document, pages) {
+        feed.ifEmpty { MangaFeedPlanner.single(document) }
     }
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialPage)
-    val firstVisible by remember {
-        derivedStateOf {
-            webtoonAnchorIndex(listState.firstVisibleItemIndex, pages.size)
-        }
-    }
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = remember {
+            strip.indexOfFirst { it.chapterUrl == anchor?.chapterUrl && it.page.id == anchor?.blockId }
+                .coerceAtLeast(0)
+        },
+    )
+    val activeChapter by rememberUpdatedState(chapterIndex)
     val currentOnVisiblePage by rememberUpdatedState(onVisiblePage)
+    val currentOnVisibleChapter by rememberUpdatedState(onVisibleChapter)
+    val currentOnAnchor by rememberUpdatedState(onAnchor)
+    val currentOnFinished by rememberUpdatedState(onChapterFinished)
+    val currentOnNearStart by rememberUpdatedState(onNearStart)
+    val currentOnNearEnd by rememberUpdatedState(onNearEnd)
     val context = LocalContext.current
-    // Measured page heights are cached by URL; the first load of a page may
-    // settle once, later visits and scroll-backs render at the exact height.
-    val pageRatios = remember(document) { mutableStateMapOf<String, Float>() }
+    // Measured page heights are cached by URL, so a page keeps its height across
+    // chapter stitches and scroll-backs.
+    val pageRatios = remember { mutableStateMapOf<String, Float>() }
+    val finishedChapters = remember { mutableSetOf<Int>() }
 
-    LaunchedEffect(document, pages, scrollToken) {
-        val target = document.pageIndexForAnchor(anchor)
-        if (target in pages.indices) listState.scrollToItem(target)
+    // An explicit restore (open, or a chapter jump from the paged view) may
+    // move the strip; continuous scrolling itself never re-anchors.
+    LaunchedEffect(scrollToken) {
+        val target = strip.indexOfFirst {
+            it.chapterUrl == anchor?.chapterUrl && it.page.id == anchor?.blockId
+        }
+        if (target >= 0) listState.scrollToItem(target)
     }
 
-    LaunchedEffect(listState, pages, chapterIndex, document.chapterUrl, scrubber) {
-        snapshotFlow { firstVisible to scrubber.dragging }
+    // One collector drives the counter, the anchor and the active chapter.
+    LaunchedEffect(listState, strip, scrubber) {
+        snapshotFlow { listState.firstVisibleItemIndex to scrubber.dragging }
             .distinctUntilChanged()
-            .collect { (pageIndex, dragging) ->
-                val page = pages.getOrNull(pageIndex) ?: return@collect
-                currentOnVisiblePage(pageIndex)
-                if (!dragging) onAnchor(ReadingAnchor(document.chapterUrl, page.id, 0), 0)
+            .collect { (index, dragging) ->
+                val item = strip.getOrNull(index) ?: return@collect
+                currentOnVisiblePage(item.pageIndex)
+                if (item.chapterIndex != activeChapter) {
+                    currentOnVisibleChapter(
+                        item.chapterIndex,
+                        ReadingAnchor(item.chapterUrl, item.page.id, 0),
+                    )
+                }
+                if (!dragging) {
+                    currentOnAnchor(ReadingAnchor(item.chapterUrl, item.page.id, 0), 0)
+                }
             }
     }
 
     SideEffect {
         scrubber.bind { target ->
-            listState.requestScrollToItem(target.coerceIn(0, pages.lastIndex))
+            val index = strip.indexOfFirst {
+                it.chapterIndex == activeChapter && it.pageIndex == target
+            }
+            if (index >= 0) listState.requestScrollToItem(index)
         }
     }
 
-    // The last page counts as read as soon as it enters the viewport.
-    LaunchedEffect(listState, pages, chapterIndex, document.chapterUrl) {
-        var finished = false
+    // A chapter counts as read once its last page is on screen.
+    LaunchedEffect(listState, strip) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
             .distinctUntilChanged()
             .collect { lastVisible ->
-                if (!finished && lastVisible >= pages.lastIndex) {
-                    finished = true
-                    onChapterFinished(chapterIndex)
+                val item = strip.getOrNull(lastVisible) ?: return@collect
+                if (item.pageIndex == item.chapterPageCount - 1 &&
+                    finishedChapters.add(item.chapterIndex)
+                ) {
+                    currentOnFinished(item.chapterIndex)
                 }
+            }
+    }
+
+    // Keep the strip fed without moving it: load the chapter before the strip's
+    // first one, and warm the next one before the active chapter runs out.
+    LaunchedEffect(listState, strip) {
+        snapshotFlow {
+            val firstIndex = listState.firstVisibleItemIndex
+            val lastIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            val first = strip.getOrNull(firstIndex)
+            val last = strip.getOrNull(lastIndex)
+            (if (firstIndex <= 1) first?.chapterIndex else null) to
+                (last != null && last.chapterIndex == activeChapter &&
+                    last.pageIndex >= last.chapterPageCount - 2)
+        }
+            .distinctUntilChanged()
+            .collect { (firstChapter, nearActiveEnd) ->
+                firstChapter?.let { currentOnNearStart(it - 1) }
+                if (nearActiveEnd) currentOnNearEnd()
             }
     }
 
@@ -570,21 +749,28 @@ private fun MangaWebtoonView(
     val pageWidth = (viewportSize.width - horizontalPaddingPx * 2).coerceAtLeast(1)
     val webtoonRequestSize = mangaWebtoonRequestSize(pageWidth)
 
-    // Screen-height budget, not ±1: a 147-page webtoon warms only what the
-    // viewport can actually reach. Known heights come from decoded pages.
-    LaunchedEffect(firstVisible, pages, viewportSize, horizontalPaddingPx, imageHeadersFor) {
+    // Screen-height budget over the whole strip: only what the viewport can
+    // actually reach is warmed, with known heights from decoded pages.
+    LaunchedEffect(
+        listState.firstVisibleItemIndex,
+        strip,
+        viewportSize,
+        horizontalPaddingPx,
+        imageHeadersFor,
+    ) {
         if (viewportSize.width <= 0 || viewportSize.height <= 0) return@LaunchedEffect
         val requestSize = webtoonRequestSize ?: return@LaunchedEffect
-        val ratios = pages.map { page -> page.imageRef?.let { pageRatios[it] } }
+        val ratios = strip.map { item -> item.page.imageRef?.let { pageRatios[it] } }
         val loader = SingletonImageLoader.get(context)
         mangaWebtoonPreloadIndices(
-            currentPage = firstVisible,
-            pageCount = pages.size,
+            currentPage = listState.firstVisibleItemIndex,
+            pageCount = strip.size,
             pageRatios = ratios,
             viewportHeightPx = viewportSize.height.toFloat(),
             pageWidthPx = pageWidth.toFloat(),
         ).forEach { index ->
-            val ref = pages.getOrNull(index)?.imageRef?.takeIf { it.isNotBlank() } ?: return@forEach
+            val ref = strip.getOrNull(index)?.page?.imageRef?.takeIf { it.isNotBlank() }
+                ?: return@forEach
             loader.enqueue(mangaImageRequest(context, ref, requestSize, Scale.FILL, imageHeadersFor))
         }
     }
@@ -605,19 +791,24 @@ private fun MangaWebtoonView(
                 bottom = 24.dp,
             ),
         ) {
-            itemsIndexed(pages, key = { _, page -> page.id.index }) { index, page ->
-                val ratio = page.imageRef?.let { pageRatios[it] }
+            itemsIndexed(strip, key = { _, item -> item.id }) { index, item ->
+                // Every page of every stitched chapter is one continuous list;
+                // a divider marks the seam instead of a chapter boundary card.
+                if (item.chapterStart && index > 0) {
+                    MangaChapterDivider(item.chapterTitle)
+                }
+                val ratio = item.page.imageRef?.let { pageRatios[it] }
                 // The measured ratio only reserves layout height. The decode
                 // size stays the pre-decode fallback so onSuccess cannot
                 // recreate the request and flash a second decode.
                 val effectiveRatio = ratio ?: MangaWebtoonFallbackRatio
                 MangaPageImage(
-                    url = page.imageRef.orEmpty(),
-                    contentDescription = page.original.ifBlank {
+                    url = item.page.imageRef.orEmpty(),
+                    contentDescription = item.page.original.ifBlank {
                         stringResource(
                             R.string.rd_manga_page_fmt,
-                            index + 1,
-                            pages.size,
+                            item.pageIndex + 1,
+                            item.chapterPageCount,
                         )
                     },
                     contentScale = ContentScale.FillWidth,
@@ -625,7 +816,9 @@ private fun MangaWebtoonView(
                     imageHeadersFor = imageHeadersFor,
                     retryPolicy = retryPolicy,
                     onRefreshPages = onRefreshPages,
-                    onImageRatio = { loaded -> page.imageRef?.let { pageRatios[it] = loaded } },
+                    onImageRatio = { loaded ->
+                        item.page.imageRef?.let { pageRatios[it] = loaded }
+                    },
                     requestSize = webtoonRequestSize,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -633,17 +826,51 @@ private fun MangaWebtoonView(
                         .clipToBounds(),
                 )
             }
-            item(key = "manga-chapter-end") {
-                MangaChapterEnd(
-                    canPrevChapter = canPrevChapter,
-                    canNextChapter = canNextChapter,
-                    onPrevChapter = onPrevChapter,
-                    onNextChapter = onNextChapter,
-                )
+            // The seamless strip only continues when the next chapter is
+            // actually stitched. If its load failed (or was never started) the
+            // end card stays the explicit way forward instead of a dead strip.
+            val nextChapterStitched =
+                strip.lastOrNull()?.chapterIndex?.let { it > chapterIndex } == true
+            if (mangaStripNeedsEndCard(nextChapterStitched, canNextChapter)) {
+                item(key = "manga-strip-end") {
+                    MangaChapterEnd(
+                        canPrevChapter = canPrevChapter,
+                        canNextChapter = canNextChapter,
+                        onPrevChapter = onPrevChapter,
+                        onNextChapter = onNextChapter,
+                    )
+                }
             }
         }
     }
 }
+
+@Composable
+private fun MangaChapterDivider(title: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 32.dp, bottom = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = title,
+            color = Color.White.copy(alpha = 0.7f),
+            style = MaterialTheme.typography.labelLarge,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/**
+ * The webtoon strip ends with an explicit card unless the next chapter is
+ * actually stitched into it: a next chapter that exists but whose load failed
+ * must still offer "Next chapter" instead of a dead strip (regression guard).
+ */
+internal fun mangaStripNeedsEndCard(
+    nextChapterStitched: Boolean,
+    canNextChapter: Boolean,
+): Boolean = !(canNextChapter && nextChapterStitched)
 
 /**
  * The end card is the webtoon's explicit chapter boundary: next/previous

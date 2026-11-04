@@ -18,6 +18,16 @@ class MangaReaderStyleTest {
         assertTrue(s.doubleTapZoom)
         assertEquals(1f, s.brightness, 0.001f)
         assertEquals(MangaColorFilter.None, s.colorFilter)
+        assertEquals(MangaPagedNavigation.Both, s.pagedNavigation)
+        assertTrue(s.pageTransition)
+    }
+
+    @Test
+    fun `paged navigation falls back to both`() {
+        assertEquals(MangaPagedNavigation.Both, parseMangaPagedNavigation(null))
+        assertEquals(MangaPagedNavigation.Both, parseMangaPagedNavigation("unknown"))
+        assertEquals(MangaPagedNavigation.Swipe, parseMangaPagedNavigation("swipe"))
+        assertEquals(MangaPagedNavigation.TapEdges, parseMangaPagedNavigation("TapEdges"))
     }
 
     @Test

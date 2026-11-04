@@ -8,6 +8,9 @@ enum class MangaColorFilter { None, Grayscale, Sepia, Invert }
 
 enum class MangaWebtoonPadding { None, Small, Medium, Large }
 
+/** How paged mode turns pages: swipe, edge taps, or both. */
+enum class MangaPagedNavigation { Swipe, TapEdges, Both }
+
 /** How the viewer turns pages: paged pager or a continuous vertical strip. */
 data class MangaReaderStyle(
     val mode: MangaReadingMode = MangaReadingMode.Webtoon,
@@ -18,6 +21,8 @@ data class MangaReaderStyle(
     val doubleTapZoom: Boolean = true,
     val brightness: Float = 1f,
     val colorFilter: MangaColorFilter = MangaColorFilter.None,
+    val pagedNavigation: MangaPagedNavigation = MangaPagedNavigation.Both,
+    val pageTransition: Boolean = true,
 ) {
     fun sanitized(): MangaReaderStyle = copy(
         brightness = brightness.coerceIn(MinBrightness, MaxBrightness),
@@ -87,3 +92,7 @@ fun parseMangaColorFilter(raw: String?): MangaColorFilter =
 fun parseMangaWebtoonPadding(raw: String?): MangaWebtoonPadding =
     MangaWebtoonPadding.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
         ?: MangaWebtoonPadding.Medium
+
+fun parseMangaPagedNavigation(raw: String?): MangaPagedNavigation =
+    MangaPagedNavigation.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
+        ?: MangaPagedNavigation.Both

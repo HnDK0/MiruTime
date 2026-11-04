@@ -19,6 +19,7 @@ import dev.mirutime.uikit.SettingsSliderRow
 import dev.mirutime.uikit.SettingsSwitchRow
 import dev.mirutime.uikit.SettingsValueRow
 import dev.mirutime.feature.reader.MangaColorFilter
+import dev.mirutime.feature.reader.MangaPagedNavigation
 import dev.mirutime.feature.reader.MangaReaderStyle
 import dev.mirutime.feature.reader.MangaReadingDirection
 import dev.mirutime.feature.reader.MangaReadingMode
@@ -61,6 +62,25 @@ fun MangaReaderSettingsControls(
             }
         }
 
+        if (style.mode == MangaReadingMode.Paged) {
+            SheetSection(title = stringResource(R.string.rd_manga_navigation)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 0.dp, vertical = MiruSpace.S),
+                ) {
+                    MangaPagedNavigation.entries.forEach { navigation ->
+                        FilterChip(
+                            selected = style.pagedNavigation == navigation,
+                            onClick = { update(style.copy(pagedNavigation = navigation)) },
+                            label = { Text(navigationLabel(navigation)) },
+                        )
+                    }
+                }
+            }
+        }
+
         SheetSection(title = stringResource(R.string.rd_manga_display)) {
             if (style.mode == MangaReadingMode.Paged) {
                 FlowRow(
@@ -84,16 +104,24 @@ fun MangaReaderSettingsControls(
                         label = { Text(stringResource(R.string.rd_manga_rtl)) },
                     )
                 }
-                SettingsSwitchRow(
-                    title = stringResource(R.string.rd_manga_invert_taps),
-                    checked = style.tapZoneInvert,
-                    onChange = { update(style.copy(tapZoneInvert = it)) },
-                    horizontalPadding = 0.dp,
-                )
+                if (style.pagedNavigation != MangaPagedNavigation.Swipe) {
+                    SettingsSwitchRow(
+                        title = stringResource(R.string.rd_manga_invert_taps),
+                        checked = style.tapZoneInvert,
+                        onChange = { update(style.copy(tapZoneInvert = it)) },
+                        horizontalPadding = 0.dp,
+                    )
+                }
                 SettingsSwitchRow(
                     title = stringResource(R.string.rd_manga_double_tap_zoom),
                     checked = style.doubleTapZoom,
                     onChange = { update(style.copy(doubleTapZoom = it)) },
+                    horizontalPadding = 0.dp,
+                )
+                SettingsSwitchRow(
+                    title = stringResource(R.string.rd_manga_page_transition),
+                    checked = style.pageTransition,
+                    onChange = { update(style.copy(pageTransition = it)) },
                     horizontalPadding = 0.dp,
                 )
             }
@@ -157,6 +185,15 @@ fun MangaReaderSettingsControls(
         }
     }
 }
+
+@Composable
+private fun navigationLabel(navigation: MangaPagedNavigation): String = stringResource(
+    when (navigation) {
+        MangaPagedNavigation.Swipe -> R.string.rd_manga_nav_swipe
+        MangaPagedNavigation.TapEdges -> R.string.rd_manga_nav_tap
+        MangaPagedNavigation.Both -> R.string.rd_manga_nav_both
+    },
+)
 
 @Composable
 private fun webtoonPaddingLabel(padding: MangaWebtoonPadding): String = stringResource(

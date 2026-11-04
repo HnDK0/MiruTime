@@ -17,6 +17,14 @@ interface ReaderContentSource {
     suspend fun documentForTranslation(bookUrl: String, chapterIndex: Int): ReaderDocument? =
         document(bookUrl, chapterIndex)
 
+    /**
+     * Parses a chapter behind the visible one without touching reading history.
+     * Prefetch and previous-chapter loads use this so only the chapter the user
+     * is actually reading moves "last read".
+     */
+    suspend fun documentForPrefetch(bookUrl: String, chapterIndex: Int): ReaderDocument? =
+        document(bookUrl, chapterIndex)
+
     suspend fun markRead(bookUrl: String, chapterIndex: Int, read: Boolean)
 }
 
