@@ -148,6 +148,7 @@ import dev.mirutime.app.features.book.domain.BookChapter
 import dev.mirutime.app.features.book.domain.BookDetails
 import dev.mirutime.app.features.book.domain.BookReview
 import dev.mirutime.app.features.book.domain.bookActionState
+import dev.mirutime.app.features.book.domain.continueChapterTitle
 import dev.mirutime.app.features.book.domain.bookChaptersCountKnown
 import dev.mirutime.app.features.book.domain.inReadingOrder
 import dev.mirutime.app.features.dashboard.ui.formatDurationLocalized
@@ -286,7 +287,7 @@ fun BookScreen(
     // In-app WebView for source-owned flows such as login.
     onOpenWebView: (url: String, title: String) -> Unit = { _, _ -> },
     // Global search screen (Finder tab), opened from the book title.
-    onOpenSearch: () -> Unit = {},
+    onOpenSearch: (String) -> Unit = {},
     // Opens the novel reader at a chapter (Continue or a chapter row).
     onOpenReader: (bookUrl: String, chapterIndex: Int, restoreSaved: Boolean) -> Unit = { _, _, _ -> },
     // Video books never open the text reader: the shell routes them to the
@@ -308,6 +309,9 @@ fun BookScreen(
     // The saved reader position is the same source the tap uses; the CTA
     // label must not fall back to "Start · Chapter 1" while it is non-zero.
     var savedContinue by remember(bookUrl) { mutableStateOf<Int?>(null) }
+    // Chapter the saved reading position belongs to; opening exactly this row
+    // restores its saved offset instead of starting at the chapter top.
+    var savedChapterIndex by remember(bookUrl) { mutableStateOf<Int?>(null) }
     var hasSavedProgress by remember(bookUrl) { mutableStateOf(false) }
     var savedLoaded by remember(bookUrl) { mutableStateOf(false) }
     LaunchedEffect(bookUrl, book) {
@@ -315,6 +319,9 @@ fun BookScreen(
         val saved = runCatching { readerGraph.positions.load(bookUrl) }.getOrNull()
         hasSavedProgress = saved != null
         savedContinue = ReaderOpenResolver.continueChapter(readerBook, saved)
+        savedChapterIndex = saved?.anchor?.chapterUrl?.let { url ->
+            readerBook.chapters.firstOrNull { it.chapterUrl == url }?.index
+        }
         savedLoaded = true
     }
     // Both scroll positions live at the page level so they restore from the
@@ -609,6 +616,33 @@ fun BookScreen(
         chaptersRefreshing = true
         ioScope.launch {
             try {
+                // Metadata first so a stored-missing rating/description/cover can
+                // be restored: the chapter refresh alone never wrote them back.
+                val metaResult = runCatching { provider.refreshMetadata(bookUrl) }.getOrNull()
+                if (metaResult is Outcome.Ok) {
+                    val refreshed = try {
+                        provider.book(bookUrl)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        null
+                    }
+                    val currentBook = book
+                    if (refreshed != null && currentBook != null &&
+                        currentBook.bookUrl == bookUrl
+                    ) {
+                        book = currentBook.copy(
+                            title = refreshed.title,
+                            author = refreshed.author,
+                            rating = refreshed.rating,
+                            description = refreshed.description,
+                            coverUrl = refreshed.coverUrl,
+                            genres = refreshed.genres,
+                            ongoing = refreshed.ongoing,
+                            updatedLabel = refreshed.updatedLabel,
+                        )
+                    }
+                }
                 val result = try {
                     withContext(Dispatchers.IO) { provider.refreshChaptersOutcome(bookUrl) }
                 } catch (e: CancellationException) {
@@ -1185,7 +1219,7 @@ fun BookScreen(
                     shelves = shelves,
                     shelvesLoading = shelvesLoading,
                     onShelfClick = { shelfSheetOpen = true },
-                    onOpenSearch = onOpenSearch,
+                    onOpenSearch = { onOpenSearch(current.title) },
                     onCoverRetry = retryCover,
                 )
             }
@@ -1217,19 +1251,12 @@ fun BookScreen(
                 val savedIndex = savedContinue
                 val continueChapter = current.continueChapter
                 val continueIndex = savedIndex ?: continueChapter?.index
-                val continueTitle = when {
-                    savedIndex != null -> current.chapters
-                        .firstOrNull { it.index == savedIndex }
-                        ?.title
-                        ?.takeIf { it.isNotBlank() }
-                        ?: metadataEntry?.chapterTitles?.get(savedIndex)
-                            ?.takeIf { it.isNotBlank() }
-                        ?: ""
-                    continueChapter != null -> metadataEntry?.chapterTitles?.get(continueChapter.index)
-                        ?.takeIf { it.isNotBlank() }
-                        ?: continueChapter.title
-                    else -> ""
-                }
+                val continueTitle = continueChapterTitle(
+                    savedIndex = savedIndex,
+                    continueChapter = continueChapter,
+                    chapters = current.chapters,
+                    translatedTitles = metadataEntry?.chapterTitles.orEmpty(),
+                )
                 ActionRow(
                     book = current,
                     continueIndexOverride = continueIndex,
@@ -1412,7 +1439,13 @@ fun BookScreen(
                                 if (current.contentType == ContentType.Video) {
                                     onOpenVideo(current.bookUrl, index)
                                 } else {
-                                    onOpenReader(current.bookUrl, index, false)
+                                    // Opening the saved chapter resumes its saved
+                                    // offset; any other row starts at the top.
+                                    onOpenReader(
+                                        current.bookUrl,
+                                        index,
+                                        index == savedChapterIndex,
+                                    )
                                 }
                             },
                             onDownloadNext100 = {

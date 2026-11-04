@@ -97,9 +97,14 @@ fun GlobalSearchScreen(
     // Fired once per committed membership write so the shell can drop cached
     // snapshots and bump its data revision (library counts/badges).
     onLibraryChanged: () -> Unit = {},
+    // Optional pre-filled query (e.g. tapping a book title searches its ORIGINAL
+    // name). A non-blank value auto-starts the fan-out (FR-115/FR-116).
+    initialQuery: String = "",
 ) {
-    var field by rememberSaveable { mutableStateOf("") }
-    var submitted by rememberSaveable { mutableStateOf<String?>(null) }
+    var field by rememberSaveable { mutableStateOf(initialQuery) }
+    var submitted by rememberSaveable {
+        mutableStateOf(initialQuery.takeIf { it.isNotBlank() })
+    }
     var scopeType by rememberSaveable { mutableStateOf<String?>(null) }
     // Results survive navigation: the snapshot for this query/scope seeds the
     // state, so backing out of a book never re-runs the whole fan-out.

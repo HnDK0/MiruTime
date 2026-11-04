@@ -13,38 +13,50 @@ class ImmediateSettingsContractTest {
     ).first { it.isFile }.readText()
 
     @Test
-    fun `library filter has no Apply and commits each control`() {
+    fun `library filters draft until Apply while appearance commits live`() {
         val text = source("src/main/java/dev/mirutime/app/features/library/ui/LibraryScreen.kt")
 
-        assertFalse(text.contains("onApply ="))
-        assertFalse(text.contains("lib_apply"))
-        assertTrue(text.contains("onSort ="))
+        assertTrue(text.contains("doneLabel"))
+        assertTrue(text.contains("finder_apply"))
+        // Appearance settings still commit live.
         assertTrue(text.contains("onCardStyle ="))
+        assertTrue(text.contains("onColumns ="))
     }
 
     @Test
-    fun `catalog filter commits live and has no Apply`() {
+    fun `catalog filter applies only on Apply`() {
         val text = source("src/main/java/dev/mirutime/app/features/finder/ui/CatalogFilterSheet.kt")
-        val screen = source("src/main/java/dev/mirutime/app/features/finder/ui/SourceCatalogScreen.kt")
 
-        assertFalse(text.contains("doneLabel"))
-        assertFalse(text.contains("finder_apply"))
-        // Filters still commit live, but the first composition and a schema
-        // seed are skipped by the pure emission rule.
-        assertTrue(text.contains("LaunchedEffect(filterKey, userEdited)"))
-        assertTrue(text.contains("CatalogFilterEmission.shouldApply"))
-        assertFalse(screen.contains("onApply = { draft ->\n                sheetOpen = false"))
+        // Draft + Apply: no live emission, an explicit Apply button.
+        assertTrue(text.contains("doneLabel"))
+        assertTrue(text.contains("finder_apply"))
+        assertFalse(text.contains("LaunchedEffect(filterKey, userEdited)"))
+        assertFalse(text.contains("CatalogFilterEmission.shouldApply"))
     }
 
     @Test
-    fun `extension and migration filters commit live`() {
+    fun `extension and migration filters apply only on Apply`() {
         val extensions = source("src/main/java/dev/mirutime/app/features/finder/ui/ExtensionFilterSheet.kt")
         val migration = source("src/main/java/dev/mirutime/app/features/migration/ui/MigrationFilterSheet.kt")
 
-        assertFalse(extensions.contains("doneLabel"))
-        assertTrue(extensions.contains("LaunchedEffect(draft)"))
-        assertFalse(migration.contains("doneLabel"))
-        assertTrue(migration.contains("LaunchedEffect(draftSelected, draftOptions)"))
+        assertTrue(extensions.contains("doneLabel"))
+        assertFalse(extensions.contains("LaunchedEffect(draft)"))
+        assertTrue(migration.contains("doneLabel"))
+        assertFalse(migration.contains("LaunchedEffect(draftSelected, draftOptions)"))
+    }
+
+    @Test
+    fun `filter sheets put Reset in the header action`() {
+        val sheets = listOf(
+            "src/main/java/dev/mirutime/app/features/finder/ui/CatalogFilterSheet.kt",
+            "src/main/java/dev/mirutime/app/features/finder/ui/ExtensionFilterSheet.kt",
+            "src/main/java/dev/mirutime/app/features/finder/ui/FinderFilterSheets.kt",
+        ).map(::source)
+
+        sheets.forEach { text ->
+            assertTrue(text.contains("headerAction"))
+            assertTrue(text.contains("finder_reset"))
+        }
     }
 
     @Test

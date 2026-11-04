@@ -283,47 +283,48 @@ class MetadataTranslationController(
 
     private suspend fun apply(job: Pending, result: MetadataTranslationResult) {
         val translations = result.translations
-        _state.update { current ->
-            var next = current
-            job.books.forEachIndexed { index, bookUrl ->
-                val entry = next[bookUrl] ?: return@forEachIndexed
-                if (entry.config != job.config) return@forEachIndexed
-                when (job.kind) {
-                    MetadataKind.Titles -> {
-                        val title = translations[index]?.takeIf { it.isNotBlank() }
-                        next = next + (bookUrl to entry.copy(
-                            status = MetadataTranslationStatus.Ready,
-                            title = title ?: entry.title,
-                            provider = result.provider,
-                        ))
-                    }
-                    MetadataKind.Details -> {
-                        val title = translations[0]?.takeIf { it.isNotBlank() }
-                        val description = translations[1]?.takeIf { it.isNotBlank() }
-                        val chapterTitles = chapterTitlesOf(translations)
-                        next = next + (bookUrl to entry.copy(
-                            status = MetadataTranslationStatus.Ready,
-                            title = title ?: entry.title,
-                            description = description ?: entry.description,
-                            chapterTitles = chapterTitles.ifEmpty { entry.chapterTitles },
-                            detailsLoaded = true,
-                            provider = result.provider,
-                        ))
-                    }
-                    MetadataKind.Chapters -> {
-                        val title = translations[0]?.takeIf { it.isNotBlank() }
-                        val chapterTitles = chapterTitlesOf(translations)
-                        next = next + (bookUrl to entry.copy(
-                            status = MetadataTranslationStatus.Ready,
-                            title = title ?: entry.title,
-                            chapterTitles = chapterTitles.ifEmpty { entry.chapterTitles },
-                            provider = result.provider,
-                        ))
-                    }
+        // One writer on the main dispatcher: build the next map in place and
+        // publish it once, so a batch of 50 titles cannot be interleaved with
+        // another state write and lose entries.
+        var next = _state.value
+        job.books.forEachIndexed { index, bookUrl ->
+            val entry = next[bookUrl] ?: return@forEachIndexed
+            if (entry.config != job.config) return@forEachIndexed
+            next = when (job.kind) {
+                MetadataKind.Titles -> {
+                    val title = translations[index]?.takeIf { it.isNotBlank() }
+                    next + (bookUrl to entry.copy(
+                        status = MetadataTranslationStatus.Ready,
+                        title = title ?: entry.title,
+                        provider = result.provider,
+                    ))
+                }
+                MetadataKind.Details -> {
+                    val title = translations[0]?.takeIf { it.isNotBlank() }
+                    val description = translations[1]?.takeIf { it.isNotBlank() }
+                    val chapterTitles = chapterTitlesOf(translations)
+                    next + (bookUrl to entry.copy(
+                        status = MetadataTranslationStatus.Ready,
+                        title = title ?: entry.title,
+                        description = description ?: entry.description,
+                        chapterTitles = chapterTitles.ifEmpty { entry.chapterTitles },
+                        detailsLoaded = true,
+                        provider = result.provider,
+                    ))
+                }
+                MetadataKind.Chapters -> {
+                    val title = translations[0]?.takeIf { it.isNotBlank() }
+                    val chapterTitles = chapterTitlesOf(translations)
+                    next + (bookUrl to entry.copy(
+                        status = MetadataTranslationStatus.Ready,
+                        title = title ?: entry.title,
+                        chapterTitles = chapterTitles.ifEmpty { entry.chapterTitles },
+                        provider = result.provider,
+                    ))
                 }
             }
-            next
         }
+        _state.value = next
         job.books.forEach(::touch)
         persist(job, translations)
     }
@@ -474,6 +475,9 @@ class MetadataTranslationController(
 
     private companion object {
         const val FIRST_CHAPTER_ID = 2
-        const val CACHE_LIMIT = 40
+        // A catalogue page is 50 books and the library reloads its own page on
+        // every visit; the old 40-entry cap evicted the whole fresh batch right
+        // after it was applied, so no card ever showed a translated title.
+        const val CACHE_LIMIT = 160
     }
 }

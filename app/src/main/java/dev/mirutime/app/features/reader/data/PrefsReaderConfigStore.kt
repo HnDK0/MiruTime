@@ -8,6 +8,7 @@ import dev.mirutime.feature.reader.ReaderConfigStore
 import dev.mirutime.feature.reader.ReaderMode
 import dev.mirutime.feature.reader.ReaderStyle
 import dev.mirutime.feature.reader.parseMangaColorFilter
+import dev.mirutime.feature.reader.parseMangaPagedNavigation
 import dev.mirutime.feature.reader.parseMangaReadingDirection
 import dev.mirutime.feature.reader.parseMangaReadingMode
 import dev.mirutime.feature.reader.parseMangaWebtoonPadding
@@ -147,6 +148,8 @@ internal fun mangaStyleToJson(style: MangaReaderStyle): JsonObject = buildJsonOb
     put("doubleTapZoom", style.doubleTapZoom)
     put("brightness", style.brightness)
     put("colorFilter", style.colorFilter.name)
+    put("pagedNavigation", style.pagedNavigation.name)
+    put("pageTransition", style.pageTransition)
 }
 
 internal fun mangaStyleFromJson(json: JsonObject): MangaReaderStyle {
@@ -172,6 +175,10 @@ internal fun mangaStyleFromJson(json: JsonObject): MangaReaderStyle {
         colorFilter = parseMangaColorFilter(
             json.str("colorFilter", defaults.colorFilter.name),
         ),
+        pagedNavigation = parseMangaPagedNavigation(
+            json.str("pagedNavigation", defaults.pagedNavigation.name),
+        ),
+        pageTransition = json.bool("pageTransition", defaults.pageTransition),
     ).sanitized()
 }
 

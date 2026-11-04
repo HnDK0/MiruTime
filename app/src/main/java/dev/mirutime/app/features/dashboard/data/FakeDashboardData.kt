@@ -50,6 +50,14 @@ class FakeDashboardDataProvider : DashboardDataProvider {
         delay(150)
         return DashboardFixtures.history
     }
+
+    override suspend fun deleteHistory(bookUrls: List<String>) {
+        delay(50)
+    }
+
+    override suspend fun clearHistory() {
+        delay(50)
+    }
 }
 
 object DashboardFixtures {

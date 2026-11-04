@@ -57,6 +57,11 @@ class DefaultReaderRepository(
         chapterIndex: Int,
     ): ReaderDocument? = loadDocument(bookUrl, chapterIndex, touchHistory = false)
 
+    override suspend fun documentForPrefetch(
+        bookUrl: String,
+        chapterIndex: Int,
+    ): ReaderDocument? = loadDocument(bookUrl, chapterIndex, touchHistory = false)
+
     private suspend fun loadDocument(
         bookUrl: String,
         chapterIndex: Int,

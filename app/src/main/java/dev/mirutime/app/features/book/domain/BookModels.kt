@@ -111,6 +111,28 @@ data class BookDetails(
 }
 
 /**
+ * Label source for the Continue/Start CTA. The translated chapter title wins so
+ * the button names the chapter exactly like the list does; the raw source title
+ * (or the generic "Chapter N") is only a fallback while metadata is in flight.
+ */
+fun continueChapterTitle(
+    savedIndex: Int?,
+    continueChapter: BookChapter?,
+    chapters: List<BookChapter>,
+    translatedTitles: Map<Int, String>,
+): String {
+    val index = savedIndex ?: continueChapter?.index
+    if (index == null) return ""
+    translatedTitles[index]?.takeIf { it.isNotBlank() }?.let { return it }
+    val raw = if (savedIndex != null) {
+        chapters.firstOrNull { it.index == savedIndex }?.title
+    } else {
+        continueChapter?.title
+    }
+    return raw?.takeIf { it.isNotBlank() } ?: ""
+}
+
+/**
  * What the page's primary action says. The chapter list loads after the
  * metadata, so "Read again"/"Continue · Ch. N" must never be derived from an
  * empty list (which used to fall back to chapter 1).

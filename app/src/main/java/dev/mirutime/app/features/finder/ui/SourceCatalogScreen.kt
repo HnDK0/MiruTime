@@ -47,12 +47,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -102,10 +104,13 @@ import dev.mirutime.app.features.finder.domain.shouldShowSearchLanguageHint
 import dev.mirutime.app.features.finder.domain.isWebUrl
 import dev.mirutime.app.features.finder.domain.pluginActiveFilterCount
 import dev.mirutime.app.features.finder.domain.SearchHistoryRules
+import dev.mirutime.app.di.ReaderGraph
 import dev.mirutime.app.features.library.domain.CardStyle
 import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.app.features.library.domain.LibraryBook
 import dev.mirutime.app.features.library.ui.LibraryCard
+import dev.mirutime.app.features.translation.data.TitleTranslationJob
+import dev.mirutime.app.features.translation.data.metadataConfigFor
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.core.api.MiruError
 import dev.mirutime.core.api.Outcome
@@ -123,6 +128,7 @@ fun SourceCatalogScreen(
     sourceId: String,
     contentPadding: PaddingValues,
     provider: FinderDataProvider,
+    readerGraph: ReaderGraph,
     // Installed plugin display name for the report; null means id only.
     sourceName: String? = null,
     onBookOpen: (String) -> Unit = {},
@@ -152,8 +158,15 @@ fun SourceCatalogScreen(
 
     // The text field stays instant (`input`); `filters.query` is the APPLIED
     // query and only moves after the debounce window.
-    var input by remember(sourceId, initialQuery) { mutableStateOf(initialQuery) }
-    var filters by remember(sourceId, initialQuery) { mutableStateOf(CatalogFilters(query = initialQuery)) }
+    // Applied filters survive the book round-trip (rememberSaveable is restored
+    // per back-stack entry), so returning keeps the filtered results instead of
+    // resetting to the default listing (FR-077).
+    var filters by rememberSaveable(sourceId, initialQuery, stateSaver = CatalogFiltersSaver) {
+        mutableStateOf(CatalogFilters(query = initialQuery))
+    }
+    // The field follows the applied/restored query, so returning from a book
+    // shows the typed query that produced the results, not just the route query.
+    var input by rememberSaveable(sourceId, initialQuery) { mutableStateOf(filters.query) }
     val debouncer = remember(sourceId, initialQuery) {
         CatalogQueryDebouncer(
             scope = scope,
@@ -265,6 +278,10 @@ fun SourceCatalogScreen(
             reloadTick == 0 &&
             FinderSearchCache.catalog(cacheKey)?.books?.isNotEmpty() == true
         ) {
+            // Restored from cache (back from a book): the list is already on
+            // screen. Clear the flag too — a superseded loadMore may have left
+            // it set, which made the next filter request spin forever.
+            loading = false
             return@LaunchedEffect
         }
         generation++
@@ -390,6 +407,41 @@ fun SourceCatalogScreen(
     // One shared card style with the library/dashboard; C is list-only.
     val catalogStyle = AppSettings.cardStyle
         .takeIf { it != CardStyle.Horizontal } ?: CardStyle.Mat
+    // Translated titles: the catalogue is where a NEW book is judged, so it
+    // warms the same metadata cache as the library instead of leaving every
+    // card in the source language. Same batch-per-config contract.
+    val metadata by readerGraph.metadataTranslations.state.collectAsState()
+    val metadataJobs = remember(
+        books,
+        AppSettings.novelTranslation.toMap(),
+        AppSettings.pluginTranslation.toMap(),
+        AppSettings.translationGlobalMode,
+        AppSettings.globalSource,
+        AppSettings.globalTarget,
+        AppSettings.provider,
+        AppSettings.activePrompt,
+    ) {
+        books.mapNotNull { book ->
+            metadataConfigFor(book.bookUrl)?.let { config ->
+                TitleTranslationJob(book.bookUrl, book.title, config)
+            }
+        }
+    }
+    LaunchedEffect(metadataJobs) {
+        readerGraph.metadataTranslations.hydrateTitles(metadataJobs)
+        readerGraph.metadataTranslations.submitTitles(metadataJobs)
+    }
+    val metadataConfigs = remember(metadataJobs) {
+        metadataJobs.associate { it.bookUrl to it.config }
+    }
+    val translatedTitles = remember(books, metadata, metadataConfigs) {
+        books.mapNotNull { book ->
+            metadata[book.bookUrl]
+                ?.takeIf { it.config == metadataConfigs[book.bookUrl] }
+                ?.title
+                ?.let { book.bookUrl to it }
+        }.toMap()
+    }
     val fontScale = LocalDensity.current.fontScale
     val columns = if (fontScale >= 1.3f) 2 else AppSettings.gridColumns.coerceIn(2, 6)
     LazyVerticalGrid(
@@ -481,7 +533,10 @@ fun SourceCatalogScreen(
                 )
             } else {
                 LibraryCard(
-                    book = book.toLibraryBook(source = sourceId),
+                    book = book.toLibraryBook(
+                        source = sourceId,
+                        translatedTitle = translatedTitles[book.bookUrl],
+                    ),
                     style = catalogStyle,
                     compactInfo = true,
                     showTypeChip = false,
@@ -766,9 +821,13 @@ internal fun CatalogSearchBar(
 // meta line (gold star + rating when the plugin has one, chapter count).
 // Catalog entries carry only the listing fields; the shared library card
 // takes the rest as neutral defaults (shelfId = "catalog", no reading state).
-private fun CatalogBook.toLibraryBook(source: String): LibraryBook = LibraryBook(
+private fun CatalogBook.toLibraryBook(
+    source: String,
+    translatedTitle: String? = null,
+): LibraryBook = LibraryBook(
     bookUrl = bookUrl,
     title = title,
+    translatedTitle = translatedTitle,
     source = source,
     author = source,
     rating = rating,

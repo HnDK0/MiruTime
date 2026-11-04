@@ -39,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
@@ -47,6 +48,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -84,6 +86,7 @@ import androidx.media3.ui.PlayerView
 import dev.mirutime.app.R
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.video.data.VideoDownloadManager
+import dev.mirutime.app.features.video.data.VideoDownloadState
 import dev.mirutime.app.features.video.data.VideoSourceRepository
 import dev.mirutime.app.features.video.data.VideoVariantProbe
 import dev.mirutime.app.features.video.domain.GestureConfig
@@ -109,8 +112,13 @@ import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.ChoiceSheet
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
+
+/** Max time to wait for the first source probe before letting playback start. */
+private const val PROBE_WAIT_MS = 9_000L
 
 /**
  * Full-screen video surface. Used by [dev.mirutime.app.features.video.VideoPlayerActivity];
@@ -266,8 +274,35 @@ private fun VideoReadyContent(
         headers = repository.headersFor(stream)
     }
 
+    // Wait for the FIRST probe of the selected/default stream before creating
+    // the player, so a reliably dead source opens the chooser instead of
+    // buffering (FR-105). A completed download is exempt; unknown/transient
+    // proceeds after the bounded wait (FR-106).
+    val offline = source.offline
+    var probeAwaited by remember(source.chapterIndex, stream.url) { mutableStateOf(false) }
+    var dismissedDeadUrl by remember(source.chapterIndex) { mutableStateOf<String?>(null) }
+    LaunchedEffect(stream.url, offline) {
+        if (offline) {
+            probeAwaited = true
+            return@LaunchedEffect
+        }
+        if (probeStatuses[stream.url] == null) {
+            probeRequest++
+            withTimeoutOrNull(PROBE_WAIT_MS) {
+                snapshotFlow { probeStatuses[stream.url] }.first { it != null }
+            }
+        }
+        probeAwaited = true
+    }
+    val selectedDead = !offline && probeStatuses[stream.url] == VideoVariantStatus.DEAD
+    // The chooser is shown once per dead URL; dismissing it means "play anyway".
+    val mustChooseVariant = selectedDead && dismissedDeadUrl != stream.url
+    LaunchedEffect(mustChooseVariant) {
+        if (mustChooseVariant) qualityPickerOpen = true
+    }
+
     val resolvedHeaders = headers
-    if (resolvedHeaders == null) {
+    if (resolvedHeaders == null || !probeAwaited || mustChooseVariant) {
         VideoLoadingOverlay()
     } else {
         // One player per chapter: switching episodes releases and rebuilds.
@@ -314,7 +349,11 @@ private fun VideoReadyContent(
                 AppSettings.setVideoVariantForBook(source.bookUrl, quality)
                 qualityPickerOpen = false
             },
-            onClose = { qualityPickerOpen = false },
+            onClose = {
+                qualityPickerOpen = false
+                // Dismissing the chooser for a dead default means "play anyway".
+                if (selectedDead) dismissedDeadUrl = stream.url
+            },
         )
     }
 }
@@ -350,10 +389,18 @@ private fun VideoSurface(
     val context = LocalContext.current
     val view = LocalView.current
     val isPortrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
-    // Same cache the offline downloads wrote into; misses still hit the
-    // network through the OkHttp upstream.
-    val dataSourceFactory = remember(stream.url, headers, videoDownloads) {
-        videoDownloads.cacheDataSourceFactory(headers)
+    // Downloaded episodes play from the download cache (offline); every other
+    // stream goes through the bounded 256 MiB playback cache (5.4).
+    val downloadItems by videoDownloads.downloads.collectAsState()
+    val isDownloaded = remember(downloadItems, source.bookUrl, source.chapterIndex) {
+        downloadItems.any {
+            it.bookUrl == source.bookUrl &&
+                it.chapterIndex == source.chapterIndex &&
+                it.state == VideoDownloadState.Completed
+        }
+    }
+    val dataSourceFactory = remember(stream.url, headers, videoDownloads, isDownloaded) {
+        videoDownloads.cacheDataSourceFactory(headers, fromDownloads = isDownloaded)
     }
 
     var settingsOpen by remember { mutableStateOf(false) }

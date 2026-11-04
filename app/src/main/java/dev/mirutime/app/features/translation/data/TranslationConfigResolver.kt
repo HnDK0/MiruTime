@@ -1,5 +1,7 @@
 package dev.mirutime.app.features.translation.data
 
+import dev.mirutime.app.features.book.data.PluginBookIndex
+
 import dev.mirutime.app.features.settings.data.TranslationConfig
 import dev.mirutime.app.features.settings.data.TranslationPair
 import dev.mirutime.translator.ProviderId
@@ -183,3 +185,12 @@ internal fun pluginIdOf(bookUrl: String): String {
     val rest = bookUrl.substringAfter("://", bookUrl)
     return rest.substringBefore('/').ifBlank { bookUrl }
 }
+
+/**
+ * Real source id of a book for per-plugin settings. Plugins serve their own
+ * page URLs, so the host is NOT the plugin id; prefer the URL→plugin index and
+ * only fall back to the URL host when the book was never indexed this process
+ * (FR-023). The fallback keeps pre-existing behavior for local/legacy URLs.
+ */
+internal fun translationSourceId(bookUrl: String): String =
+    PluginBookIndex.sourceFor(bookUrl) ?: pluginIdOf(bookUrl)

@@ -38,7 +38,9 @@ class MetadataConfigTest {
     }
 
     @Test
-    fun `standard scope yields no metadata config`() {
-        assertNull(store("GEMINI", full = false))
+    fun `standard scope also yields a metadata config`() {
+        // Chapter titles translate whenever translation is on with a pair, not
+        // only for a FULL override (FR-112).
+        assertNotNull(store("GEMINI", full = false))
     }
 }

@@ -4,11 +4,8 @@ package dev.mirutime.app.features.finder.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -17,6 +14,8 @@ import androidx.compose.ui.res.stringResource
 import dev.mirutime.app.R
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
+import dev.mirutime.uikit.MiruButton
+import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.SheetSection
 import dev.mirutime.app.features.finder.domain.ExtensionFilters
@@ -36,17 +35,36 @@ fun ExtensionFilterSheet(
 ) {
     var draft by remember { mutableStateOf(applied) }
 
-    // Immediate filters: every chip applies to the list behind the sheet,
-    // the sheet stays open, Close is the only footer action. The inline
-    // search owns the query; never write a stale copy back.
-    LaunchedEffect(draft) {
-        onApply(draft.copy(query = applied.query))
-    }
-
+    // Draft-only until Apply (FR-035): chips edit the draft, Close discards.
+    // The inline search owns the query; never write a stale copy back.
     AppBottomSheet(
         title = stringResource(R.string.finder_ext_sheet_title),
         description = stringResource(R.string.finder_ext_sheet_desc),
         onClose = onClose,
+        doneLabel = stringResource(R.string.finder_apply),
+        onDone = {
+            onApply(draft.copy(query = applied.query))
+            onClose()
+        },
+        // One Reset standard: the sheet header carries it (template:
+        // CatalogFilterSheet). Reset clears the filters but keeps the query.
+        headerAction = {
+            MiruButton(
+                onClick = {
+                    draft = draft.copy(
+                        types = emptySet(),
+                        languages = emptySet(),
+                        status = ExtensionStatus.Any,
+                    )
+                },
+                style = MiruButtonStyle.Secondary,
+                enabled = draft.types.isNotEmpty() ||
+                    draft.languages.isNotEmpty() ||
+                    draft.status != ExtensionStatus.Any,
+            ) {
+                Text(text = stringResource(R.string.finder_reset))
+            }
+        },
     ) {
         SheetSection(title = stringResource(R.string.finder_btn_type)) {
             FlowRow(
@@ -110,23 +128,6 @@ fun ExtensionFilterSheet(
                     }
                 }
             }
-        }
-        TextButton(
-            onClick = {
-                draft = draft.copy(
-                    types = emptySet(),
-                    languages = emptySet(),
-                    status = ExtensionStatus.Any,
-                )
-            },
-            enabled = draft.types.isNotEmpty() ||
-                draft.languages.isNotEmpty() ||
-                draft.status != ExtensionStatus.Any,
-        ) {
-            Text(
-                text = stringResource(R.string.finder_reset),
-                style = MaterialTheme.typography.labelLarge,
-            )
         }
     }
 }

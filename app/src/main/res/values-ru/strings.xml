@@ -473,6 +473,11 @@
     <string name="dash_history">История</string>
     <string name="dash_history_desc">Что вы читали недавно</string>
     <string name="dash_history_empty">Пока пусто. Здесь появятся книги, которые вы откроете.</string>
+    <string name="dash_history_clear_all">Удалить всё</string>
+    <string name="dash_history_delete_title">Удалить запись истории?</string>
+    <string name="dash_history_delete_desc_fmt">Удалить записи истории (%1$d)? Книги, прогресс чтения и загрузки останутся.</string>
+    <string name="dash_history_clear_title">Очистить всю историю?</string>
+    <string name="dash_history_clear_desc">Будут удалены все записи истории. Книги, прогресс чтения и загрузки останутся.</string>
     <string name="dash_show_history">Вся история</string>
     <string name="dash_new">NEW</string>
     <string name="dash_up_to_date">Всё актуально.</string>
@@ -581,7 +586,7 @@
     <string name="finder_sheet_title">Поиск и фильтры</string>
     <string name="finder_sheet_desc">Один запрос: текст и фильтры. Если у плагина нет API фильтров, они применяются только к загруженной странице.</string>
     <string name="finder_sheet_desc_local">Поиск по каталогу папок с фильтром по формату файла.</string>
-    <string name="finder_sheet_desc_plugin">Фильтры, объявленные источником. Изменения применяются сразу; запрос — по Search.</string>
+    <string name="finder_sheet_desc_plugin">Фильтры, объявленные источником. Выберите фильтры и нажмите Apply.</string>
     <string name="finder_filters_search_hint">Некоторые фильтры могут не применяться к поиску в этом источнике.</string>
     <string name="finder_search_language_hint_zh">Поиск на китайском (например, 诡秘之主)</string>
     <string name="finder_apply">Применить</string>
@@ -709,9 +714,10 @@
     <string name="finder_link_found_fmt">Найдено в %1$s</string>
     <string name="finder_link_unknown_fmt">Ни один установленный источник не обрабатывает %1$s.</string>
     <string name="finder_link_install_fmt">Установить %1$s</string>
-    <string name="finder_link_no_plugin">Подходящего плагина нет и в репозитории.</string>
     <string name="finder_link_invalid">Это не похоже на веб-ссылку.</string>
-    <string name="finder_link_source_error_fmt">%1$s не смог загрузить ссылку: %2$s</string>
+    <string name="finder_link_batch_blocked">Сначала исправьте эти ссылки:</string>
+    <string name="finder_link_batch_ready_fmt">Готово к добавлению: %1$d</string>
+    <string name="finder_link_added_count_fmt">Добавлено %1$d из %2$d</string>
     <string name="finder_action_check_update">Проверить обновление</string>
     <string name="finder_action_check_update_sub">Спросить репозиторий о новой версии</string>
     <string name="finder_action_edit">Редактор плагина</string>

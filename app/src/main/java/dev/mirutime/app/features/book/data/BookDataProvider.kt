@@ -75,6 +75,15 @@ interface BookDataProvider {
     suspend fun refreshCover(bookUrl: String): Outcome<String?> = Outcome.Ok(null)
 
     /**
+     * Explicit metadata refresh (FR-011/FR-012/FR-013): re-fetches title,
+     * author, description, rating and cover from the source and writes the
+     * changed fields, preserving membership, shelf, progress and read flags.
+     * A field the source no longer returns keeps its stored value (never wiped);
+     * `Err` carries the typed plugin failure so the page can explain it.
+     */
+    suspend fun refreshMetadata(bookUrl: String): Outcome<Unit> = Outcome.Ok(Unit)
+
+    /**
      * Optional cheap update probe (NoveLA getChapterListHash): a plugin that
      * exposes a chapter-list hash lets the library update skip the full list
      * when the hash is unchanged. Null = plugin has no hash; callers fall back

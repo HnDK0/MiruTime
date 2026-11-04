@@ -7,7 +7,9 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 
 data class UpdateCheckSummary(
@@ -38,6 +40,10 @@ class LibraryUpdateService(
 ) {
     suspend fun checkAll(
         onProgress: (UpdateProgress) -> Unit = {},
+    ): UpdateCheckSummary = updateGate.withLock { runCheckAll(onProgress) }
+
+    private suspend fun runCheckAll(
+        onProgress: (UpdateProgress) -> Unit,
     ): UpdateCheckSummary {
         // A shelf can opt out of update checks; honoring it here keeps the
         // worker and the manual "check now" action consistent.
@@ -92,7 +98,9 @@ class LibraryUpdateService(
     }
 
     /** Refresh one book; returns the number of newly discovered chapters. */
-    suspend fun checkBook(bookUrl: String): Int {
+    suspend fun checkBook(bookUrl: String): Int = updateGate.withLock { runCheckBook(bookUrl) }
+
+    private suspend fun runCheckBook(bookUrl: String): Int {
         val row = library.book(bookUrl) ?: return 0
         if (row.isLocalOnly() || row.shelfId in excludedShelfIds()) return 0
         return when (
@@ -164,5 +172,14 @@ class LibraryUpdateService(
         data object NoChange : UpdateResult
         data class Failed(val error: PluginError?, val sourceId: String) : UpdateResult
         data class Updated(val newChapters: Int) : UpdateResult
+    }
+
+    private companion object {
+        /**
+         * One check run at a time per process. The badge accumulates deltas, so
+         * a background worker and the Updates screen firing together would both
+         * read the old total and count the same new chapters twice.
+         */
+        val updateGate = Mutex()
     }
 }

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
@@ -500,6 +501,9 @@ fun MiruShell(
         NavHost(
             navController = navController,
             startDestination = MiruDestination.Dashboard.route,
+            // Every destination (not only bottom sheets) lifts above the IME, so
+            // full-screen text forms never have their fields/actions covered.
+            modifier = Modifier.imePadding(),
             // Tab switches read as a quick settle, not a muddy blend: the old
             // screen fades out fast while shrinking a touch, the new one
             // fades in at full size. Same curve everywhere incl. drill-ins.
@@ -648,10 +652,19 @@ fun MiruShell(
                 BackupSettingsScreen(contentPadding = padding)
             }
             composable(SettingsRoutes.About) { AboutSettingsScreen(contentPadding = padding) }
-            composable("finder/search") {
+            composable(
+                route = "finder/search?q={q}",
+                arguments = listOf(
+                    navArgument("q") {
+                        type = NavType.StringType
+                        defaultValue = ""
+                    },
+                ),
+            ) { entry ->
                 GlobalSearchScreen(
                     contentPadding = padding,
                     provider = pluginProvider,
+                    initialQuery = entry.arguments?.getString("q")?.let(Uri::decode).orEmpty(),
                     onBookOpen = { bookUrl ->
                         navController.navigate("book/${Uri.encode(bookUrl)}")
                     },
@@ -683,6 +696,7 @@ fun MiruShell(
                     initialQuery = entry.arguments?.getString("q")?.let(Uri::decode).orEmpty(),
                     contentPadding = padding,
                     provider = pluginProvider,
+                    readerGraph = readerGraph,
                     onBookOpen = { bookUrl ->
                         navController.navigate("book/${Uri.encode(bookUrl)}")
                     },
@@ -788,7 +802,11 @@ fun MiruShell(
                             ),
                         )
                     },
-                    onOpenSearch = { navController.navigate("finder/search") },
+                    // Tapping a book title searches its ORIGINAL name and starts
+                    // immediately, even when the title is displayed translated.
+                    onOpenSearch = { query ->
+                        navController.navigate("finder/search?q=${Uri.encode(query)}")
+                    },
                     migration = migrationGraph,
                     onOpenBook = { targetUrl ->
                         navController.navigate("book/${Uri.encode(targetUrl)}")
@@ -869,10 +887,16 @@ fun MiruShell(
                 ),
             ) { entry ->
                 val bookUrl = entry.arguments?.getString("bookUrl")?.let(Uri::decode).orEmpty()
+                // rememberSaveable survives process death: on re-entry the flag
+                // is already true, so the reader restores its saved anchor
+                // instead of the chapter the route was first opened on.
+                var openedBefore by rememberSaveable { mutableStateOf(false) }
+                LaunchedEffect(Unit) { openedBefore = true }
                 ReaderScreen(
                     bookUrl = bookUrl,
                     startChapterIndex = entry.arguments?.getInt("chapterIndex") ?: 1,
                     restoreSaved = entry.arguments?.getBoolean("restore") ?: false,
+                    reopened = openedBefore,
                     onBack = { navController.popBackStack() },
                     onOpenRegex = { novelUrl ->
                         navController.navigate("${SettingsRoutes.Regex}?novel=${Uri.encode(novelUrl)}")

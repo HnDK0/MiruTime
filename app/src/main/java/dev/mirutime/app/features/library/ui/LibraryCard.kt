@@ -38,7 +38,7 @@ fun LibraryCard(
 ) {
     val catalog = compactInfo
     val kind = if (showTypeChip && !catalog) book.contentType.toMiruKind() else null
-    val read = if (catalog) null else book.readChapters
+    val read = if (catalog) null else book.progressChapter
     val total = if (catalog) null else book.totalChapters
     val effectiveMembership = membership
         ?: if (!badge.isNullOrBlank()) MiruMembershipBadge(sameSource = true, sourceCount = 1) else null

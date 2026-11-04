@@ -12,7 +12,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,17 +70,18 @@ fun MigrationFilterSheet(
     )
     val selectedSources = sources.filter { it.id in draftSelected }
 
-    // Immediate source selection + transfer options: the parent gets every
-    // change, the sheet stays open, Close is the only footer action. The
-    // search/language/type fields filter the local source list only.
-    LaunchedEffect(draftSelected, draftOptions) {
-        onApply(migrationSelectedSourceIds(draftSelected, sources), draftOptions)
-    }
-
+    // Draft-only until Apply (FR-035): source selection + transfer options are
+    // a draft; the parent only sees the committed set on Apply, Close discards.
+    // The search/language/type fields filter the local source list only.
     AppBottomSheet(
         title = stringResource(R.string.migration_filter_title),
         description = stringResource(R.string.migration_filter_desc),
         onClose = onClose,
+        doneLabel = stringResource(R.string.finder_apply),
+        onDone = {
+            onApply(migrationSelectedSourceIds(draftSelected, sources), draftOptions)
+            onClose()
+        },
         // 55% body keeps the visible surface (handle + margins + 200% footer)
         // at/under 70%; content still scrolls.
         maxHeightFraction = 0.55f,

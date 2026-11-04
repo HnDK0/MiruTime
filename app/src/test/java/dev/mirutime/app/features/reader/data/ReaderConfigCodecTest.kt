@@ -1,5 +1,7 @@
 package dev.mirutime.app.features.reader.data
 
+import dev.mirutime.feature.reader.MangaPagedNavigation
+import dev.mirutime.feature.reader.MangaReaderStyle
 import dev.mirutime.feature.reader.MangaReadingMode
 import dev.mirutime.feature.reader.ReaderStyle
 import kotlinx.serialization.json.Json
@@ -91,5 +93,23 @@ class ReaderConfigCodecTest {
         val legacy = mangaStyleFromJson(buildJsonObject { put("brightness", 0.8f) })
         assertEquals(MangaReadingMode.Paged, legacy.mode)
         assertEquals(0.8f, legacy.brightness, 0.001f)
+    }
+
+    @Test
+    fun `manga navigation and viewer toggles survive a round trip`() {
+        val style = MangaReaderStyle.Default.copy(
+            pagedNavigation = MangaPagedNavigation.TapEdges,
+            pageTransition = false,
+        )
+        val decoded = mangaStyleFromJson(mangaStyleToJson(style))
+        assertEquals(MangaPagedNavigation.TapEdges, decoded.pagedNavigation)
+        assertEquals(false, decoded.pageTransition)
+    }
+
+    @Test
+    fun `legacy manga style defaults the new viewer toggles`() {
+        val legacy = mangaStyleFromJson(buildJsonObject { put("mode", "Paged") })
+        assertEquals(MangaPagedNavigation.Both, legacy.pagedNavigation)
+        assertEquals(true, legacy.pageTransition)
     }
 }

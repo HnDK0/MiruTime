@@ -50,7 +50,8 @@ class VideoSourceRepository(
         }
 
         val chapters = provider.chapters(bookUrl)
-        val streams = offlineStream(bookUrl, chapterIndex)?.let(::listOf)
+        val offline = offlineStream(bookUrl, chapterIndex)
+        val streams = offline?.let(::listOf)
             ?: when (val result = provider.videoStreams(bookUrl, chapterIndex)) {
                 is Outcome.Ok -> result.value
                 is Outcome.Err -> return VideoLoadResult.Error(result.error.videoMessage())
@@ -81,6 +82,7 @@ class VideoSourceRepository(
                 streams = streams,
                 episodes = episodes,
                 startPositionMs = savedPosition(bookUrl, chapterIndex),
+                offline = offline != null,
             ),
         )
     }

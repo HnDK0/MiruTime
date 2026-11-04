@@ -17,4 +17,10 @@ interface DashboardDataProvider {
     suspend fun updates(): List<UpdateItem>
     suspend fun history(limit: Int): List<HistoryEntry>
     suspend fun fullHistory(): List<HistoryEntry>
+
+    /** Removes the selected history records; books and their state are kept (FR-063/FR-065). */
+    suspend fun deleteHistory(bookUrls: List<String>)
+
+    /** Clears every history record; books and their state are kept (FR-063/FR-065). */
+    suspend fun clearHistory()
 }

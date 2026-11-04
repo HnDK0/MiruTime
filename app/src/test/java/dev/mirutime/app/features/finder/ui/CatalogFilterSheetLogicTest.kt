@@ -29,57 +29,6 @@ class CatalogFilterSheetLogicTest {
     private val defaults = pluginFilterDefaults(schema)
 
     @Test
-    fun `first composition never applies`() {
-        assertFalse(
-            CatalogFilterEmission.shouldApply(
-                previous = null,
-                current = CatalogFilters(),
-                userEdited = false,
-            ),
-        )
-        assertFalse(
-            CatalogFilterEmission.shouldApply(
-                previous = null,
-                current = CatalogFilters(query = "dragon"),
-                userEdited = false,
-            ),
-        )
-    }
-
-    @Test
-    fun `schema arrival never applies`() {
-        val seeded = CatalogFilters().withPluginDraft(schema, defaults)
-
-        assertFalse(
-            CatalogFilterEmission.shouldApply(
-                previous = CatalogFilters(),
-                current = seeded,
-                userEdited = false,
-            ),
-        )
-    }
-
-    @Test
-    fun `a user edit applies once and an unchanged draft does not`() {
-        val edited = CatalogFilters(pluginValues = mapOf("kind" to listOf("all")))
-
-        assertTrue(
-            CatalogFilterEmission.shouldApply(
-                previous = CatalogFilters(),
-                current = edited,
-                userEdited = true,
-            ),
-        )
-        assertFalse(
-            CatalogFilterEmission.shouldApply(
-                previous = edited,
-                current = edited,
-                userEdited = true,
-            ),
-        )
-    }
-
-    @Test
     fun `reset is enabled for stale plugin values under an empty schema`() {
         val applied = CatalogFilters(pluginValues = mapOf("ghost_included" to listOf("x")))
 

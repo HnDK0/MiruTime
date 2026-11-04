@@ -78,7 +78,7 @@ class ChapterBulkTranslator(
 /** The same mode resolution the reader uses; kept here for the bulk caller. */
 fun activeTranslationMode(bookUrl: String): TranslationMode? = translationMode(
     novel = AppSettings.novelTranslation[bookUrl],
-    plugin = AppSettings.pluginTranslation[pluginIdOf(bookUrl)],
+    plugin = AppSettings.pluginTranslation[translationSourceId(bookUrl)],
     globalEnabled = AppSettings.translationGlobalMode,
     globalSource = AppSettings.globalSource,
     globalTarget = AppSettings.globalTarget,

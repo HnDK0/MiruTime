@@ -33,7 +33,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -67,16 +66,6 @@ import dev.mirutime.app.features.finder.domain.withPluginDraft
 // Pure decision table of the filter sheet, kept out of the composable so the
 // "no request on open/schema" contract is unit-testable.
 internal object CatalogFilterEmission {
-    // `previous == null` means the sheet was just opened: the caller already
-    // holds those filters, so re-applying them would duplicate the catalogue
-    // request. A schema that arrives later re-seeds the draft without a user
-    // edit and must not apply either.
-    fun shouldApply(
-        previous: CatalogFilters?,
-        current: CatalogFilters,
-        userEdited: Boolean,
-    ): Boolean = userEdited && previous != current
-
     // Reset is reachable while the sheet differs from the reset state, and
     // while the applied snapshot still carries plugin values the current
     // schema no longer declares (they have to be cleared somehow).
@@ -146,21 +135,6 @@ fun CatalogFilterSheet(
     val activePreset = remember(presets, presetSnapshot) {
         presets.firstOrNull { it.filters == presetSnapshot }
     }
-    // The query is a text form: it applies on IME Search, not each keystroke.
-    // Every other filter commits immediately; Close only dismisses.
-    val filterKey = currentFilters.copy(query = "")
-    // null = nothing emitted yet (the sheet just opened): first composition
-    // and schema seeding must not fire a catalogue request.
-    var lastEmitted by remember { mutableStateOf<CatalogFilters?>(null) }
-    var userEdited by remember { mutableStateOf(false) }
-    LaunchedEffect(filterKey, userEdited) {
-        if (CatalogFilterEmission.shouldApply(lastEmitted, currentFilters, userEdited)) {
-            lastEmitted = currentFilters
-            onApply(currentFilters)
-        }
-        userEdited = false
-    }
-
     val canReset = CatalogFilterEmission.canReset(
         applied = applied,
         draft = draft,
@@ -168,22 +142,25 @@ fun CatalogFilterSheet(
         pluginDraft = pluginDraft,
         pluginDefaults = pluginDefaults,
     )
+    // Draft-only until Apply: opening the sheet or seeding the schema never
+    // fires a catalogue request, and every control change stays local (FR-035).
     AppBottomSheet(
         title = stringResource(R.string.finder_sheet_title),
         description = stringResource(
             if (local) R.string.finder_sheet_desc_local else R.string.finder_sheet_desc_plugin,
         ),
         onClose = onClose,
+        doneLabel = stringResource(R.string.finder_apply),
+        onDone = {
+            onApply(currentFilters)
+            onClose()
+        },
         headerAction = {
-            // Reset always means the blank filters: it clears stale plugin
-            // values too, and emits exactly one request.
+            // Reset only edits the draft; it does not apply until Apply.
             MiruButton(
                 onClick = {
                     draft = CatalogFilters()
                     if (!local) pluginDraft = pluginDefaults
-                    userEdited = false
-                    lastEmitted = CatalogFilters()
-                    onApply(CatalogFilters())
                 },
                 style = MiruButtonStyle.Secondary,
                 enabled = canReset,
@@ -215,9 +192,9 @@ fun CatalogFilterSheet(
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(
                 onSearch = {
-                    lastEmitted = currentFilters
-                    userEdited = false
+                    // Search is an explicit apply of the current draft.
                     onApply(currentFilters)
+                    onClose()
                 },
             ),
             shape = MaterialTheme.shapes.small,
@@ -253,7 +230,6 @@ fun CatalogFilterSheet(
                     if (!local) {
                         pluginDraft = preset.filters.toPluginFilterDraft(schema)
                     }
-                    userEdited = true
                 },
                 onDeletePreset = { name -> onDeletePreset(name) },
                 onStartSave = { savingPreset = true },
@@ -403,7 +379,6 @@ fun CatalogFilterSheet(
                 genres = genres,
                 onDraftChange = {
                     draft = it
-                    userEdited = true
                 },
             )
         } else {
@@ -427,7 +402,6 @@ fun CatalogFilterSheet(
                         textHistory = textHistory[filter.key].orEmpty(),
                         onChange = { updated ->
                             pluginDraft = pluginDraft + (filter.key to updated)
-                            userEdited = true
                         },
                     )
                 }

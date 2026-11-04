@@ -176,6 +176,88 @@ class PluginBookDataProvider(
         return Outcome.Ok(store.ensureCover(row.bookId, sourceId, coverUrl, force = true))
     }
 
+    // Explicit metadata refresh: the same fields loadBook writes, but always
+    // re-fetched and written back. A blank field keeps its stored value so a
+    // source hiccup (or a genuinely absent field) never wipes data (FR-012);
+    // membership, shelf, progress and read flags come from the existing row.
+    override suspend fun refreshMetadata(bookUrl: String): Outcome<Unit> {
+        if (LocalBookProvider.isLocalBook(bookUrl) || isLocalFileBook(bookUrl)) {
+            return Outcome.Ok(Unit)
+        }
+        val sourceId = PluginBookIndex.sourceFor(bookUrl)
+            ?: return Outcome.Err(PluginError.ScriptError("metadata source unavailable"))
+        val source = pluginSourceFor(sourceId)
+            ?: return Outcome.Err(PluginError.ScriptError("metadata source unavailable"))
+        val existing = library?.book(sourceId, bookUrl) ?: library?.book(bookUrl)
+            ?: return Outcome.Err(PluginError.ScriptError("book is not stored"))
+        val meta = when (val result = source.book(bookUrl)) {
+            is Outcome.Err -> {
+                pluginErrors[bookUrl] = result.error as? PluginError
+                    ?: PluginError.ScriptError(result.error::class.simpleName ?: "unknown error")
+                return Outcome.Err(result.error)
+            }
+            is Outcome.Ok -> result.value
+        }
+        pluginErrors.remove(bookUrl)
+        pluginMeta[bookUrl] = meta
+        val baseUrl = source.metadata.baseUrl
+        val title = meta.title.trim().ifBlank {
+            PluginBookIndex.titleFor(bookUrl) ?: source.metadata.name
+        }
+        val coverUrl = resolveCoverUrl(meta.coverUrl, baseUrl)
+        graphOrNull?.registerCoverReferers(sourceId, listOfNotNull(coverUrl), baseUrl)
+        val timestamp = now()
+        val readCount = library?.readChapterIndexes(existing.bookId)?.size ?: 0
+        val freshRating = parsePluginRating(meta.rating)
+        val built = BookDetails(
+            bookUrl = bookUrl,
+            title = title,
+            source = source.metadata.name.ifBlank { hostOf(bookUrl) },
+            author = meta.author?.takeIf { it.isNotBlank() }
+                ?: existing.authorRaw.ifBlank { existing.author }.ifBlank { "Unknown" },
+            originLanguage = meta.extras["language"]?.takeIf { it.isNotBlank() }
+                ?: meta.extras["originLanguage"]?.takeIf { it.isNotBlank() }
+                ?: existing.originLanguage,
+            contentType = source.metadata.contentType.toAppType(),
+            // A freshly parsed rating wins; a blank one keeps the stored value
+            // instead of wiping it, so "refresh restores, never erases".
+            rating = mergedRating(freshRating, existing.rating.toFloat()),
+            ongoing = pluginStatusOngoing(meta.status),
+            updatedLabel = meta.lastUpdated.orEmpty(),
+            totalChapters = existing.totalChapters,
+            readCount = readCount,
+            readMinutes = 0,
+            ttsMinutes = 0,
+            inLibrary = existing.inLibrary,
+            shelfId = existing.shelfId,
+            genres = (meta.genres + extraTags(meta.extras)).distinct(),
+            description = mergedText(meta.description, existing.description),
+            sourceUrl = resolveCoverUrl(bookUrl, baseUrl) ?: bookUrl,
+            authUrl = null,
+            chapters = emptyList(),
+            reviews = emptyList(),
+            coverUrl = coverUrl ?: existing.coverUrl,
+        )
+        library?.saveBook(buildEntity(bookUrl, sourceId, built, meta, existing, timestamp))
+        library?.let { repo -> saveTags(repo, existing.bookId, meta, timestamp) }
+        PluginBookIndex.put(bookUrl, sourceId)
+        PluginBookIndex.putTitle(bookUrl, title)
+        // Re-download the cover file only when the source exposes a URL; a
+        // failed fetch keeps the previous file (BookCoverStore).
+        if (coverUrl != null) {
+            coverStore?.ensureCover(existing.bookId, sourceId, coverUrl, force = true)
+        }
+        details.remove(bookUrl)
+        MiruLog.event(
+            "book",
+            "metadata-refresh",
+            "book" to MiruLog.idHash(bookUrl),
+            "rating" to built.rating,
+            "cover" to (coverUrl != null),
+        )
+        return Outcome.Ok(Unit)
+    }
+
     override suspend fun ensureHistoryBook(bookUrl: String) {
         if (isLocalFileBook(bookUrl)) {
             ensureLocalSafHistory(bookUrl)
@@ -1583,6 +1665,21 @@ class PluginBookDataProvider(
                 details[bookUrl] = it.copy(inLibrary = true, shelfId = row.shelfId)
             }
             MembershipResult(success = true)
+        }
+        // The library card shows the chapter count/progress as soon as the
+        // caller reloads the library. Metadata-only add leaves totalChapters=0,
+        // and the async enrichment would finish AFTER that reload, so the card
+        // stayed empty. Fetch the list once here (cached when the book page
+        // already loaded it) before returning; a failure still lets the add
+        // succeed and the update service fills the list later.
+        if (result.success && !result.superseded && !localBook) {
+            try {
+                chapters(bookUrl)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Best-effort: the card keeps its progress once chapters land.
+            }
         }
         // Chapters/cover/tags never delay the visible membership state.
         if (result.success && !result.superseded && !localBook) enqueueEnrichment(bookUrl)

@@ -41,7 +41,7 @@ fun AppReaderTranslationPanel(
     var config by remember(bookUrl) {
         mutableStateOf(s.novelTranslation[bookUrl] ?: NovelTranslation())
     }
-    val plugin = s.pluginTranslation[pluginIdOf(bookUrl)]
+    val plugin = s.pluginTranslation[dev.mirutime.app.features.translation.data.translationSourceId(bookUrl)]
     val level = when {
         config.enabled -> R.string.rd_level_novel
         plugin?.enabled == true -> R.string.rd_level_plugin

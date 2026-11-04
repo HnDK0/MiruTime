@@ -3,13 +3,17 @@
 package dev.mirutime.app.features.video.data
 
 import android.content.Context
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteOpenHelper
 import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.database.DatabaseProvider
 import androidx.media3.database.ExoDatabaseProvider
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.datasource.okhttp.OkHttpDataSource
@@ -63,6 +67,14 @@ class VideoDownloadManager(
     private val appContext = context.applicationContext
     private val databaseProvider = ExoDatabaseProvider(appContext)
     private val cache = SimpleCache(videoDir, NoOpCacheEvictor(), databaseProvider)
+    // Streaming gets its own bounded cache: playback bytes must not grow the
+    // download directory and must not create download marks (5.4). It lives in
+    // cacheDir and is capped at 256 MiB with LRU eviction.
+    private val playbackCache = SimpleCache(
+        File(appContext.cacheDir, PLAYBACK_CACHE_DIR_NAME),
+        LeastRecentlyUsedCacheEvictor(PLAYBACK_CACHE_BYTES),
+        NamedDatabaseProvider(appContext, PLAYBACK_CACHE_DB_NAME),
+    )
     private val index = DefaultDownloadIndex(databaseProvider)
     private val executor: Executor = Executors.newFixedThreadPool(MAX_PARALLEL_DOWNLOADS)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -113,10 +125,17 @@ class VideoDownloadManager(
     /**
      * The player reads through the same cache; a completed download is served
      * locally and a missing span still falls back to the network.
+     *
+     * `fromDownloads` selects the download cache for episodes that were fully
+     * downloaded (offline playback); every other stream reads/writes the
+     * bounded playback cache so streaming never inflates the download dir.
      */
-    fun cacheDataSourceFactory(headers: Map<String, String>): CacheDataSource.Factory =
+    fun cacheDataSourceFactory(
+        headers: Map<String, String>,
+        fromDownloads: Boolean = false,
+    ): CacheDataSource.Factory =
         CacheDataSource.Factory()
-            .setCache(cache)
+            .setCache(if (fromDownloads) cache else playbackCache)
             .setUpstreamDataSourceFactory(
                 OkHttpDataSource.Factory(client).setDefaultRequestProperties(headers),
             )
@@ -357,6 +376,9 @@ class VideoDownloadManager(
 
     companion object {
         const val DIR_NAME = "video_downloads"
+        const val PLAYBACK_CACHE_DIR_NAME = "video_playback_cache"
+        private const val PLAYBACK_CACHE_DB_NAME = "video_playback_cache.db"
+        private const val PLAYBACK_CACHE_BYTES = 256L * 1024 * 1024
         private const val MAX_PARALLEL_DOWNLOADS = 2
         private const val MAX_RETRIES = 3
         private const val STOP_REASON_PAUSED = 1
@@ -491,6 +513,24 @@ internal object VideoDownloadData {
 
     private fun decodePart(value: String): String =
         URLDecoder.decode(value, Charsets.UTF_8.name())
+}
+
+private const val PLAYBACK_DB_VERSION = 3
+
+/** A media3 DatabaseProvider bound to a caller-chosen database file. ExoPlayer's
+ *  fixed-name providers cannot back two SimpleCache instances at once. */
+private class NamedDatabaseProvider(
+    context: Context,
+    private val name: String,
+) : SQLiteOpenHelper(context.applicationContext, name, null, PLAYBACK_DB_VERSION),
+    DatabaseProvider {
+    override fun getWritableDatabase(): SQLiteDatabase = super.getWritableDatabase()
+
+    override fun getReadableDatabase(): SQLiteDatabase = super.getReadableDatabase()
+
+    override fun onCreate(db: SQLiteDatabase) = Unit
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
 }
 
 /** One downloader per request so its cached spans carry the stream headers. */

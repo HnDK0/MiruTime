@@ -1267,7 +1267,9 @@ private fun SkeletonCoverGrid(columns: Int) {
 @Composable
 private fun ResumeCard(book: LibraryBook, onOpen: () -> Unit) {
     val title = book.translatedTitle ?: book.title
-    val progress = book.readChapters.toFloat() / book.totalChapters.coerceAtLeast(1)
+    // Position-based progress: the saved chapter Continue restores, not the
+    // number of fully finished chapters.
+    val progress = book.progressChapter.toFloat() / book.totalChapters.coerceAtLeast(1)
     val percent = (progress * 100).roundToInt()
     Surface(
         shape = MaterialTheme.shapes.medium,
@@ -1308,7 +1310,7 @@ private fun ResumeCard(book: LibraryBook, onOpen: () -> Unit) {
                 Text(
                     text = stringResource(
                         R.string.lib_resume_meta_fmt,
-                        book.readChapters,
+                        book.progressChapter,
                         book.totalChapters,
                         book.sourceLabel,
                         book.lastReadLabel,
@@ -1440,8 +1442,9 @@ private fun SortDirection.flip(): SortDirection = when (this) {
     SortDirection.Desc -> SortDirection.Asc
 }
 
-// Big filter sheet: every control applies immediately; the sheet stays open
-// and only Close dismisses it. There is no draft/Apply step.
+// Big filter sheet. Filters (sort, sources, genres, type) stay a draft until
+// Apply; appearance settings (layout, columns, card style) apply immediately
+// (FR-035 / 6.3). Close discards the filter draft.
 @Composable
 private fun FilterSheet(
     sort: LibrarySort,
@@ -1464,41 +1467,55 @@ private fun FilterSheet(
     onColumns: (Int) -> Unit,
     onCardStyle: (CardStyle) -> Unit,
 ) {
+    var draftSort by remember { mutableStateOf(sort) }
+    var draftSortDir by remember { mutableStateOf(sortDir) }
+    var draftSources by remember { mutableStateOf(selSources) }
+    var draftGenres by remember { mutableStateOf(genres) }
+    var draftType by remember { mutableStateOf(type) }
     AppBottomSheet(
         title = stringResource(R.string.lib_filter_title),
         description = stringResource(R.string.lib_filter_desc),
         onClose = onClose,
+        doneLabel = stringResource(R.string.finder_apply),
+        onDone = {
+            onSort(draftSort, draftSortDir)
+            onSources(draftSources)
+            onGenres(draftGenres)
+            onType(draftType)
+            onClose()
+        },
         // 55% body keeps the visible surface (handle + margins + 200% footer)
         // at/under 70%; content still scrolls.
         maxHeightFraction = 0.55f,
     ) {
         if (sortEnabled) {
             SheetSection(title = stringResource(R.string.lib_section_sort), initiallyExpanded = true) {
-                SortOptions(sort = sort, sortDir = sortDir) { option ->
-                    onSort(
-                        option,
-                        if (option == sort) sortDir.flip() else sortDir,
-                    )
+                SortOptions(sort = draftSort, sortDir = draftSortDir) { option ->
+                    if (option == draftSort) {
+                        draftSortDir = draftSortDir.flip()
+                    } else {
+                        draftSort = option
+                    }
                 }
             }
         }
         SheetSection(title = stringResource(R.string.lib_section_source), initiallyExpanded = false) {
             SourcesOptions(
-                selected = selSources,
+                selected = draftSources,
                 all = sources,
                 onToggle = {
-                    onSources(if (it in selSources) selSources - it else selSources + it)
+                    draftSources = if (it in draftSources) draftSources - it else draftSources + it
                 },
-                onClearAll = { onSources(emptySet()) },
+                onClearAll = { draftSources = emptySet() },
             )
         }
         SheetSection(title = stringResource(R.string.lib_section_genres), initiallyExpanded = false) {
-            GenresOptions(selected = genres, all = allGenres) {
-                onGenres(if (it in genres) genres - it else genres + it)
+            GenresOptions(selected = draftGenres, all = allGenres) {
+                draftGenres = if (it in draftGenres) draftGenres - it else draftGenres + it
             }
         }
         SheetSection(title = stringResource(R.string.lib_section_type), initiallyExpanded = false) {
-            TypeOptions(type = type) { onType(it) }
+            TypeOptions(type = draftType) { draftType = it }
         }
         SheetSection(title = stringResource(R.string.lib_section_grid), initiallyExpanded = false) {
             Text(

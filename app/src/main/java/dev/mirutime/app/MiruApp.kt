@@ -377,7 +377,9 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             translationsFor = { bookUrl, chapterUrl, html ->
                 val mode = translationMode(
                     novel = AppSettings.novelTranslation[bookUrl],
-                    plugin = AppSettings.pluginTranslation[pluginIdOf(bookUrl)],
+                    plugin = AppSettings.pluginTranslation[
+                        dev.mirutime.app.features.translation.data.translationSourceId(bookUrl)
+                    ],
                     globalEnabled = AppSettings.translationGlobalMode,
                     globalSource = AppSettings.globalSource,
                     globalTarget = AppSettings.globalTarget,

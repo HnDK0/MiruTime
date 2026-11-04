@@ -482,6 +482,11 @@
     <string name="dash_history">History</string>
     <string name="dash_history_desc">What you read most recently</string>
     <string name="dash_history_empty">Nothing here yet. Books you open will show up here.</string>
+    <string name="dash_history_clear_all">Delete all</string>
+    <string name="dash_history_delete_title">Delete history?</string>
+    <string name="dash_history_delete_desc_fmt">Remove %1$d history records? Books, reading progress and downloads stay.</string>
+    <string name="dash_history_clear_title">Clear all history?</string>
+    <string name="dash_history_clear_desc">Every history record is removed. Books, reading progress and downloads stay.</string>
     <string name="dash_show_history">Show all history</string>
     <string name="dash_new">NEW</string>
     <string name="dash_up_to_date">Everything is up to date.</string>
@@ -568,7 +573,7 @@
     <string name="finder_sheet_title">Search and filters</string>
     <string name="finder_sheet_desc">One request: the query plus the filters. If a plugin has no filter API, filters apply to the loaded page only.</string>
     <string name="finder_sheet_desc_local">Search this folder catalogue and filter by file format.</string>
-    <string name="finder_sheet_desc_plugin">Filters declared by this source. Changes apply immediately; the query applies on Search.</string>
+    <string name="finder_sheet_desc_plugin">Filters declared by this source. Choose filters, then Apply.</string>
     <string name="finder_filters_search_hint">Some filters may not apply to search on this source.</string>
     <string name="finder_search_language_hint_zh">Search in Chinese (e.g. 诡秘之主)</string>
     <string name="finder_apply">Apply</string>
@@ -696,9 +701,10 @@
     <string name="finder_link_found_fmt">Found in %1$s</string>
     <string name="finder_link_unknown_fmt">No installed source handles %1$s.</string>
     <string name="finder_link_install_fmt">Install %1$s</string>
-    <string name="finder_link_no_plugin">No plugin for this site in the repository either.</string>
     <string name="finder_link_invalid">This does not look like a web link.</string>
-    <string name="finder_link_source_error_fmt">%1$s could not load this link: %2$s</string>
+    <string name="finder_link_batch_blocked">Fix these links first:</string>
+    <string name="finder_link_batch_ready_fmt">Ready to add: %1$d</string>
+    <string name="finder_link_added_count_fmt">Added %1$d of %2$d</string>
     <string name="finder_action_check_update">Check for updates</string>
     <string name="finder_action_check_update_sub">Ask the repository for a newer version</string>
     <string name="finder_action_edit">Edit plugin</string>

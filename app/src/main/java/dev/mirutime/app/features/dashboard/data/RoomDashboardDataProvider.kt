@@ -106,11 +106,21 @@ class RoomDashboardDataProvider(
 
     override suspend fun fullHistory(): List<HistoryEntry> {
         val timestamp = now()
-        val rows = library.history(Int.MAX_VALUE)
+        // A real cap: the History screen is a list, and an unbounded read grows
+        // with the library. 500 covers any practical history.
+        val rows = library.history(MaxHistoryRows)
         if (rows.isEmpty()) return emptyList()
         val batch = batch(rows)
         return rows.map { it.toHistoryEntry(timestamp, batch) }
     }
+
+    override suspend fun deleteHistory(bookUrls: List<String>) {
+        if (bookUrls.isEmpty()) return
+        val ids = library.bookIdsByUrls(bookUrls).values.toList()
+        if (ids.isNotEmpty()) library.deleteHistory(ids)
+    }
+
+    override suspend fun clearHistory() = library.clearHistory()
 
     private data class DashboardBatch(
         val stats: Map<Long, BookReadStats>,
@@ -178,3 +188,6 @@ internal fun dashboardCoverUrl(
 
 private fun hostOf(url: String): String =
     runCatching { URI(url).host.orEmpty() }.getOrNull().orEmpty()
+
+/** Upper bound for the full History screen; see [RoomDashboardDataProvider.fullHistory]. */
+private const val MaxHistoryRows = 500

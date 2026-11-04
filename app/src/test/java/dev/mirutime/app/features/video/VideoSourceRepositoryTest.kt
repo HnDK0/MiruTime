@@ -62,6 +62,8 @@ class VideoSourceRepositoryTest {
         // not called a second time.
         assertEquals("https://site/show/1", ready.source.streams.single().headers["Referer"])
         assertEquals(0, provider.videoStreamCalls)
+        // The player uses this to exempt offline playback from the DEAD probe.
+        assertTrue(ready.source.offline)
     }
 
     @Test

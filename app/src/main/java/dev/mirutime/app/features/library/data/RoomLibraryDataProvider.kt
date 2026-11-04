@@ -420,6 +420,7 @@ internal fun mapLibraryBookRow(
             .getOrDefault(ContentType.Novel),
         totalChapters = entity.totalChapters,
         readChapters = readCount,
+        progressChapter = lastIndex,
         hasUpdate = entity.newChapters > 0,
         newChapters = entity.newChapters,
         shelfId = entity.shelfId,

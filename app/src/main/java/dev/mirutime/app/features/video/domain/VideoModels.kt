@@ -51,6 +51,8 @@ data class VideoChapterSource(
     val episodes: List<VideoEpisode>,
     /** Resumed position for this episode; 0 when never watched. */
     val startPositionMs: Long,
+    /** True when the streams come from a completed explicit download. */
+    val offline: Boolean = false,
 ) {
     private val position: Int
         get() = episodes.indexOfFirst { it.index == chapterIndex }

@@ -35,7 +35,7 @@ internal fun MetadataConfig.storeKey(): MetadataTranslationKey = MetadataTransla
  * not parse. The controller never touches settings itself (JVM-testable).
  */
 fun metadataConfigFor(bookUrl: String): MetadataConfig? {
-    val plugin = AppSettings.pluginTranslation[pluginIdOf(bookUrl)]
+    val plugin = AppSettings.pluginTranslation[translationSourceId(bookUrl)]
     val mode = translationMode(
         novel = AppSettings.novelTranslation[bookUrl],
         plugin = plugin,
@@ -44,7 +44,10 @@ fun metadataConfigFor(bookUrl: String): MetadataConfig? {
         globalTarget = AppSettings.globalTarget,
         globalProvider = AppSettings.provider,
     ) ?: return null
-    if (!mode.full || !mode.hasPair) return null
+    // Titles/description translate whenever translation is ON with a complete
+    // pair, including the standard/global scope — not only a book/plugin FULL
+    // override (FR-112).
+    if (!mode.hasPair) return null
 
     val target = runCatching { LanguageCode.parse(mode.target) }.getOrNull() ?: return null
     val source = runCatching { LanguageCode.parse(mode.source) }.getOrNull()

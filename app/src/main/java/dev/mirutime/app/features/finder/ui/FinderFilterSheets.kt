@@ -21,7 +21,6 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +37,8 @@ import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
+import dev.mirutime.uikit.MiruButton
+import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.app.features.finder.domain.BrowseFilters
 import dev.mirutime.app.features.finder.domain.CatalogSource
@@ -94,6 +95,17 @@ fun BrowseFilterSheet(
             if (kind != BrowseSheetKind.Pins) onApply(draft)
             onClose()
         },
+        // One Reset standard: the sheet header carries it (template:
+        // CatalogFilterSheet), only for the kinds with something to reset.
+        headerAction = when (kind) {
+            BrowseSheetKind.Type -> {
+                { ResetHeaderButton(draft.types.isNotEmpty()) { draft = draft.copy(types = emptySet()) } }
+            }
+            BrowseSheetKind.Language -> {
+                { ResetHeaderButton(draft.languages.isNotEmpty()) { draft = draft.copy(languages = emptySet()) } }
+            }
+            else -> null
+        },
     ) {
         when (kind) {
             BrowseSheetKind.Type -> {
@@ -112,9 +124,6 @@ fun BrowseFilterSheet(
                             label = typeLabel(type),
                         )
                     }
-                }
-                ResetButton(enabled = draft.types.isNotEmpty()) {
-                    draft = draft.copy(types = emptySet())
                 }
             }
             BrowseSheetKind.Language -> {
@@ -144,9 +153,6 @@ fun BrowseFilterSheet(
                     color = extra.muted,
                     modifier = Modifier.padding(top = MiruSpace.S),
                 )
-                ResetButton(enabled = draft.languages.isNotEmpty()) {
-                    draft = draft.copy(languages = emptySet())
-                }
             }
             BrowseSheetKind.Sort -> {
                 SourceSort.entries.forEach { sort ->
@@ -270,11 +276,12 @@ fun BrowseFilterSheet(
 }
 
 @Composable
-private fun ResetButton(enabled: Boolean, onClick: () -> Unit) {
-    TextButton(onClick = onClick, enabled = enabled) {
-        Text(
-            text = stringResource(R.string.finder_reset),
-            style = MaterialTheme.typography.labelLarge,
-        )
+private fun ResetHeaderButton(enabled: Boolean, onClick: () -> Unit) {
+    MiruButton(
+        onClick = onClick,
+        style = MiruButtonStyle.Secondary,
+        enabled = enabled,
+    ) {
+        Text(text = stringResource(R.string.finder_reset))
     }
 }
