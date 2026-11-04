@@ -592,3 +592,29 @@ data class BookMigrationEntity(
     val createdAt: Long,
     val finishedAt: Long? = null,
 )
+
+/**
+ * Independent reading-history record: exactly one row per book, kept apart from
+ * [BookEntity.lastReadAt] so deleting history never changes the library, its
+ * sort key, the saved position, read flags or downloads (FR-061/FR-065).
+ * `readAt` mirrors the last read time; `chapterIndex`/`chapterId` are the
+ * chapter the user was on when it was recorded.
+ */
+@Entity(
+    tableName = "history",
+    foreignKeys = [
+        ForeignKey(
+            entity = BookEntity::class,
+            parentColumns = ["bookId"],
+            childColumns = ["bookId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("readAt")],
+)
+data class HistoryEntity(
+    @PrimaryKey val bookId: Long,
+    val readAt: Long,
+    val chapterIndex: Int? = null,
+    val chapterId: Long? = null,
+)

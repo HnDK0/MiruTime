@@ -91,7 +91,7 @@ class LibraryMigrationTest {
         val migrated = buildLibraryDatabase(libraryDatabaseBuilder(file))
         try {
             val repository = LibraryRepository(migrated.libraryDao())
-            assertEquals(9, LibrarySchemaVersion)
+            assertEquals(10, LibrarySchemaVersion)
             assertEquals("https://migrate.test/book", repository.book(bookId)?.url)
             assertEquals(chapterId, repository.chapters(bookId).single().chapterId)
 
@@ -223,7 +223,7 @@ class LibraryMigrationTest {
         }
 
         BundledSQLiteDriver().open(file.absolutePath).use { connection ->
-            assertEquals(9, connection.long("PRAGMA user_version").toInt())
+            assertEquals(10, connection.long("PRAGMA user_version").toInt())
             assertEquals(5, connection.long("SELECT COUNT(*) FROM books").toInt())
             assertEquals(5003, connection.long("SELECT COUNT(*) FROM chapters").toInt())
             listOf(
@@ -415,7 +415,7 @@ class LibraryMigrationTest {
         }
 
         BundledSQLiteDriver().open(file.absolutePath).use { connection ->
-            assertEquals(9, connection.long("PRAGMA user_version").toInt())
+            assertEquals(10, connection.long("PRAGMA user_version").toInt())
             assertEquals(1, connection.long("SELECT COUNT(*) FROM video_progress").toInt())
             assertTrue(connection.indexExists("index_video_progress_bookId", "video_progress"))
         }
@@ -455,8 +455,86 @@ class LibraryMigrationTest {
         }
 
         BundledSQLiteDriver().open(file.absolutePath).use { connection ->
-            assertEquals(9, connection.long("PRAGMA user_version").toInt())
+            assertEquals(10, connection.long("PRAGMA user_version").toInt())
             assertEquals(0, connection.long("SELECT COUNT(*) FROM video_progress").toInt())
+        }
+    }
+
+    @Test
+    fun `migration 9 to 10 backfills independent history and keeps book state`() = runTest {
+        val file = File(tempDir(), "migrate-v9.db")
+        var bookId: Long
+        var chapterId: Long
+
+        val created = buildLibraryDatabase(libraryDatabaseBuilder(file))
+        try {
+            val repository = LibraryRepository(created.libraryDao())
+            bookId = repository.saveBook(book("https://v9.test/book"))
+            chapterId = repository.replaceChapters(
+                bookId,
+                listOf(ChapterSeed(1, "https://v9.test/book/1", "One")),
+                at = 1L,
+            ).single().chapterId
+            repository.touchHistory(bookId, chapterId, 1, at = 5_000L)
+            repository.saveProgress(ProgressEntity(bookId, chapterId, 3, 40, 2, 0, false, 7L, 8L))
+            repository.markChapterRead(bookId, 1, true, at = 6_000L)
+        } finally {
+            created.close()
+        }
+
+        downgradeToV9(file)
+
+        val migrated = buildLibraryDatabase(libraryDatabaseBuilder(file))
+        try {
+            val repository = LibraryRepository(migrated.libraryDao())
+            // Backfilled from books.lastReadAt: exactly one row, before anything
+            // is deleted.
+            assertEquals(listOf(bookId), repository.history(10).map { it.bookId })
+        } finally {
+            migrated.close()
+        }
+
+        // The history row itself is not exposed as a BookEntity, so the carried
+        // chapter is checked straight from the table.
+        BundledSQLiteDriver().open(file.absolutePath).use { connection ->
+            assertEquals(5_000L, connection.long("SELECT readAt FROM history WHERE bookId = $bookId"))
+            assertEquals(1L, connection.long("SELECT chapterIndex FROM history WHERE bookId = $bookId"))
+            assertEquals(chapterId, connection.long("SELECT chapterId FROM history WHERE bookId = $bookId"))
+        }
+
+        val reopened = buildLibraryDatabase(libraryDatabaseBuilder(file))
+        try {
+            val repository = LibraryRepository(reopened.libraryDao())
+            // Deleting history removes only the history row.
+            repository.deleteHistory(bookId)
+            assertEquals(0, repository.history(10).size)
+            assertEquals("https://v9.test/book", repository.book(bookId)?.url)
+            assertEquals(5_000L, repository.book(bookId)?.lastReadAt)
+            assertEquals(40, repository.progress(bookId)?.charOffset)
+            assertEquals(1, repository.readChapterStats()[bookId]?.readCount)
+        } finally {
+            reopened.close()
+        }
+
+        BundledSQLiteDriver().open(file.absolutePath).use { connection ->
+            assertEquals(10, connection.long("PRAGMA user_version").toInt())
+            // The list row was deleted, but the backfill/index remain valid and
+            // the book itself is intact.
+            assertEquals(0, connection.long("SELECT COUNT(*) FROM history").toInt())
+            assertEquals(1, connection.long("SELECT COUNT(*) FROM books").toInt())
+            assertTrue(connection.indexExists("index_history_readAt", "history"))
+        }
+    }
+
+    private fun downgradeToV9(file: File) {
+        BundledSQLiteDriver().open(file.absolutePath).use { connection ->
+            connection.exec("DROP INDEX index_history_readAt")
+            connection.exec("DROP TABLE history")
+            connection.exec("PRAGMA user_version = 9")
+            connection.exec(
+                "UPDATE room_master_table SET identity_hash = " +
+                    "'117dd4519b1602322a7e187aa9956185' WHERE id = 42",
+            )
         }
     }
 

@@ -35,7 +35,17 @@ object LibraryMigrations {
         migrateV8ToV9(connection)
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+    /**
+     * Schema v10: additive history table. One row per book, backfilled from
+     * `books.lastReadAt`; the book columns stay the library's sort key, so
+     * deleting history rows never touches the library (FR-061/FR-065).
+     */
+    val MIGRATION_9_10: Migration = Migration(9, 10) { connection ->
+        migrateV9ToV10(connection)
+    }
+
+    val ALL: Array<Migration> =
+        arrayOf(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
 }
 
 /**
@@ -116,6 +126,7 @@ private fun migrateBackupSteps(connection: SQLiteConnection, fromVersion: Int) {
     if (fromVersion < 7) migrateV6ToV7(connection)
     if (fromVersion < 8) migrateV7ToV8(connection)
     if (fromVersion < 9) migrateV8ToV9(connection)
+    if (fromVersion < 10) migrateV9ToV10(connection)
 }
 
 private fun migrateV6ToV7(connection: SQLiteConnection) {
@@ -251,16 +262,51 @@ private fun migrateV8ToV9(connection: SQLiteConnection) {
 }
 
 /**
+ * v10 byte-for-byte matches [LibraryMigrations.MIGRATION_9_10]: additive table
+ * and index, plus a one-time backfill from the denormalized `books` columns.
+ * Historical rows are preserved; only the new history table is written.
+ */
+private fun migrateV9ToV10(connection: SQLiteConnection) {
+    connection.exec(
+        "CREATE TABLE IF NOT EXISTS history (" +
+            "bookId INTEGER NOT NULL, " +
+            "readAt INTEGER NOT NULL, " +
+            "chapterIndex INTEGER, " +
+            "chapterId INTEGER, " +
+            "PRIMARY KEY(bookId), " +
+            "FOREIGN KEY(bookId) REFERENCES books(bookId) " +
+            "ON UPDATE NO ACTION ON DELETE CASCADE)",
+    )
+    connection.exec(
+        "CREATE INDEX IF NOT EXISTS index_history_readAt ON history (readAt)",
+    )
+    // Backfill only when the source columns are present: a minimal/legacy
+    // snapshot without them must still migrate (and simply start with no
+    // history). Real v6+ databases always carry these columns.
+    val bookColumns = connection.columns("books")
+    if ("lastReadAt" !in bookColumns) return
+    val chapterIndexExpr = if ("lastChapterIndex" in bookColumns) "lastChapterIndex" else "NULL"
+    val chapterIdExpr = if ("lastChapterId" in bookColumns) "lastChapterId" else "NULL"
+    // Idempotent: bookId is the PK, so re-running (e.g. a re-opened backup)
+    // cannot duplicate; only books that were read get a row.
+    connection.exec(
+        "INSERT OR IGNORE INTO history(bookId, readAt, chapterIndex, chapterId) " +
+            "SELECT bookId, lastReadAt, $chapterIndexExpr, $chapterIdExpr " +
+            "FROM books WHERE lastReadAt IS NOT NULL",
+    )
+}
+
+/**
  * Room refuses to open a migrated file whose `room_master_table` still carries
  * an older hash. The live import opens the staged database through Room, so the
- * migrator publishes the current identity itself. `9.json` is the source of
+ * migrator publishes the current identity itself. `10.json` is the source of
  * truth.
  */
 private fun updateRoomIdentity(connection: SQLiteConnection) {
     if (!connection.tableExists("room_master_table")) return
     connection.exec(
         "INSERT OR REPLACE INTO room_master_table (id, identity_hash) " +
-            "VALUES (42, '$V9_IDENTITY_HASH')",
+            "VALUES (42, '$V10_IDENTITY_HASH')",
     )
 }
 
@@ -303,9 +349,20 @@ private fun verifyRestoredDatabase(connection: SQLiteConnection, expectedVersion
             error("Migrated database is missing index $index on $table")
         }
     }
+    REQUIRED_V10_TABLES.forEach { table ->
+        if (!connection.tableExists(table)) {
+            error("Migrated database is missing table $table")
+        }
+    }
+    REQUIRED_V10_INDEXES.forEach { (index, table) ->
+        if (!connection.indexExists(index, table)) {
+            error("Migrated database is missing index $index on $table")
+        }
+    }
 }
 
 private const val V9_IDENTITY_HASH = "117dd4519b1602322a7e187aa9956185"
+private const val V10_IDENTITY_HASH = "5290005f22d81a551a46b9dd80932d07"
 
 private val REQUIRED_V7_TABLES = listOf(
     "books",
@@ -337,6 +394,12 @@ private val REQUIRED_V9_TABLES = listOf("video_progress")
 
 private val REQUIRED_V9_INDEXES = mapOf(
     "index_video_progress_bookId" to "video_progress",
+)
+
+private val REQUIRED_V10_TABLES = listOf("history")
+
+private val REQUIRED_V10_INDEXES = mapOf(
+    "index_history_readAt" to "history",
 )
 
 private fun SQLiteConnection.exec(sql: String) {

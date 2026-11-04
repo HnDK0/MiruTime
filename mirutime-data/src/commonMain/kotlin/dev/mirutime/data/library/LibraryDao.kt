@@ -226,11 +226,26 @@ interface LibraryDao {
     )
     suspend fun setChaptersReadForBookUrls(urls: List<String>, read: Boolean, at: Long): Int
 
+    // Independent history: the history table owns the list and its order, so
+    // deleting a history row never affects the library sort (books.lastReadAt)
+    // or any other book state (FR-061/FR-065).
     @Query(
-        "SELECT * FROM books WHERE lastReadAt IS NOT NULL " +
-            "ORDER BY lastReadAt DESC LIMIT :limit",
+        "SELECT b.* FROM books b INNER JOIN history h ON h.bookId = b.bookId " +
+            "ORDER BY h.readAt DESC LIMIT :limit",
     )
     suspend fun history(limit: Int): List<BookEntity>
+
+    @Upsert
+    suspend fun upsertHistory(row: HistoryEntity)
+
+    @Query("DELETE FROM history WHERE bookId = :bookId")
+    suspend fun deleteHistory(bookId: Long)
+
+    @Query("DELETE FROM history WHERE bookId IN (:bookIds)")
+    suspend fun deleteHistoryFor(bookIds: List<Long>)
+
+    @Query("DELETE FROM history")
+    suspend fun clearHistory()
 
     @Upsert
     suspend fun upsertBook(book: BookEntity): Long
@@ -326,8 +341,13 @@ interface LibraryDao {
     @Query("UPDATE books SET totalChapters = :total WHERE bookId = :bookId")
     suspend fun updateTotalChapters(bookId: Long, total: Int)
 
+    // `newChapters` is the UNSEEN badge: it accumulates newly detected chapters
+    // and is only cleared by markUpdatesSeen. A later no-change run must never
+    // zero a badge the user has not looked at yet (FR-098/FR-099); the delta is
+    // measured against the previously recorded total, so it cannot double-count.
     @Query(
-        "UPDATE books SET totalChapters = :total, newChapters = :newChapters, " +
+        "UPDATE books SET totalChapters = :total, " +
+            "newChapters = newChapters + :newChapters, " +
             "chapterListHash = COALESCE(:hash, chapterListHash), " +
             "lastUpdateCheckAt = :at, " +
             "lastUpdateAt = CASE WHEN :newChapters > 0 THEN :at ELSE lastUpdateAt END, " +
@@ -357,6 +377,28 @@ interface LibraryDao {
         chapterIndex: Int?,
         at: Long,
     )
+
+    /**
+     * Moves "last read" for the library sort and records the independent
+     * history row in one transaction, so the two never disagree (FR-061).
+     */
+    @Transaction
+    suspend fun touchHistoryAndRecord(
+        bookId: Long,
+        chapterId: Long?,
+        chapterIndex: Int?,
+        at: Long,
+    ) {
+        touchHistory(bookId, chapterId, chapterIndex, at)
+        upsertHistory(
+            HistoryEntity(
+                bookId = bookId,
+                readAt = at,
+                chapterIndex = chapterIndex,
+                chapterId = chapterId,
+            ),
+        )
+    }
 
     @Query(
         "UPDATE books SET url = :newBase || SUBSTR(url, LENGTH(:oldBase) + 1), " +

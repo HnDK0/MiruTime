@@ -121,6 +121,9 @@ class LibraryRepositoryTest {
         val saved = book("https://site/book/2", inLibrary = true, lastReadAt = 20L)
         repository.saveBook(historical)
         repository.saveBook(saved)
+        // History is its own table now; a touch records the independent row.
+        repository.touchHistory(historical.bookUrl, chapterIndex = 1, at = 10L)
+        repository.touchHistory(saved.bookUrl, chapterIndex = 1, at = 20L)
 
         assertEquals(listOf(saved.bookUrl), repository.libraryBooks().map { it.bookUrl })
         assertEquals(listOf(saved.bookUrl, historical.bookUrl), repository.history(10).map { it.bookUrl })
@@ -160,6 +163,7 @@ class LibraryRepositoryTest {
         repository.replaceChapters(firstId, listOf(ChapterSeed(12, "${first.bookUrl}/12", "Twelve")), at = 1L)
 
         repository.touchHistory(first.bookUrl, chapterIndex = 12, at = 30L)
+        repository.touchHistory(second.bookUrl, chapterIndex = 1, at = 20L)
 
         val history = repository.history(10)
         assertEquals(listOf(first.bookUrl, second.bookUrl), history.map { it.bookUrl })
@@ -345,6 +349,28 @@ class LibraryRepositoryTest {
         repository.markUpdatesSeen(bookId, at = 200L)
         assertEquals(0, repository.book(bookId)?.newChapters)
         assertTrue(repository.booksWithUpdates().isEmpty())
+    }
+
+    @Test
+    fun `update check keeps the unseen badge and accumulates new chapters`() = runTest {
+        val book = book("https://site/book/updates2", inLibrary = true, lastReadAt = null)
+        repository.saveBook(book)
+        val bookId = repository.book(book.bookUrl)!!.bookId
+
+        repository.recordUpdateCheck(bookId, total = 100, newChapters = 3, hash = "h1", at = 1L)
+        assertEquals(3, repository.book(bookId)?.newChapters)
+
+        // A later no-change run must NOT erase the unseen badge.
+        repository.recordUpdateCheck(bookId, total = 100, newChapters = 0, hash = "h1", at = 2L)
+        assertEquals(3, repository.book(bookId)?.newChapters)
+        assertEquals(listOf(bookId), repository.booksWithUpdates().map { it.bookId })
+
+        // A further delta accumulates on top of the unseen count.
+        repository.recordUpdateCheck(bookId, total = 105, newChapters = 5, hash = "h2", at = 3L)
+        assertEquals(8, repository.book(bookId)?.newChapters)
+
+        repository.markUpdatesSeen(bookId, at = 4L)
+        assertEquals(0, repository.book(bookId)?.newChapters)
     }
 
     @Test

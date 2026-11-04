@@ -549,13 +549,27 @@ class LibraryRepository(private val dao: LibraryDao) {
         dao.bookByUrl(bookUrl)?.let { dao.inLibrary(it.bookId) == true } == true
 
     suspend fun touchHistory(bookId: Long, chapterId: Long?, chapterIndex: Int?, at: Long) =
-        dao.touchHistory(bookId, chapterId, chapterIndex, at)
+        dao.touchHistoryAndRecord(bookId, chapterId, chapterIndex, at)
 
     suspend fun touchHistory(bookUrl: String, chapterIndex: Int, at: Long) {
         val book = dao.bookByUrl(bookUrl) ?: return
         val chapter = dao.chapterByIndex(book.bookId, chapterIndex)
-        dao.touchHistory(book.bookId, chapter?.chapterId, chapterIndex, at)
+        dao.touchHistoryAndRecord(book.bookId, chapter?.chapterId, chapterIndex, at)
     }
+
+    /** Deletes one history record; the book, progress and library are untouched. */
+    suspend fun deleteHistory(bookId: Long) = dao.deleteHistory(bookId)
+
+    /** Deletes the selected history records; other book state is untouched. */
+    suspend fun deleteHistory(bookIds: List<Long>) {
+        bookIds.distinct().chunked(SqliteIdChunk).forEach { chunk ->
+            currentCoroutineContext().ensureActive()
+            dao.deleteHistoryFor(chunk)
+        }
+    }
+
+    /** Clears every history record; books and their state stay in place. */
+    suspend fun clearHistory() = dao.clearHistory()
 
     // --- chapters ------------------------------------------------------------
 
