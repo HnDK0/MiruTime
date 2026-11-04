@@ -62,6 +62,15 @@ class TtsController(
      */
     val chapterRequests: SharedFlow<TtsChapterDirection> = _chapterRequests.asSharedFlow()
 
+    /**
+     * True only while the pending chapter request came from the queue finishing
+     * the chapter (auto-next). A manual skip clears it first, so the reader
+     * never marks a chapter read the user skipped through (FR-082/FR-083).
+     */
+    @Volatile
+    var chapterEndedNaturally: Boolean = false
+        private set
+
     private var ready = false
     private var pending: (() -> Unit)? = null
     private var chunks: List<TtsChunk> = emptyList()
@@ -97,12 +106,14 @@ class TtsController(
         blockIndex: Int?,
         charOffset: Int = 0,
     ) {
-        applySavedSettings()
         val next = TtsChunker.chunks(document, translations)
         if (next.isEmpty()) {
             setState(TtsState(status = TtsStatus.Failed, message = "Nothing to read"))
             return
         }
+        // A session speaks one language: pick the matching original/translated
+        // voice slot before the engine is prepared (FR-041).
+        applySavedSettings(next.firstOrNull()?.translated == true)
         stopInternal(keepStatus = true)
         chunks = next
         rebuildChunkCharStats()
@@ -125,6 +136,49 @@ class TtsController(
         } else {
             speakFrom(current)
         }
+    }
+
+    /**
+     * Moves the cursor to [blockIndex] while keeping the transport state: a
+     * paused session only moves its cursor/highlight and stays paused, while a
+     * playing one re-queues from the new block. The mini player's paragraph
+     * arrows use this so a pause is never silently undone (FR-051).
+     */
+    fun seekToBlock(
+        document: ReaderDocument,
+        translations: Map<Int, String> = emptyMap(),
+        blockIndex: Int,
+        charOffset: Int = 0,
+    ) {
+        if (_state.value.status != TtsStatus.Paused) {
+            playFrom(document, translations, blockIndex, charOffset)
+            return
+        }
+        val next = TtsChunker.chunks(document, translations)
+        if (next.isEmpty()) {
+            setState(TtsState(status = TtsStatus.Failed, message = "Nothing to read"))
+            return
+        }
+        applySavedSettings(next.firstOrNull()?.translated == true)
+        stopInternal(keepStatus = true)
+        pending = null
+        chunks = next
+        rebuildChunkCharStats()
+        bookUrl = document.bookUrl
+        chapterIndex = document.chapterIndex
+        current = ttsStartIndex(next, blockIndex, charOffset)
+        active = false
+        MiruLog.event(
+            "tts",
+            "seek",
+            "chunks" to next.size,
+            "chapter" to document.chapterIndex,
+            "block" to blockIndex,
+            "startChunk" to current,
+        )
+        // Never starts speech: resume() is what moves a paused session.
+        setState(chunkState(current, TtsStatus.Paused))
+        persist(wasPlaying = false, immediate = true)
     }
 
     /**
@@ -158,7 +212,29 @@ class TtsController(
         return true
     }
 
+    /**
+     * True only while the pause came from audio-focus loss (call, navigation
+     * prompt). Every explicit pause path — notification, headset media button,
+     * becoming-noisy, user — clears it, so a later focus gain can never undo a
+     * user pause (FR-045/FR-046).
+     */
+    @Volatile
+    var pausedByFocusLoss: Boolean = false
+        private set
+
     fun pause() {
+        pausedByFocusLoss = false
+        pauseInternal()
+    }
+
+    /** Pause caused by a transient audio-focus loss; a focus gain may resume it. */
+    fun pauseForFocusLoss() {
+        if (!active && _state.value.status != TtsStatus.Loading) return
+        pausedByFocusLoss = true
+        pauseInternal()
+    }
+
+    private fun pauseInternal() {
         if (!active && _state.value.status != TtsStatus.Loading) return
         pending = null
         invalidateUtterances()
@@ -169,6 +245,7 @@ class TtsController(
     }
 
     fun resume() {
+        pausedByFocusLoss = false
         if (chunks.isEmpty()) return
         active = true
         applyPlaybackSettings()
@@ -223,6 +300,9 @@ class TtsController(
 
     private fun requestChapter(direction: TtsChapterDirection) {
         if (chunks.isEmpty()) return
+        // Manual skip: never a natural end, even when the cursor sits on the
+        // last chunk (atEnd would be true there anyway).
+        chapterEndedNaturally = false
         active = false
         pending = null
         invalidateUtterances()
@@ -242,6 +322,7 @@ class TtsController(
     }
 
     fun stop() {
+        pausedByFocusLoss = false
         active = false
         pending = null
         invalidateUtterances()
@@ -274,11 +355,17 @@ class TtsController(
     fun updateSettings(settings: TtsSettings) {
         val previous = _settings.value
         val sanitized = settings.sanitized()
-        val playbackChanged = ttsPlaybackChanged(previous, sanitized)
-        val engineChanged = previous.sanitized().engineId != sanitized.engineId
+        // The session speaks one language: edits apply to that slot.
+        val sessionTranslated = chunks.firstOrNull()?.translated == true
+        val previousSelection = previous.sanitized().voiceForSession(sessionTranslated)
+        val nextSelection = sanitized.voiceForSession(sessionTranslated)
+        // Only the slot this session speaks can affect playback: editing the
+        // other language's voice must not restart the current chunk.
+        val playbackChanged = ttsPlaybackChanged(previous, sanitized, sessionTranslated)
+        val engineChanged = previousSelection.engineId != nextSelection.engineId
         _settings.value = sanitized
         settingsStore.save(sanitized)
-        voiceId = sanitized.voiceId
+        voiceId = nextSelection.voiceId
         speed = sanitized.speed
         pitch = sanitized.pitch
 
@@ -290,7 +377,7 @@ class TtsController(
                 setState(chunkState(current, TtsStatus.Loading))
                 pending = { speakFrom(current) }
             }
-            val reinitializing = applyEngine(sanitized.engineId)
+            val reinitializing = applyEngine(nextSelection.engineId)
             if (!reinitializing) {
                 // Already on the requested engine (e.g. explicit default id);
                 // no readiness callback will arrive, so resume now.
@@ -344,7 +431,7 @@ class TtsController(
             setState(TtsState())
             return
         }
-        applySavedSettings()
+        applySavedSettings(chunks.firstOrNull()?.translated == true)
         invalidateUtterances()
         setState(chunkState(current, TtsStatus.Loading))
         if (ready) {
@@ -445,6 +532,7 @@ class TtsController(
     }
 
     private fun stopInternal(keepStatus: Boolean) {
+        pausedByFocusLoss = false
         active = false
         invalidateUtterances()
         engine.stop()
@@ -463,13 +551,14 @@ class TtsController(
         pending = null
     }
 
-    private fun applySavedSettings() {
+    private fun applySavedSettings(translated: Boolean = false) {
         val saved = settingsStore.load().sanitized()
         _settings.value = saved
-        voiceId = saved.voiceId
+        val selection = saved.voiceForSession(translated)
+        voiceId = selection.voiceId
         speed = saved.speed
         pitch = saved.pitch
-        applyEngine(saved.engineId)
+        applyEngine(selection.engineId)
         applyPlaybackSettings()
         publishCapabilities()
     }
@@ -567,6 +656,7 @@ class TtsController(
             if (_settings.value.autoNextChapter) {
                 // Keep the status active across the chapter load so the
                 // foreground service is not torn down between chapters.
+                chapterEndedNaturally = true
                 setState(
                     _state.value.copy(
                         status = TtsStatus.Loading,

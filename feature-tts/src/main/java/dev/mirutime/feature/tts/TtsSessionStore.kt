@@ -66,10 +66,14 @@ class PrefsTtsSessionStore(context: Context) : TtsSessionStore {
         const val KEY_FLOATING_GLOW = "settings_floating_glow"
         const val KEY_FLOATING_PARAGRAPH_MODE = "settings_floating_paragraph_mode"
         const val KEY_SAVED_VOICES = "settings_saved_voices"
+        const val KEY_TRANSLATED_VOICE_ID = "settings_translated_voice_id"
+        const val KEY_TRANSLATED_ENGINE_ID = "settings_translated_engine_id"
         val BackupKeys = setOf(
             KEY_SESSION,
             KEY_VOICE_ID,
             KEY_ENGINE_ID,
+            KEY_TRANSLATED_VOICE_ID,
+            KEY_TRANSLATED_ENGINE_ID,
             KEY_SPEED,
             KEY_PITCH,
             KEY_AUTO_NEXT,

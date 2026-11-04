@@ -33,22 +33,20 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.CenterFocusStrong
-import androidx.compose.material.icons.filled.CenterFocusWeak
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.outlined.Bookmarks
 import androidx.compose.material.icons.outlined.RecordVoiceOver
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -84,6 +82,8 @@ import dev.mirutime.feature.tts.R
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
+import dev.mirutime.uikit.MiruButton
+import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSlider
 import dev.mirutime.uikit.SettingsSwitchRow
@@ -129,33 +129,24 @@ private enum class TtsOverlay { Voices, SavedVoices, DeleteSavedVoice }
 @Composable
 fun TtsMiniPlayer(
     status: TtsStatus,
-    chapterTitle: String,
-    sentencePreview: String?,
-    sentenceNumber: Int,
-    chunkCount: Int,
-    chapterNumber: Int,
-    chapterCount: Int,
     chapterPercent: Int,
-    atEnd: Boolean,
     onToggle: () -> Unit,
     onStop: () -> Unit,
     onStartHere: () -> Unit,
     onFocus: () -> Unit,
+    onPrevParagraph: () -> Unit,
+    onNextParagraph: () -> Unit,
     modifier: Modifier = Modifier,
-    showSentence: Boolean = true,
-    sentenceMaxLines: Int = 1,
 ) {
     val playing = status == TtsStatus.Playing || status == TtsStatus.Loading
     val session = playing || status == TtsStatus.Paused
-    val statusLabel = ttsStatusLabel(status, atEnd)
-    val progress = if (chunkCount > 0) {
-        (sentenceNumber.toFloat() / chunkCount).coerceIn(0f, 1f)
-    } else {
-        chapterPercent / 100f
-    }
+    val progress = (chapterPercent / 100f).coerceIn(0f, 1f)
     val shape = RoundedCornerShape(18.dp)
     val accent = MaterialTheme.colorScheme.primary
 
+    // Thin bar: playback + Start here/Focus/Next chapter, one 2dp progress line.
+    // Chapter title and text progress are deliberately absent — the reader
+    // already shows them (FR-054/FR-055).
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -169,166 +160,94 @@ fun TtsMiniPlayer(
                 ),
             )
             .border(1.dp, accent.copy(alpha = 0.16f), shape)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 8.dp, vertical = 3.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TtsPlayPauseButton(
                 playing = playing,
                 onClick = onToggle,
-                size = 44.dp,
-                iconSize = 24.dp,
+                size = 40.dp,
+                iconSize = 22.dp,
             )
-            Spacer(Modifier.width(MiruSpace.M))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val chapterPosition = ttsChapterLabel(chapterNumber, chapterCount)
-                    if (chapterPosition.isNotEmpty()) {
-                        Text(
-                            text = chapterPosition,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
-                    }
-                    Text(
-                        text = if (chapterPosition.isEmpty()) statusLabel else " · $statusLabel",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (status == TtsStatus.Failed) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            accent
-                        },
-                        maxLines = 1,
-                    )
-                }
-                Text(
-                    text = chapterTitle.ifBlank { stringResource(R.string.rd_tts_chapter_unknown) },
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (showSentence) {
-                    Text(
-                        text = sentencePreview ?: stringResource(R.string.rd_tts_preparing),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = sentenceMaxLines,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            Spacer(Modifier.width(MiruSpace.S))
-            MiniStopButton(onStop = onStop)
-        }
-        Spacer(Modifier.height(MiruSpace.S))
-        TtsProgressBar(progress = progress, height = 4.dp)
-        Spacer(Modifier.height(MiruSpace.S))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            MiniAction(
-                icon = Icons.Filled.CenterFocusWeak,
-                label = stringResource(R.string.rd_tts_start_here),
+            MiniIconAction(
+                icon = Icons.Filled.KeyboardArrowLeft,
+                description = stringResource(R.string.rd_tts_prev_paragraph),
+                enabled = session,
+                onClick = onPrevParagraph,
+            )
+            MiniIconAction(
+                icon = Icons.Filled.KeyboardArrowRight,
+                description = stringResource(R.string.rd_tts_next_paragraph),
+                enabled = session,
+                onClick = onNextParagraph,
+            )
+            MiniIconAction(
+                icon = Icons.Filled.TouchApp,
+                description = stringResource(R.string.rd_tts_start_here),
                 enabled = session,
                 onClick = onStartHere,
             )
-            Spacer(Modifier.width(MiruSpace.S))
-            MiniAction(
-                icon = Icons.Filled.CenterFocusStrong,
-                label = stringResource(R.string.rd_tts_focus),
+            MiniIconAction(
+                icon = Icons.Filled.Search,
+                description = stringResource(R.string.rd_tts_focus),
                 enabled = session,
                 onClick = onFocus,
             )
             Spacer(Modifier.weight(1f))
-            Text(
-                text = if (chunkCount > 0) {
-                    stringResource(
-                        R.string.rd_tts_mini_progress_fmt,
-                        sentenceNumber,
-                        chunkCount,
-                        ttsProgressPercentValue(sentenceNumber, chunkCount),
-                    )
-                } else {
-                    stringResource(R.string.rd_tts_progress_fmt, chapterPercent)
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
+            MiniStopButton(onStop = onStop)
         }
+        TtsProgressBar(progress = progress, height = 2.dp)
+    }
+}
+
+@Composable
+private fun MiniIconAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    IconButton(onClick = onClick, enabled = enabled) {
+        Icon(
+            imageVector = icon,
+            contentDescription = description,
+            tint = if (enabled) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+            },
+            modifier = Modifier.size(20.dp),
+        )
     }
 }
 
 @Composable
 private fun MiniStopButton(onStop: () -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    // Closes the TTS session: a larger red circle with a cross, no cramped
+    // "Stop" caption that used to wrap in the thin bar.
+    Box(
+        contentAlignment = Alignment.Center,
         modifier = Modifier
             .minimumInteractiveComponentSize()
+            .size(40.dp)
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .clickable(role = Role.Button, onClick = onStop)
-            .padding(horizontal = 10.dp, vertical = 7.dp),
+            .background(MaterialTheme.colorScheme.error)
+            .clickable(role = Role.Button, onClick = onStop),
     ) {
         Icon(
-            imageVector = Icons.Filled.Stop,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(15.dp),
-        )
-        Spacer(Modifier.width(4.dp))
-        Text(
-            text = stringResource(R.string.rd_tts_stop),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-        )
-    }
-}
-
-@Composable
-private fun MiniAction(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .minimumInteractiveComponentSize()
-            .clip(RoundedCornerShape(50))
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f))
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (enabled) {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
-            },
-            modifier = Modifier.size(15.dp),
-        )
-        Spacer(Modifier.width(5.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = if (enabled) {
-                MaterialTheme.colorScheme.onSurface
-            } else {
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-            },
-            maxLines = 1,
+            imageVector = Icons.Filled.Close,
+            contentDescription = stringResource(R.string.rd_tts_stop),
+            tint = MaterialTheme.colorScheme.onError,
+            modifier = Modifier.size(22.dp),
         )
     }
 }
 
 /**
- * The single TTS surface in the reader. A compact player comes first; voice,
- * speed, pitch and engine live in accordions so the sheet never opens as a
- * wall of controls. Only one accordion is open at a time.
+ * The settings sheet in the reader: settings only (speed, pitch, voices,
+ * engine, auto-next, highlight, test/reset) plus ONE primary Play/Pause to
+ * start the session. The full transport (chapter/chunk, Start here, Focus)
+ * lives in the mini and floating players, never here (FR-054, 6.6).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -337,9 +256,6 @@ fun TtsSettingsPanel(
     capabilities: TtsCapabilities,
     status: TtsStatus,
     message: String?,
-    atEnd: Boolean,
-    canPreviousChapter: Boolean,
-    canNextChapter: Boolean,
     highlight: Boolean,
     highlightColor: Long,
     highlightColors: List<Long>,
@@ -348,12 +264,6 @@ fun TtsSettingsPanel(
     onReset: () -> Unit,
     onRetry: () -> Unit,
     onToggle: () -> Unit,
-    onStartHere: () -> Unit,
-    onFocus: () -> Unit,
-    onPreviousChunk: () -> Unit,
-    onNextChunk: () -> Unit,
-    onPreviousChapter: () -> Unit,
-    onNextChapter: () -> Unit,
     onHighlightChange: (Boolean) -> Unit,
     onHighlightColorChange: (Long) -> Unit,
     onDismiss: () -> Unit,
@@ -362,10 +272,12 @@ fun TtsSettingsPanel(
     val ready = capabilities.ready
     val failed = status == TtsStatus.Failed
     val playing = status == TtsStatus.Playing || status == TtsStatus.Loading
-    val session = playing || status == TtsStatus.Paused
     val testText = stringResource(R.string.rd_tts_test_text)
     var section by rememberSaveable { mutableStateOf<TtsSettingSection?>(null) }
     var overlay by rememberSaveable { mutableStateOf<TtsOverlay?>(null) }
+    // Which voice slot the picker edits: the original-language voice or the
+    // independent translated-text voice (FR-040).
+    var voiceSlotTranslated by rememberSaveable { mutableStateOf(false) }
     var deleteIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     // The engine accordion must also see engines installed after app start.
     LaunchedEffect(Unit) { onDiscoverVoices() }
@@ -376,12 +288,27 @@ fun TtsSettingsPanel(
                 capabilities = capabilities,
                 settings = settings,
                 onSettingsChange = onSettingsChange,
-                currentVoiceId = settings.voiceId,
-                currentEngineId = settings.engineId ?: capabilities.currentEngineId,
+                currentVoiceId = if (voiceSlotTranslated) {
+                    settings.translatedVoiceId
+                } else {
+                    settings.voiceId
+                },
+                currentEngineId = (if (voiceSlotTranslated) {
+                    settings.translatedEngineId
+                } else {
+                    settings.engineId
+                }) ?: capabilities.currentEngineId,
                 failed = failed,
                 onSelect = { voiceId, voiceEngineId ->
                     onSettingsChange(
-                        settings.copy(voiceId = voiceId, engineId = voiceEngineId),
+                        if (voiceSlotTranslated) {
+                            settings.copy(
+                                translatedVoiceId = voiceId,
+                                translatedEngineId = voiceEngineId,
+                            )
+                        } else {
+                            settings.copy(voiceId = voiceId, engineId = voiceEngineId)
+                        },
                     )
                     overlay = null
                 },
@@ -514,21 +441,22 @@ fun TtsSettingsPanel(
                 .padding(vertical = MiruSpace.Xs),
         ) {
             TtsChip(
-                label = stringResource(R.string.rd_tts_start_here),
-                icon = Icons.Filled.CenterFocusWeak,
-                enabled = ready,
-                onClick = onStartHere,
-            )
-            TtsChip(
-                label = stringResource(R.string.rd_tts_focus),
-                icon = Icons.Filled.CenterFocusStrong,
-                onClick = onFocus,
-            )
-            TtsChip(
                 label = stringResource(R.string.rd_tts_voices),
                 icon = Icons.Outlined.RecordVoiceOver,
                 enabled = ready,
-                onClick = { overlay = TtsOverlay.Voices },
+                onClick = {
+                    voiceSlotTranslated = false
+                    overlay = TtsOverlay.Voices
+                },
+            )
+            TtsChip(
+                label = stringResource(R.string.rd_tts_voices_translation),
+                icon = Icons.Outlined.Translate,
+                enabled = ready,
+                onClick = {
+                    voiceSlotTranslated = true
+                    overlay = TtsOverlay.Voices
+                },
             )
             TtsChip(
                 label = stringResource(R.string.rd_tts_saved_voices),
@@ -537,46 +465,19 @@ fun TtsSettingsPanel(
             )
         }
 
-        Row(
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
+        // One primary action as a full-width plate: start or pause the session.
+        MiruButton(
+            onClick = onToggle,
+            style = MiruButtonStyle.Primary,
+            leadingIcon = if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = MiruSpace.S),
+                .padding(top = MiruSpace.Xs, bottom = MiruSpace.S),
         ) {
-            TtsIconButton(
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(R.string.tts_action_prev_chapter),
-                tint = MaterialTheme.colorScheme.onSurface,
-                enabled = canPreviousChapter,
-                onClick = onPreviousChapter,
-            )
-            TtsIconButton(
-                icon = Icons.Filled.SkipPrevious,
-                contentDescription = stringResource(R.string.rd_tts_prev_chunk),
-                tint = MaterialTheme.colorScheme.onSurface,
-                enabled = session,
-                onClick = onPreviousChunk,
-            )
-            TtsPlayPauseButton(
-                playing = playing,
-                onClick = onToggle,
-                size = 48.dp,
-                iconSize = 24.dp,
-            )
-            TtsIconButton(
-                icon = Icons.Filled.SkipNext,
-                contentDescription = stringResource(R.string.rd_tts_next_chunk),
-                tint = MaterialTheme.colorScheme.onSurface,
-                enabled = session && !atEnd,
-                onClick = onNextChunk,
-            )
-            TtsIconButton(
-                icon = Icons.AutoMirrored.Filled.ArrowForward,
-                contentDescription = stringResource(R.string.tts_action_next_chapter),
-                tint = MaterialTheme.colorScheme.onSurface,
-                enabled = canNextChapter,
-                onClick = onNextChapter,
+            Text(
+                text = stringResource(
+                    if (playing) R.string.rd_tts_action_pause else R.string.rd_tts_start_tts,
+                ),
             )
         }
 
@@ -1400,30 +1301,6 @@ private fun TtsAccordion(
     MiruRowDivider()
 }
 
-
-@Composable
-private fun TtsIconButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    contentDescription: String,
-    tint: Color,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-) {
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(48.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = if (enabled) tint else tint.copy(alpha = 0.35f),
-            modifier = Modifier.size(22.dp),
-        )
-    }
-}
 
 @Composable
 private fun TtsHighlightDot(

@@ -30,6 +30,8 @@ class PrefsTtsSettingsStore(context: Context) : TtsSettingsStore {
     override fun load(): TtsSettings = TtsSettings(
         voiceId = prefs.getString(PrefsTtsSessionStore.KEY_VOICE_ID, null),
         engineId = prefs.getString(PrefsTtsSessionStore.KEY_ENGINE_ID, null),
+        translatedVoiceId = prefs.getString(PrefsTtsSessionStore.KEY_TRANSLATED_VOICE_ID, null),
+        translatedEngineId = prefs.getString(PrefsTtsSessionStore.KEY_TRANSLATED_ENGINE_ID, null),
         speed = clampTtsSpeed(readFloat(PrefsTtsSessionStore.KEY_SPEED) ?: 1f),
         pitch = clampTtsPitch(readFloat(PrefsTtsSessionStore.KEY_PITCH) ?: 1f),
         autoNextChapter = readBoolean(PrefsTtsSessionStore.KEY_AUTO_NEXT),
@@ -62,6 +64,14 @@ class PrefsTtsSettingsStore(context: Context) : TtsSettingsStore {
         prefs.edit()
             .putString(PrefsTtsSessionStore.KEY_VOICE_ID, sanitized.voiceId)
             .putString(PrefsTtsSessionStore.KEY_ENGINE_ID, sanitized.engineId)
+            .putString(
+                PrefsTtsSessionStore.KEY_TRANSLATED_VOICE_ID,
+                sanitized.translatedVoiceId,
+            )
+            .putString(
+                PrefsTtsSessionStore.KEY_TRANSLATED_ENGINE_ID,
+                sanitized.translatedEngineId,
+            )
             // Strings, not floats: ReaderBackupPrefs is a Map<String, String>
             // and a float here would make a backup snapshot throw.
             .putString(PrefsTtsSessionStore.KEY_SPEED, sanitized.speed.toString())

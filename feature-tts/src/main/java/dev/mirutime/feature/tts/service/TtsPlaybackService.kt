@@ -22,6 +22,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.view.KeyEvent
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
@@ -93,8 +94,28 @@ class TtsPlaybackService : Service() {
     }
 
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
-        if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-            if (isActive()) ttsController.pause()
+        MiruLog.event("tts", "audio-focus", "change" to change)
+        when (change) {
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                // Permanent loss: stop speaking, but do not auto-resume later.
+                if (isActive()) ttsController.pause()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                if (isActive()) ttsController.pauseForFocusLoss()
+            }
+            AudioManager.AUDIOFOCUS_GAIN,
+            AudioManager.AUDIOFOCUS_GAIN_TRANSIENT,
+            -> {
+                // Resume only the pause WE caused; a user pause stays a pause.
+                if (
+                    ttsController.pausedByFocusLoss &&
+                    ttsController.state.value.status == TtsStatus.Paused
+                ) {
+                    ttsController.resume()
+                }
+            }
+            // Speech ducking has no lower-volume meaning here: keep reading.
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> Unit
         }
     }
 
@@ -141,9 +162,22 @@ class TtsPlaybackService : Service() {
                     override fun onSkipToPrevious() {
                         ttsController.skipPreviousChapter()
                     }
+
+                    // Some devices deliver the raw media-button KeyEvent here
+                    // instead of routing it to onPlay/onPause/onSkip*.
+                    override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
+                        val key = mediaButtonIntent.mediaButtonKey()
+                            ?: return super.onMediaButtonEvent(mediaButtonIntent)
+                        if (key.action != KeyEvent.ACTION_DOWN) return true
+                        handleMediaButton(key)
+                        return true
+                    }
                 },
             )
             setSessionActivity(contentIntent())
+            // Explicit media-button receiver so headsets/Bluetooth route to this
+            // session even when it is not the platform's default one (FR-044).
+            setMediaButtonReceiver(TtsMediaButtonReceiver.pendingIntent(this@TtsPlaybackService))
         }
         registerNoisyReceiver()
         observeState()
@@ -160,6 +194,8 @@ class TtsPlaybackService : Service() {
             "status" to ttsController.state.value.status,
         )
         when (command) {
+            // Explicit play/pause/stop is a user action: the controller clears
+            // the focus-loss marker, so a later regain cannot re-resume it.
             TtsTransportCommand.Play -> ttsController.resume()
             TtsTransportCommand.Pause -> ttsController.pause()
             TtsTransportCommand.Stop -> {
@@ -242,7 +278,11 @@ class TtsPlaybackService : Service() {
             }
             TtsStatus.Paused -> {
                 releaseWakeLock()
-                abandonAudioFocus()
+                // A pause caused by audio-focus loss must keep the request:
+                // abandoning it means the system never delivers AUDIOFOCUS_GAIN,
+                // so the "resume what we paused" path could never run. A user
+                // pause still drops the request so other apps get clean focus.
+                if (!ttsController.pausedByFocusLoss) abandonAudioFocus()
                 updateMediaSession()
                 ensureForeground()
             }
@@ -301,6 +341,30 @@ class TtsPlaybackService : Service() {
     private fun isActive(): Boolean = when (ttsController.state.value.status) {
         TtsStatus.Playing, TtsStatus.Loading -> true
         else -> false
+    }
+
+    // Shared mapping for keys delivered through onMediaButtonEvent; the
+    // BroadcastReceiver path uses the same rules.
+    private fun handleMediaButton(key: KeyEvent) {
+        when (key.keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY -> ttsController.resume()
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> ttsController.pause()
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ->
+                if (ttsController.state.value.status == TtsStatus.Playing) {
+                    ttsController.pause()
+                } else {
+                    ttsController.resume()
+                }
+            KeyEvent.KEYCODE_MEDIA_STOP -> ttsController.stop()
+            KeyEvent.KEYCODE_MEDIA_NEXT,
+            KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD,
+            -> ttsController.skipNextChapter()
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+            KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD,
+            -> ttsController.skipPreviousChapter()
+            else -> Unit
+        }
+        MiruLog.event("tts", "media-button", "code" to key.keyCode)
     }
 
     private fun createChannel() {
@@ -401,6 +465,13 @@ class TtsPlaybackService : Service() {
         val fallback = getString(R.string.tts_notification_title)
         val chapter = chapterTitle.trim().ifEmpty { info.title.ifEmpty { fallback } }
         val book = bookTitle.trim()
+        // Feed the system media controls a real duration/position from the
+        // time estimate, so they are not a flat card with no progress (FR-048).
+        val tts = ttsController.state.value
+        val totalSeconds = tts.estimatedTotalSeconds.coerceAtLeast(0)
+        val durationMs = totalSeconds * 1000L
+        val positionMs = (totalSeconds - tts.estimatedRemainingSeconds)
+            .coerceIn(0, totalSeconds) * 1000L
         val state = when (ttsController.state.value.status) {
             TtsStatus.Playing -> PlaybackState.STATE_PLAYING
             TtsStatus.Loading -> PlaybackState.STATE_BUFFERING
@@ -419,6 +490,7 @@ class TtsPlaybackService : Service() {
                 MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE,
                 book,
             )
+            .putLong(MediaMetadata.METADATA_KEY_DURATION, durationMs)
         coverBitmap?.let { bitmap ->
             metadata.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, bitmap)
             metadata.putBitmap(MediaMetadata.METADATA_KEY_ART, bitmap)
@@ -439,7 +511,7 @@ class TtsPlaybackService : Service() {
                 .setActions(skipActions)
                 .setState(
                     state,
-                    PlaybackState.PLAYBACK_POSITION_UNKNOWN,
+                    positionMs,
                     if (state == PlaybackState.STATE_PLAYING) 1f else 0f,
                 )
                 .build(),

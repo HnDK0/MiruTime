@@ -205,6 +205,87 @@ class TtsControllerTest {
     }
 
     @Test
+    fun `only a focus-loss pause can auto-resume`() = runTest {
+        val controller = TtsController(FakeEngine(), this, InMemoryTtsSessionStore())
+        controller.play(document, emptyMap())
+        assertEquals(TtsStatus.Playing, controller.state.value.status)
+        assertFalse(controller.pausedByFocusLoss)
+
+        controller.pauseForFocusLoss()
+        assertEquals(TtsStatus.Paused, controller.state.value.status)
+        assertTrue(controller.pausedByFocusLoss)
+
+        controller.resume()
+        assertFalse(controller.pausedByFocusLoss)
+        assertEquals(TtsStatus.Playing, controller.state.value.status)
+
+        // A headset/notification pause after a focus-loss pause cancels the
+        // auto-resume, so the call ending cannot start speech the user stopped.
+        controller.pauseForFocusLoss()
+        assertTrue(controller.pausedByFocusLoss)
+        controller.pause()
+        assertFalse(controller.pausedByFocusLoss)
+
+        controller.resume()
+        controller.stop()
+        assertFalse(controller.pausedByFocusLoss)
+    }
+
+    @Test
+    fun `only a finished queue reports a natural chapter end`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        controller.updateSettings(TtsSettings(autoNextChapter = true))
+        controller.play(document, emptyMap())
+
+        // A manual skip from the last chunk is not a natural end, even though
+        // the state reports atEnd = true there.
+        controller.skipNextChunk()
+        assertTrue(controller.state.value.atEnd)
+        controller.skipNextChapter()
+        assertFalse(controller.chapterEndedNaturally)
+
+        // The queue finishing the last chunk is the only natural end.
+        controller.play(document, emptyMap())
+        engine.listener?.onDone(engine.spoken.last())
+        assertTrue(controller.chapterEndedNaturally)
+
+        // A manual skip after that must clear it again.
+        controller.skipNextChapter()
+        assertFalse(controller.chapterEndedNaturally)
+    }
+
+    @Test
+    fun `paragraph seek keeps a paused session paused`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        controller.play(document, emptyMap())
+        controller.skipNextChunk()
+        controller.pause()
+        assertEquals(1, controller.state.value.currentChunk)
+        val spoken = engine.spoken.size
+
+        controller.seekToBlock(document, emptyMap(), blockIndex = 0)
+
+        assertEquals(TtsStatus.Paused, controller.state.value.status)
+        assertEquals(0, controller.state.value.currentChunk)
+        assertEquals(spoken, engine.spoken.size)
+    }
+
+    @Test
+    fun `paragraph seek keeps a playing session playing`() = runTest {
+        val controller = TtsController(FakeEngine(), this, InMemoryTtsSessionStore())
+        controller.play(document, emptyMap())
+        controller.skipNextChunk()
+        assertEquals(1, controller.state.value.currentChunk)
+
+        controller.seekToBlock(document, emptyMap(), blockIndex = 0)
+
+        assertEquals(TtsStatus.Playing, controller.state.value.status)
+        assertEquals(0, controller.state.value.currentChunk)
+    }
+
+    @Test
     fun `stop clears the persisted session`() = runTest {
         val store = InMemoryTtsSessionStore()
         val controller = TtsController(FakeEngine(), this, store)

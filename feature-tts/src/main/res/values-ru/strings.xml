@@ -29,6 +29,7 @@
     <string name="rd_tts_finished">Озвучивание завершено. Начните заново с начала.</string>
     <string name="rd_tts_start">Начать</string>
     <string name="rd_tts_stop">Остановить</string>
+    <string name="rd_tts_start_tts">Запустить TTS</string>
     <string name="rd_tts_action_play">Продолжить</string>
     <string name="rd_tts_action_pause">Пауза</string>
     <string name="rd_tts_current_voice_fmt">Текущий голос: %1$s</string>
@@ -53,6 +54,9 @@
     <string name="rd_tts_advanced">Голос и воспроизведение</string>
     <string name="rd_tts_test_reset">Проверка и сброс</string>
     <string name="rd_tts_voices">Голоса</string>
+    <string name="rd_tts_voices_translation">Голос перевода</string>
+    <string name="rd_tts_prev_paragraph">Предыдущий абзац</string>
+    <string name="rd_tts_next_paragraph">Следующий абзац</string>
     <string name="rd_tts_voices_desc">Выберите голос. Сохранённые избранные также применяют скорость и тон.</string>
     <string name="rd_tts_voice_current">Текущий</string>
     <string name="rd_tts_voice_all">Все голоса</string>
@@ -90,7 +94,6 @@
     <string name="rd_tts_chapter_position_fmt">Гл. %1$d/%2$d</string>
     <string name="rd_tts_sentence_progress_fmt">Фраза %1$d/%2$d</string>
     <string name="rd_tts_chapter_progress">Прогресс главы</string>
-    <string name="rd_tts_mini_progress_fmt">%1$d/%2$d · %3$d%%</string>
     <string name="rd_tts_progress_fmt">%1$d%%</string>
     <string name="rd_tts_chapter_number_fmt">%1$d/%2$d</string>
     <string name="rd_tts_time_remaining_fmt">Осталось примерно %1$s</string>

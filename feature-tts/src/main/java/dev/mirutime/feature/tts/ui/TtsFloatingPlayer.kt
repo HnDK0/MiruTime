@@ -36,15 +36,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.NavigateBefore
 import androidx.compose.material.icons.automirrored.rounded.NavigateNext
 import androidx.compose.material.icons.automirrored.rounded.TextSnippet
-import androidx.compose.material.icons.filled.CenterFocusStrong
-import androidx.compose.material.icons.filled.CenterFocusWeak
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -526,12 +526,12 @@ fun TtsFloatingPlayer(
                                 },
                             )
                             FloatingIconAction(
-                                icon = Icons.Filled.CenterFocusWeak,
+                                icon = Icons.Filled.TouchApp,
                                 contentDescription = stringResource(R.string.rd_tts_start_here),
                                 onClick = onStartHere,
                             )
                             FloatingIconAction(
-                                icon = Icons.Filled.CenterFocusStrong,
+                                icon = Icons.Filled.Search,
                                 contentDescription = stringResource(R.string.rd_tts_focus),
                                 onClick = onFocus,
                             )

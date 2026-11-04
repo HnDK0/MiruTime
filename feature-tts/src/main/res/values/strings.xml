@@ -29,6 +29,7 @@
     <string name="rd_tts_finished">Playback finished. Start again from the top.</string>
     <string name="rd_tts_start">Start</string>
     <string name="rd_tts_stop">Stop</string>
+    <string name="rd_tts_start_tts">Start TTS</string>
     <string name="rd_tts_action_play">Play</string>
     <string name="rd_tts_action_pause">Pause</string>
     <string name="rd_tts_current_voice_fmt">Current voice: %1$s</string>
@@ -53,6 +54,9 @@
     <string name="rd_tts_advanced">Voice &amp; playback</string>
     <string name="rd_tts_test_reset">Test &amp; reset</string>
     <string name="rd_tts_voices">Voices</string>
+    <string name="rd_tts_voices_translation">Translation voice</string>
+    <string name="rd_tts_prev_paragraph">Previous paragraph</string>
+    <string name="rd_tts_next_paragraph">Next paragraph</string>
     <string name="rd_tts_voices_desc">Pick a voice. Saved favorites also apply their speed and pitch.</string>
     <string name="rd_tts_voice_current">Current</string>
     <string name="rd_tts_voice_all">All voices</string>
@@ -90,7 +94,6 @@
     <string name="rd_tts_chapter_position_fmt">Ch. %1$d/%2$d</string>
     <string name="rd_tts_sentence_progress_fmt">Sentence %1$d/%2$d</string>
     <string name="rd_tts_chapter_progress">Chapter progress</string>
-    <string name="rd_tts_mini_progress_fmt">%1$d/%2$d · %3$d%%</string>
     <string name="rd_tts_progress_fmt">%1$d%%</string>
     <string name="rd_tts_chapter_number_fmt">%1$d/%2$d</string>
     <string name="rd_tts_time_remaining_fmt">About %1$s remaining</string>

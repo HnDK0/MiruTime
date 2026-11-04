@@ -24,6 +24,9 @@ val TtsFloatingGlowModes = setOf("auto", "on", "off")
 data class TtsSettings(
     val voiceId: String? = null,
     val engineId: String? = null,
+    /** Independent voice/engine for reading TRANSLATED text (FR-040..043). */
+    val translatedVoiceId: String? = null,
+    val translatedEngineId: String? = null,
     val speed: Float = 1f,
     val pitch: Float = 1f,
     val autoNextChapter: Boolean = false,
@@ -47,6 +50,8 @@ data class TtsSettings(
     fun sanitized(): TtsSettings = copy(
         voiceId = voiceId?.takeIf { it.isNotBlank() },
         engineId = engineId?.takeIf { it.isNotBlank() },
+        translatedVoiceId = translatedVoiceId?.takeIf { it.isNotBlank() },
+        translatedEngineId = translatedEngineId?.takeIf { it.isNotBlank() },
         speed = clampTtsSpeed(speed),
         pitch = clampTtsPitch(pitch),
         floatingBubbleX = finiteOrUnset(floatingBubbleX),
@@ -65,6 +70,21 @@ data class TtsSettings(
 }
 
 private fun finiteOrUnset(value: Float): Float = if (value.isFinite()) value else -1f
+
+/** Voice/engine a session should speak with, by the language it reads. */
+data class TtsVoiceSelection(val voiceId: String?, val engineId: String?)
+
+/**
+ * A session speaks ONE language, so it uses the matching saved slot. An unset
+ * translated slot falls back to the original voice, keeping pre-existing
+ * behavior until the user picks a separate one (FR-040..042).
+ */
+fun TtsSettings.voiceForSession(translated: Boolean): TtsVoiceSelection =
+    if (translated && translatedVoiceId != null) {
+        TtsVoiceSelection(translatedVoiceId, translatedEngineId)
+    } else {
+        TtsVoiceSelection(voiceId, engineId)
+    }
 
 fun clampTtsFloatingWidth(value: Float): Float =
     if (value.isFinite()) {
@@ -177,14 +197,19 @@ fun ttsSliderSteps(
 }
 
 /**
- * True when a settings change must stop and re-queue the current chunk.
- * Appearance-only changes (floating player, auto-next, favorites) are ignored.
+ * Whether the change must stop and re-queue the current chunk. Only the voice
+ * slot the session speaks counts, so tuning the other language's voice never
+ * interrupts playback; appearance-only changes (floating player, auto-next,
+ * favorites) are ignored.
  */
-fun ttsPlaybackChanged(previous: TtsSettings, next: TtsSettings): Boolean {
+fun ttsPlaybackChanged(
+    previous: TtsSettings,
+    next: TtsSettings,
+    translated: Boolean,
+): Boolean {
     val before = previous.sanitized()
     val after = next.sanitized()
-    return before.engineId != after.engineId ||
-        before.voiceId != after.voiceId ||
+    return before.voiceForSession(translated) != after.voiceForSession(translated) ||
         before.speed != after.speed ||
         before.pitch != after.pitch
 }

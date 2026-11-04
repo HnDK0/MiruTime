@@ -15,5 +15,16 @@
             android:name="dev.mirutime.feature.tts.service.TtsPlaybackService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!-- Headset/Bluetooth media buttons. The system delivers
+             ACTION_MEDIA_BUTTON here; the receiver forwards it to the live
+             TtsController session (FR-044). -->
+        <receiver
+            android:name="dev.mirutime.feature.tts.service.TtsMediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

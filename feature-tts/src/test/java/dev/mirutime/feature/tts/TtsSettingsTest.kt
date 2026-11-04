@@ -45,13 +45,39 @@ class TtsSettingsTest {
     fun playbackChangedIgnoresAppearanceOnlyFields() {
         val base = TtsSettings(voiceId = "voice-a", engineId = "engine-a", speed = 1.2f, pitch = 0.9f)
 
-        assertFalse(ttsPlaybackChanged(base, base.copy(floatingPlayer = true)))
-        assertFalse(ttsPlaybackChanged(base, base.copy(savedVoices = emptyList())))
-        assertTrue(ttsPlaybackChanged(base, base.copy(voiceId = "voice-b")))
-        assertTrue(ttsPlaybackChanged(base, base.copy(engineId = "engine-b")))
-        assertTrue(ttsPlaybackChanged(base, base.copy(speed = 1.3f)))
-        assertTrue(ttsPlaybackChanged(base, base.copy(pitch = 1.1f)))
-        assertFalse(ttsPlaybackChanged(base, base.copy(floatingOpacity = 0.5f)))
+        assertFalse(ttsPlaybackChanged(base, base.copy(floatingPlayer = true), translated = false))
+        assertFalse(
+            ttsPlaybackChanged(base, base.copy(savedVoices = emptyList()), translated = false),
+        )
+        assertTrue(ttsPlaybackChanged(base, base.copy(voiceId = "voice-b"), translated = false))
+        assertTrue(ttsPlaybackChanged(base, base.copy(engineId = "engine-b"), translated = false))
+        assertTrue(ttsPlaybackChanged(base, base.copy(speed = 1.3f), translated = false))
+        assertTrue(ttsPlaybackChanged(base, base.copy(pitch = 1.1f), translated = false))
+        assertFalse(ttsPlaybackChanged(base, base.copy(floatingOpacity = 0.5f), translated = false))
+    }
+
+    @Test
+    fun playbackChangedOnlyCountsTheSlotTheSessionSpeaks() {
+        val base = TtsSettings(
+            voiceId = "voice-a",
+            engineId = "engine-a",
+            translatedVoiceId = "voice-t",
+            translatedEngineId = "engine-t",
+        )
+
+        // Tuning the other language's voice must not restart the current chunk.
+        assertFalse(
+            ttsPlaybackChanged(base, base.copy(translatedVoiceId = "voice-t2"), translated = false),
+        )
+        assertFalse(ttsPlaybackChanged(base, base.copy(voiceId = "voice-b"), translated = true))
+        assertTrue(
+            ttsPlaybackChanged(base, base.copy(translatedVoiceId = "voice-t2"), translated = true),
+        )
+        assertTrue(ttsPlaybackChanged(base, base.copy(voiceId = "voice-b"), translated = false))
+
+        // An unset translated slot follows the original one.
+        val fallback = TtsSettings(voiceId = "voice-a")
+        assertTrue(ttsPlaybackChanged(fallback, fallback.copy(voiceId = "voice-b"), translated = true))
     }
 
     @Test
