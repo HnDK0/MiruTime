@@ -1,7 +1,6 @@
 package dev.mirutime.feature.reader.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -16,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,7 +27,6 @@ import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -38,18 +35,17 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import dev.mirutime.uikit.MiruDockAction
 import dev.mirutime.uikit.MiruIconButton
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
@@ -246,7 +242,7 @@ internal fun ReaderChrome(
                     if (ttsEnabled) {
                         // One entry for idle and live sessions alike: it opens
                         // the player sheet, and the label/tint carry the state.
-                        DockAction(
+                        MiruDockAction(
                             icon = Icons.Outlined.RecordVoiceOver,
                             label = ttsLabel,
                             active = ttsSession,
@@ -254,13 +250,13 @@ internal fun ReaderChrome(
                         )
                     }
                     if (!manga) {
-                        DockAction(
+                        MiruDockAction(
                             icon = Icons.Outlined.Translate,
                             label = stringResource(R.string.rd_translation),
                             onClick = onTranslation,
                         )
                     }
-                    DockAction(
+                    MiruDockAction(
                         icon = if (manga) Icons.Outlined.Tune else Icons.Outlined.FormatSize,
                         label = if (manga) {
                             stringResource(R.string.rd_settings)
@@ -270,7 +266,7 @@ internal fun ReaderChrome(
                         onClick = onStyle,
                     )
                     if (!manga) {
-                        DockAction(
+                        MiruDockAction(
                             icon = Icons.Outlined.MoreVert,
                             label = stringResource(R.string.rd_more),
                             onClick = onMore,
@@ -323,49 +319,6 @@ private fun MangaPageScrubber(
                 modifier = Modifier.weight(1f),
             )
         }
-    }
-}
-
-@Composable
-private fun DockAction(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-    active: Boolean = false,
-) {
-    val iconColor = when {
-        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
-        active -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.onSurface
-    }
-    val labelColor = when {
-        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
-        active -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Column(
-        modifier = Modifier
-            .width(72.dp)
-            // Keep the interactive box at the 48dp touch minimum (D2-03).
-            .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(MiruRadius.Large))
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = iconColor,
-            modifier = Modifier.size(22.dp),
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = labelColor,
-            maxLines = 1,
-        )
     }
 }
 

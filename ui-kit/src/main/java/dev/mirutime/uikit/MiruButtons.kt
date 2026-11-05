@@ -75,7 +75,10 @@ fun MiruButton(
         MiruButtonStyle.Destructive -> scheme.onError
         MiruButtonStyle.Text -> extra.accent
     }
-    val contentInk = if (enabled) ink else scheme.onSurface.copy(alpha = 0.38f)
+    // A busy button keeps the active fill and ink even when the caller also
+    // disables it: the spinner must read as progress, not as an idle disabled
+    // control.
+    val contentInk = if (enabled || busy) ink else scheme.onSurface.copy(alpha = 0.38f)
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides MiruSize.Touch) {
         Row(
             modifier = modifier
@@ -93,13 +96,13 @@ fun MiruButton(
                 .clip(shape)
                 .background(
                     when {
-                        enabled -> backing
+                        enabled || busy -> backing
                         style == MiruButtonStyle.Text -> Color.Transparent
                         else -> scheme.onSurface.copy(alpha = 0.12f)
                     },
                 )
                 .then(
-                    if (style == MiruButtonStyle.Secondary && enabled) {
+                    if (style == MiruButtonStyle.Secondary && (enabled || busy)) {
                         Modifier.border(MiruSize.Stroke, scheme.outlineVariant, shape)
                     } else {
                         Modifier
@@ -118,7 +121,7 @@ fun MiruButton(
                         modifier = Modifier.size(MiruSize.Indicator),
                         // A busy CTA is often disabled; keep the only activity
                         // cue above the 3:1 non-text contrast floor.
-                        color = if (enabled) contentInk else scheme.onSurface.copy(alpha = 0.60f),
+                        color = if (enabled || busy) contentInk else scheme.onSurface.copy(alpha = 0.60f),
                         strokeWidth = MiruSpace.Xxs,
                     )
                 } else if (leadingIcon != null) {

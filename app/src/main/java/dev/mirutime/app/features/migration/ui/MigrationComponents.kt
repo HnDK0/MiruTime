@@ -29,12 +29,9 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -53,7 +50,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
 import dev.mirutime.app.design.components.CatalogTile
 import dev.mirutime.app.design.components.SelectionBadge
@@ -82,6 +78,8 @@ import dev.mirutime.data.library.migration.BookMigrationResult
 import dev.mirutime.uikit.CardProgressBar
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruFilterChip
+import dev.mirutime.uikit.MiruButton
+import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruCard
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruRowDivider
@@ -89,8 +87,6 @@ import dev.mirutime.uikit.MiruSectionCard
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.SettingsSwitchRow
-import dev.mirutime.uikit.miruCardElevation
-import dev.mirutime.uikit.miruCardSurface
 
 sealed interface MigrationSearchUi {
     data object Idle : MigrationSearchUi
@@ -649,44 +645,16 @@ fun MigrationActionButton(
     icon: ImageVector? = null,
     fillWidth: Boolean = true,
 ) {
-    Button(
+    MiruButton(
         onClick = onClick,
         enabled = enabled && !busy,
-        modifier = modifier
-            .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
-            .defaultMinSize(minHeight = MiruSize.ButtonPrimary),
-        shape = MaterialTheme.shapes.small,
-        // Busy keeps the primary fill so the spinner and label stay readable;
-        // a plain disabled button sinks into the photo plate.
-        colors = if (busy) {
-            ButtonDefaults.buttonColors(
-                disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
-                disabledContentColor = MaterialTheme.colorScheme.onPrimary,
-            )
-        } else {
-            ButtonDefaults.buttonColors()
-        },
-        contentPadding = PaddingValues(horizontal = MiruSpace.L, vertical = MiruSpace.S),
+        busy = busy,
+        style = MiruButtonStyle.Primary,
+        leadingIcon = icon,
+        busyDescription = label,
+        modifier = modifier.then(if (fillWidth) Modifier.fillMaxWidth() else Modifier),
     ) {
-        if (busy) {
-            CircularProgressIndicator(
-                strokeWidth = MiruSpace.Xxs,
-                color = LocalContentColor.current,
-                modifier = Modifier.size(MiruSize.Touch / 3),
-            )
-            Text(text = label, modifier = Modifier.padding(start = MiruSpace.S))
-        } else {
-            if (icon != null) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(MiruSize.Touch / 3),
-                )
-                Text(text = label, modifier = Modifier.padding(start = MiruSpace.S))
-            } else {
-                Text(text = label)
-            }
-        }
+        Text(text = label)
     }
 }
 
@@ -702,12 +670,10 @@ fun MigrationFloatingAction(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
 ) {
-    Surface(
+    MiruCard(
         modifier = modifier,
         shape = RoundedCornerShape(MiruRadius.Plate),
-        color = miruCardSurface(),
-        shadowElevation = miruCardElevation(),
-        tonalElevation = 0.dp,
+        contentPadding = PaddingValues(MiruSpace.Xs),
     ) {
         MigrationActionButton(
             label = label,
@@ -716,7 +682,6 @@ fun MigrationFloatingAction(
             busy = busy,
             icon = icon,
             fillWidth = false,
-            modifier = Modifier.padding(MiruSpace.Xs),
         )
     }
 }
