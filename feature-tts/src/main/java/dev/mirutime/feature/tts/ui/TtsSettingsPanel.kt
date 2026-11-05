@@ -35,7 +35,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -89,7 +88,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.feature.tts.R
@@ -99,6 +97,7 @@ import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.uikit.ChipRail
 import dev.mirutime.uikit.MiruFilterChip
+import dev.mirutime.uikit.MiruLabeledSliderRow
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.SheetHeaderAction
 import dev.mirutime.uikit.MiruButton
@@ -439,7 +438,7 @@ fun TtsSettingsPanel(
         // current chunk once, on release.
         var speedDraft by remember(settings.speed) { mutableStateOf(settings.speed) }
         var pitchDraft by remember(settings.pitch) { mutableStateOf(settings.pitch) }
-        TtsSliderRow(
+        MiruLabeledSliderRow(
             label = stringResource(R.string.rd_tts_speed),
             valueText = stringResource(R.string.rd_tts_speed_value, speedDraft),
         ) {
@@ -457,7 +456,7 @@ fun TtsSettingsPanel(
                 },
             )
         }
-        TtsSliderRow(
+        MiruLabeledSliderRow(
             label = stringResource(R.string.rd_tts_pitch),
             valueText = stringResource(R.string.rd_tts_pitch_value, pitchDraft),
         ) {
@@ -483,27 +482,30 @@ fun TtsSettingsPanel(
                 .horizontalScroll(rememberScrollState())
                 .padding(vertical = MiruSpace.Xs),
         ) {
-            TtsChip(
+            MiruFilterChip(
+                selected = false,
                 label = stringResource(R.string.rd_tts_voices),
-                icon = Icons.Outlined.RecordVoiceOver,
+                leadingIcon = Icons.Outlined.RecordVoiceOver,
                 enabled = ready,
                 onClick = {
                     voiceSlotTranslated = false
                     overlay = TtsOverlay.Voices
                 },
             )
-            TtsChip(
+            MiruFilterChip(
+                selected = false,
                 label = stringResource(R.string.rd_tts_voices_translation),
-                icon = Icons.Outlined.Translate,
+                leadingIcon = Icons.Outlined.Translate,
                 enabled = ready,
                 onClick = {
                     voiceSlotTranslated = true
                     overlay = TtsOverlay.Voices
                 },
             )
-            TtsChip(
+            MiruFilterChip(
+                selected = false,
                 label = stringResource(R.string.rd_tts_saved_voices),
-                icon = Icons.Outlined.Bookmarks,
+                leadingIcon = Icons.Outlined.Bookmarks,
                 onClick = { overlay = TtsOverlay.SavedVoices },
             )
         }
@@ -847,89 +849,6 @@ private fun SleepTimerRow(
                 ),
             )
         }
-    }
-}
-
-@Composable
-private fun TtsChip(
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-) {
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier
-            .minimumInteractiveComponentSize()
-            .heightIn(min = 32.dp)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (enabled) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
-                },
-                modifier = Modifier.size(14.dp),
-            )
-            Spacer(Modifier.width(4.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (enabled) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                },
-                maxLines = 1,
-            )
-        }
-    }
-}
-
-/**
- * One-line control: label on the left, slider in the middle, current value on
- * the right. The slider owns no extra captions, so the two parameters stay a
- * compact two-row block instead of four.
- */
-@Composable
-private fun TtsSliderRow(
-    label: String,
-    valueText: String,
-    content: @Composable () -> Unit,
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = MiruSize.Touch)
-            .padding(vertical = MiruSpace.Xs),
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.widthIn(min = MiruSize.SliderLabelWidth),
-        )
-        Spacer(Modifier.width(MiruSpace.M))
-        Box(Modifier.weight(1f)) { content() }
-        Spacer(Modifier.width(MiruSpace.M))
-        Text(
-            text = valueText,
-            style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.End,
-            maxLines = 1,
-            modifier = Modifier.widthIn(min = MiruSize.SliderValueWidth),
-        )
     }
 }
 
@@ -1560,7 +1479,7 @@ private fun TtsStatusPill(status: TtsStatus, atEnd: Boolean) {
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     Surface(
-        shape = RoundedCornerShape(50),
+        shape = RoundedCornerShape(MiruRadius.Badge),
         color = color.copy(alpha = 0.14f),
     ) {
         Row(

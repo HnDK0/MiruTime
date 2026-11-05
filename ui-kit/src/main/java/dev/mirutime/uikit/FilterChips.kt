@@ -96,6 +96,7 @@ fun MiruFilterChip(
     label: String,
     modifier: Modifier = Modifier,
     leadingIcon: ImageVector? = null,
+    enabled: Boolean = true,
 ) {
     val extra = LocalMiruExtraColors.current
     // Same pair of looks in every theme: unselected = the plate + onSurface
@@ -104,7 +105,11 @@ fun MiruFilterChip(
     val backing: Color
     val ink: Color
     val border: Color
-    if (selected) {
+    if (!enabled) {
+        backing = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+        ink = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        border = Color.Transparent
+    } else if (selected) {
         backing = extra.accent
         ink = contrastInkFor(extra.accent, false, listOf(extra.onAccent))
         border = Color.Transparent
@@ -119,7 +124,7 @@ fun MiruFilterChip(
             modifier = modifier
                 .clip(shape)
                 .semantics { this.selected = selected }
-                .clickable(role = Role.Button, onClick = onClick)
+                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
                 .minimumInteractiveComponentSize(),
             contentAlignment = Alignment.Center,
         ) {
