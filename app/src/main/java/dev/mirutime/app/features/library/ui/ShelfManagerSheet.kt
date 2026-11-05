@@ -108,7 +108,7 @@ fun ShelfManagerSheet(
                 )
             }
         }
-        SheetSection(title = stringResource(R.string.shelf_section_manage), initiallyExpanded = true) {
+        SheetSection(title = stringResource(R.string.shelf_section_manage)) {
             TextButton(onClick = { createOpen = true }) {
                 Text(text = stringResource(R.string.shelf_new_btn))
             }

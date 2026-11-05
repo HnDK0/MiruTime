@@ -18,7 +18,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -95,6 +97,11 @@ import kotlinx.coroutines.launch
 //     its row. Toggle icon + three dots per installed row (sheet: check
 //     update, plugin settings, edit plugin, translator, uninstall).
 // Long-press an installed row to multi-select and uninstall in bulk.
+
+// Repo card (0), management card (1), sticky search (2); results follow.
+private const val ExtensionSearchItemIndex = 2
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ManageExtensionsScreen(
     contentPadding: PaddingValues,
@@ -224,7 +231,16 @@ fun ManageExtensionsScreen(
         }
     }
 
+    val listState = rememberLazyListState()
+    // Typing must never leave the matches under the keyboard: the search bar
+    // is pinned and every query change brings the results back under it.
+    LaunchedEffect(filters.query) {
+        if (filters.query.isNotBlank()) {
+            listState.animateScrollToItem(ExtensionSearchItemIndex)
+        }
+    }
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(MiruSize.Gap),
         contentPadding = PaddingValues(
@@ -385,7 +401,7 @@ fun ManageExtensionsScreen(
                 }
             }
         }
-        item(key = "filter-bar") {
+        stickyHeader(key = "filter-bar") {
             CatalogSearchBar(
                 query = filters.query,
                 onQueryChange = { filters = filters.copy(query = it) },

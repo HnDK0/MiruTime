@@ -1489,7 +1489,7 @@ private fun FilterSheet(
         maxHeightFraction = 0.55f,
     ) {
         if (sortEnabled) {
-            SheetSection(title = stringResource(R.string.lib_section_sort), initiallyExpanded = true) {
+            SheetSection(title = stringResource(R.string.lib_section_sort)) {
                 SortOptions(sort = draftSort, sortDir = draftSortDir) { option ->
                     if (option == draftSort) {
                         draftSortDir = draftSortDir.flip()

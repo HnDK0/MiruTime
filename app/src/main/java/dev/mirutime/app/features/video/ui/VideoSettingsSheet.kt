@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,12 +36,15 @@ import dev.mirutime.app.features.video.domain.isVideoResolutionLabel
 import dev.mirutime.app.features.video.domain.videoVariantChoices
 import dev.mirutime.core.api.VideoStream
 import dev.mirutime.uikit.AppBottomSheet
+import dev.mirutime.uikit.ChipOption
+import dev.mirutime.uikit.ChipRow
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.SettingsSliderRow
 import dev.mirutime.uikit.SettingsSwitchRow
 import dev.mirutime.uikit.SettingsValueRow
+import dev.mirutime.uikit.SheetSection
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -121,134 +125,157 @@ fun VideoSettingsSheet(
         description = stringResource(R.string.video_settings_desc),
         onClose = onClose,
     ) {
-        VideoSectionHeader(stringResource(R.string.video_section_playback))
-        VideoChipLabel(stringResource(R.string.video_speed))
-        VideoChipRow {
-            VideoSpeedOptions.forEach { option ->
-                VideoChoiceChip(
-                    text = speedLabel(option),
-                    selected = option == speed,
-                    onClick = { onSpeed(option) },
-                )
-            }
-        }
-        VideoChipLabel(stringResource(R.string.video_seek_step))
-        VideoChipRow {
-            VideoSeekStepOptions.forEach { option ->
-                VideoChoiceChip(
-                    text = stringResource(R.string.video_seek_step_fmt, option / 1000),
-                    selected = option == AppSettings.videoSeekStepMs,
-                    onClick = { AppSettings.videoSeekStepMs = option },
-                )
-            }
-        }
-        VideoChipLabel(stringResource(R.string.video_auto_hide))
-        VideoChipRow {
-            VideoAutoHideOptions.forEach { option ->
-                VideoChoiceChip(
-                    text = if (option == 0) {
-                        stringResource(R.string.video_auto_hide_never)
-                    } else {
-                        stringResource(R.string.video_seconds_value, secondsLabel(option))
-                    },
-                    selected = option == AppSettings.videoControllerAutoHideMs,
-                    onClick = { AppSettings.videoControllerAutoHideMs = option },
-                )
-            }
-        }
-        SettingsSwitchRow(
-            title = stringResource(R.string.video_auto_next),
-            subtitle = stringResource(R.string.video_auto_next_desc),
-            checked = AppSettings.videoAutoNext,
-            onChange = { AppSettings.videoAutoNext = it },
-            horizontalPadding = 0.dp,
-        )
-
-        VideoSectionHeader(stringResource(R.string.video_section_video))
-        // The variant value can be a full "server · quality · language" label;
-        // split the row 50/50 so the label never collapses to one letter.
-        VideoVariantValueRow(
-            value = currentVariantLabel,
-            onClick = onVariantClick,
-        )
-        // One HLS level is not a choice: the row is absent, not greyed.
-        if (currentResolutionLabel != null) {
-            SettingsValueRow(
-                title = stringResource(R.string.video_resolution),
-                value = currentResolutionLabel,
-                valueColor = muted,
-                onClick = onResolutionClick,
+        SheetSection(
+            title = stringResource(R.string.video_section_playback),
+            summary = speedLabel(speed),
+        ) {
+            VideoChipLabel(stringResource(R.string.video_speed))
+            ChipRow(
+                options = VideoSpeedOptions.map { ChipOption(it.toString(), speedLabel(it)) },
+                selectedIds = setOf(speed.toString()),
+                onToggle = { onSpeed(it.toFloat()) },
+                contentPadding = PaddingValues(0.dp),
+                modifier = Modifier.padding(bottom = MiruSpace.Xs),
+            )
+            VideoChipLabel(stringResource(R.string.video_seek_step))
+            ChipRow(
+                options = VideoSeekStepOptions.map {
+                    ChipOption(
+                        it.toString(),
+                        stringResource(R.string.video_seek_step_fmt, it / 1000),
+                    )
+                },
+                selectedIds = setOf(AppSettings.videoSeekStepMs.toString()),
+                onToggle = { AppSettings.videoSeekStepMs = it.toInt() },
+                contentPadding = PaddingValues(0.dp),
+                modifier = Modifier.padding(bottom = MiruSpace.Xs),
+            )
+            VideoChipLabel(stringResource(R.string.video_auto_hide))
+            ChipRow(
+                options = VideoAutoHideOptions.map { option ->
+                    ChipOption(
+                        option.toString(),
+                        if (option == 0) {
+                            stringResource(R.string.video_auto_hide_never)
+                        } else {
+                            stringResource(R.string.video_seconds_value, secondsLabel(option))
+                        },
+                    )
+                },
+                selectedIds = setOf(AppSettings.videoControllerAutoHideMs.toString()),
+                onToggle = { AppSettings.videoControllerAutoHideMs = it.toInt() },
+                contentPadding = PaddingValues(0.dp),
+                modifier = Modifier.padding(bottom = MiruSpace.S),
+            )
+            SettingsSwitchRow(
+                title = stringResource(R.string.video_auto_next),
+                subtitle = stringResource(R.string.video_auto_next_desc),
+                checked = AppSettings.videoAutoNext,
+                onChange = { AppSettings.videoAutoNext = it },
                 horizontalPadding = 0.dp,
             )
         }
 
-        VideoSectionHeader(stringResource(R.string.video_section_gestures))
-        SettingsSwitchRow(
-            title = stringResource(R.string.video_gesture_double_tap),
-            checked = AppSettings.videoGestureDoubleTap,
-            onChange = { AppSettings.videoGestureDoubleTap = it },
-            horizontalPadding = 0.dp,
-        )
-        SettingsSwitchRow(
-            title = stringResource(R.string.video_gesture_vertical_swipe),
-            checked = AppSettings.videoGestureVerticalSwipe,
-            onChange = { AppSettings.videoGestureVerticalSwipe = it },
-            horizontalPadding = 0.dp,
-        )
-        SettingsSwitchRow(
-            title = stringResource(R.string.video_gesture_long_press),
-            checked = AppSettings.videoGestureLongPressSpeed,
-            onChange = { AppSettings.videoGestureLongPressSpeed = it },
-            horizontalPadding = 0.dp,
-        )
-        SettingsSwitchRow(
-            title = stringResource(R.string.video_gesture_swapped_sides),
-            subtitle = stringResource(R.string.video_gesture_swapped_sides_desc),
-            checked = AppSettings.videoGestureSwappedSides,
-            onChange = { AppSettings.videoGestureSwappedSides = it },
-            horizontalPadding = 0.dp,
-        )
-        SettingsSliderRow(
-            title = stringResource(R.string.video_gesture_sensitivity),
-            subtitle = stringResource(R.string.video_gesture_sensitivity_desc),
-            valueText = "${(AppSettings.videoGestureDragThreshold * 100).roundToInt()}%",
-            value = AppSettings.videoGestureDragThreshold,
-            range = DragThresholdMin..DragThresholdMax,
-            steps = DragThresholdSteps,
-            onChange = {
-                AppSettings.videoGestureDragThreshold = (it * 100).roundToInt() / 100f
-            },
-            horizontalPadding = 0.dp,
-        )
+        SheetSection(
+            title = stringResource(R.string.video_section_video),
+            summary = currentVariantLabel,
+        ) {
+            SettingsValueRow(
+                title = stringResource(R.string.video_variant),
+                value = currentVariantLabel,
+                valueColor = muted,
+                onClick = onVariantClick,
+                horizontalPadding = 0.dp,
+            )
+            // One HLS level is not a choice: the row is absent, not greyed.
+            if (currentResolutionLabel != null) {
+                SettingsValueRow(
+                    title = stringResource(R.string.video_resolution),
+                    value = currentResolutionLabel,
+                    valueColor = muted,
+                    onClick = onResolutionClick,
+                    horizontalPadding = 0.dp,
+                )
+            }
+        }
 
-        VideoSectionHeader(stringResource(R.string.video_section_audio))
-        SettingsValueRow(
-            title = stringResource(R.string.video_audio),
-            value = currentAudioLabel,
-            valueColor = muted,
-            enabled = audioEnabled,
-            onClick = onAudioClick,
-            horizontalPadding = 0.dp,
-        )
+        SheetSection(title = stringResource(R.string.video_section_gestures)) {
+            SettingsSwitchRow(
+                title = stringResource(R.string.video_gesture_double_tap),
+                checked = AppSettings.videoGestureDoubleTap,
+                onChange = { AppSettings.videoGestureDoubleTap = it },
+                horizontalPadding = 0.dp,
+            )
+            SettingsSwitchRow(
+                title = stringResource(R.string.video_gesture_vertical_swipe),
+                checked = AppSettings.videoGestureVerticalSwipe,
+                onChange = { AppSettings.videoGestureVerticalSwipe = it },
+                horizontalPadding = 0.dp,
+            )
+            SettingsSwitchRow(
+                title = stringResource(R.string.video_gesture_long_press),
+                checked = AppSettings.videoGestureLongPressSpeed,
+                onChange = { AppSettings.videoGestureLongPressSpeed = it },
+                horizontalPadding = 0.dp,
+            )
+            SettingsSwitchRow(
+                title = stringResource(R.string.video_gesture_swapped_sides),
+                subtitle = stringResource(R.string.video_gesture_swapped_sides_desc),
+                checked = AppSettings.videoGestureSwappedSides,
+                onChange = { AppSettings.videoGestureSwappedSides = it },
+                horizontalPadding = 0.dp,
+            )
+            SettingsSliderRow(
+                title = stringResource(R.string.video_gesture_sensitivity),
+                subtitle = stringResource(R.string.video_gesture_sensitivity_desc),
+                valueText = "${(AppSettings.videoGestureDragThreshold * 100).roundToInt()}%",
+                value = AppSettings.videoGestureDragThreshold,
+                range = DragThresholdMin..DragThresholdMax,
+                steps = DragThresholdSteps,
+                onChange = {
+                    AppSettings.videoGestureDragThreshold = (it * 100).roundToInt() / 100f
+                },
+                horizontalPadding = 0.dp,
+            )
+        }
 
-        VideoSectionHeader(stringResource(R.string.video_section_subtitles))
-        SettingsValueRow(
-            title = stringResource(R.string.video_subtitle_track),
-            value = currentSubtitleLabel,
-            valueColor = muted,
-            enabled = subtitlesEnabled,
-            onClick = onSubtitlesClick,
-            horizontalPadding = 0.dp,
-        )
+        SheetSection(
+            title = stringResource(R.string.video_section_audio),
+            summary = currentAudioLabel,
+        ) {
+            SettingsValueRow(
+                title = stringResource(R.string.video_audio),
+                value = currentAudioLabel,
+                valueColor = muted,
+                enabled = audioEnabled,
+                onClick = onAudioClick,
+                horizontalPadding = 0.dp,
+            )
+        }
 
-        VideoSectionHeader(stringResource(R.string.video_section_screen))
-        SettingsSwitchRow(
-            title = stringResource(R.string.video_keep_screen),
-            subtitle = stringResource(R.string.video_keep_screen_desc),
-            checked = keepScreenOn,
-            onChange = onKeepScreenOn,
-            horizontalPadding = 0.dp,
-        )
+        SheetSection(
+            title = stringResource(R.string.video_section_subtitles),
+            summary = currentSubtitleLabel,
+        ) {
+            SettingsValueRow(
+                title = stringResource(R.string.video_subtitle_track),
+                value = currentSubtitleLabel,
+                valueColor = muted,
+                enabled = subtitlesEnabled,
+                onClick = onSubtitlesClick,
+                horizontalPadding = 0.dp,
+            )
+        }
+
+        SheetSection(title = stringResource(R.string.video_section_screen)) {
+            SettingsSwitchRow(
+                title = stringResource(R.string.video_keep_screen),
+                subtitle = stringResource(R.string.video_keep_screen_desc),
+                checked = keepScreenOn,
+                onChange = onKeepScreenOn,
+                horizontalPadding = 0.dp,
+            )
+        }
     }
 }
 
@@ -273,89 +300,27 @@ fun VideoVariantSheet(
         onClose = onClose,
     ) {
         if (quality.isNotEmpty()) {
-            VideoSectionHeader(stringResource(R.string.video_quality))
-            quality.forEach { choice ->
-                VideoVariantRow(
-                    choice = choice,
-                    selected = choice.index == selectedStreamIndex,
-                    onSelect = { onSelect(choice.index) },
-                )
+            SheetSection(title = stringResource(R.string.video_quality)) {
+                quality.forEach { choice ->
+                    VideoVariantRow(
+                        choice = choice,
+                        selected = choice.index == selectedStreamIndex,
+                        onSelect = { onSelect(choice.index) },
+                    )
+                }
             }
         }
         if (voice.isNotEmpty()) {
-            VideoSectionHeader(stringResource(R.string.video_voiceover))
-            voice.forEach { choice ->
-                VideoVariantRow(
-                    choice = choice,
-                    selected = choice.index == selectedStreamIndex,
-                    onSelect = { onSelect(choice.index) },
-                )
+            SheetSection(title = stringResource(R.string.video_voiceover)) {
+                voice.forEach { choice ->
+                    VideoVariantRow(
+                        choice = choice,
+                        selected = choice.index == selectedStreamIndex,
+                        onSelect = { onSelect(choice.index) },
+                    )
+                }
             }
         }
-    }
-}
-
-@Composable
-private fun VideoVariantValueRow(
-    value: String,
-    onClick: () -> Unit,
-) {
-    val extra = LocalMiruExtraColors.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onClick)
-            .defaultMinSize(minHeight = MiruSize.Row)
-            .padding(vertical = MiruSpace.S),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(MiruSpace.M),
-    ) {
-        Text(
-            text = stringResource(R.string.video_variant),
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = extra.muted,
-            textAlign = TextAlign.End,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-            contentDescription = null,
-            tint = extra.muted,
-            modifier = Modifier.size(16.dp),
-        )
-    }
-}
-
-@Composable
-private fun VideoSectionHeader(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = MiruSpace.M, bottom = MiruSpace.Xs),
-    )
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun VideoChipRow(content: @Composable () -> Unit) {
-    FlowRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = MiruSpace.Xs),
-        horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-        verticalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
-    ) {
-        content()
     }
 }
 
@@ -366,22 +331,6 @@ private fun VideoChipLabel(text: String) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = MiruSpace.S, bottom = MiruSpace.Xs),
-    )
-}
-
-@Composable
-private fun VideoChoiceChip(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(text = text, maxLines = 2) },
-        // Material's filter chip already adds a 48dp minimum interactive
-        // component; the explicit token keeps the target stable at 200% font.
-        modifier = Modifier.heightIn(min = MiruSize.Touch),
     )
 }
 

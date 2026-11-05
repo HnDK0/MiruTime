@@ -95,7 +95,6 @@ fun MigrationFilterSheet(
 
         SheetSection(
             title = stringResource(R.string.migration_filter_sources_section),
-            initiallyExpanded = true,
         ) {
             // Count and both bulk actions get their own lines at 200%: a
             // single Row clipped "Clear" against the sheet edge.
@@ -224,7 +223,6 @@ fun MigrationFilterSheet(
 
         SheetSection(
             title = stringResource(R.string.migration_options_title),
-            initiallyExpanded = true,
         ) {
             SettingsSwitchRow(
                 title = stringResource(R.string.migration_option_progress),
