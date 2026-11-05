@@ -55,5 +55,7 @@ class CoverReactivityContractTest {
         assertTrue(library.contains("coverFixes[book.bookUrl] = fresh"))
         assertTrue(library.contains("val fixCover: (LibraryBook) -> LibraryBook"))
         assertTrue(library.contains("book = fixCover(book)"))
+        assertTrue(library.contains("reloadKey = pager.generation"))
+        assertTrue(library.contains("onRetry = onRetry"))
     }
 }

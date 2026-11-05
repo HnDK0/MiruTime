@@ -716,10 +716,18 @@ fun LibraryScreen(
             } else {
                 if (lastRead != null && shelfId == "reading") {
                     item {
-                        ResumeCard(
-                            book = fixCover(lastRead!!),
-                            onOpen = { onBookOpen(lastRead!!.bookUrl) },
-                        )
+                        lastRead?.let { book ->
+                            ResumeCard(
+                                book = fixCover(book),
+                                onOpen = { onBookOpen(book.bookUrl) },
+                                onRetry = {
+                                    provider.refreshCover(book.bookUrl).getOrNull()?.also { fresh ->
+                                        coverFixes[book.bookUrl] = fresh
+                                    }
+                                },
+                                reloadKey = pager.generation,
+                            )
+                        }
                     }
                 }
 
@@ -880,6 +888,7 @@ fun LibraryScreen(
                                                 coverFixes[book.bookUrl] = fresh
                                             }
                                         },
+                                        reloadKey = pager.generation,
                                         modifier = Modifier.weight(1f),
                                     )
                                 }
@@ -905,6 +914,7 @@ fun LibraryScreen(
                                     coverFixes[book.bookUrl] = fresh
                                 }
                             },
+                            reloadKey = pager.generation,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = MiruSpace.CardGap),
@@ -1282,7 +1292,12 @@ private fun SkeletonCoverGrid(columns: Int) {
 // button. Roughly half the height of the old header + block + full-width
 // button.
 @Composable
-private fun ResumeCard(book: LibraryBook, onOpen: () -> Unit) {
+private fun ResumeCard(
+    book: LibraryBook,
+    onOpen: () -> Unit,
+    onRetry: (suspend () -> String?)? = null,
+    reloadKey: Any? = null,
+) {
     val title = book.translatedTitle ?: book.title
     // Position-based progress: the saved chapter Continue restores, not the
     // number of fully finished chapters.
@@ -1305,6 +1320,8 @@ private fun ResumeCard(book: LibraryBook, onOpen: () -> Unit) {
                     .aspectRatio(1f / 1.45f)
                     .padding(CoverInset),
                 corner = MiruRadius.Cover,
+                onRetry = onRetry,
+                reloadKey = reloadKey,
             )
             Spacer(modifier = Modifier.width(MiruSpace.M))
             Column(modifier = Modifier.weight(1f)) {
