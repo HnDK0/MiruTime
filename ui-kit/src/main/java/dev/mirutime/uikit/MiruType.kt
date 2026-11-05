@@ -94,5 +94,7 @@ object MiruCardType {
     )
     val Meta = style(FontWeight.Normal, 10, 13)
     val Rating = style(FontWeight.SemiBold, 10, 13).copy(fontSize = 10.5.sp)
+    // Source chip on a cover: one step smaller than the list meta.
+    val CoverMeta = style(FontWeight.Normal, 9, 12)
     val Num = style(FontWeight.SemiBold, 10, 13)
 }

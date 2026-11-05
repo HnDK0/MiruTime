@@ -443,8 +443,11 @@ private fun CoverBox(
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(MiruSpace.S)
-                    .fillMaxWidth(0.6f),
+                    .padding(
+                        start = MiruSpace.S,
+                        end = MiruSpace.S,
+                        bottom = MiruSpace.Xs,
+                    ),
                 verticalArrangement = Arrangement.spacedBy(MiruSpace.Xxs),
             ) {
                 if (hasUpdate) {
@@ -454,6 +457,7 @@ private fun CoverBox(
                     MiruSourceLabel(
                         text = bottomSource,
                         newChapters = bottomNewChapters,
+                        textStyle = MiruCardType.CoverMeta,
                     )
                 }
             }

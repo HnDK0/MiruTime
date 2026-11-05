@@ -10,6 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -21,6 +22,7 @@ fun MiruSourceLabel(
     text: String,
     modifier: Modifier = Modifier,
     newChapters: Int = 0,
+    textStyle: TextStyle = MiruCardType.Meta,
 ) {
     val extra = LocalMiruExtraColors.current
     val updateLabel = newChaptersLabel(newChapters)
@@ -39,7 +41,7 @@ fun MiruSourceLabel(
                 text = text,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                style = MiruCardType.Meta,
+                style = textStyle,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }

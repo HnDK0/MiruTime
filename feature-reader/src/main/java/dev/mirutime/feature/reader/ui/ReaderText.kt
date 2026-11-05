@@ -30,7 +30,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -51,6 +53,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.mirutime.feature.reader.R
@@ -76,6 +79,7 @@ fun ReaderBlockView(
     translationFirst: Boolean = true,
     ttsHighlight: TtsHighlight? = null,
     onSearchSelection: ((String) -> Unit)? = null,
+    bleed: Dp = 0.dp,
 ) {
     val searchable = SelectionSearch.isSearchable(block.kind)
     val selectionState = rememberSelectionState()
@@ -83,10 +87,10 @@ fun ReaderBlockView(
     val body: @Composable () -> Unit = {
         when {
             translated != null && searchable && parallel ->
-                ParallelTranslation(block, translated, style, translationFirst, ttsHighlight)
+                ParallelTranslation(block, translated, style, translationFirst, ttsHighlight, bleed)
             translated != null && searchable ->
-                TranslatedText(block.kind, translated, style, block, ttsHighlight)
-            else -> OriginalText(block, style, ttsHighlight)
+                TranslatedText(block.kind, translated, style, block, ttsHighlight, bleed)
+            else -> OriginalText(block, style, ttsHighlight, bleed)
         }
     }
     // Long press selects everywhere; short taps are handled at the Initial
@@ -104,10 +108,15 @@ fun ReaderBlockView(
                 .fillMaxWidth()
                 .then(
                     if (blockTint) {
-                        Modifier.background(
-                            Color(ttsHighlight.colorArgb).copy(alpha = 0.10f),
-                            RoundedCornerShape(6.dp),
-                        )
+                        Modifier.drawBehind {
+                            val bleedPx = bleed.toPx()
+                            drawRoundRect(
+                                color = Color(ttsHighlight.colorArgb).copy(alpha = 0.10f),
+                                topLeft = Offset(-bleedPx, 0f),
+                                size = Size(size.width + bleedPx * 2f, size.height),
+                                cornerRadius = CornerRadius(6.dp.toPx()),
+                            )
+                        }
                     } else {
                         Modifier
                     },
@@ -151,7 +160,12 @@ fun Modifier.selectionSearchMenu(
 }
 
 @Composable
-private fun OriginalText(block: ReaderBlock, style: ReaderStyle, highlight: TtsHighlight?) {
+private fun OriginalText(
+    block: ReaderBlock,
+    style: ReaderStyle,
+    highlight: TtsHighlight?,
+    bleed: Dp,
+) {
     when (block.kind) {
         BlockKind.Heading -> Text(
             text = highlightedText(block.original, block, style, highlight, applyFirstLetterBold = false),
@@ -195,6 +209,7 @@ private fun OriginalText(block: ReaderBlock, style: ReaderStyle, highlight: TtsH
                                         end = rawEnd,
                                         isTranslated = false,
                                         highlight = highlight,
+                                        bleed = bleed,
                                     ),
                                 ),
                         ) {
@@ -232,6 +247,7 @@ private fun TranslatedText(
     style: ReaderStyle,
     block: ReaderBlock? = null,
     highlight: TtsHighlight? = null,
+    bleed: Dp = 0.dp,
 ) {
     val textStyle = if (kind == BlockKind.Heading) style.headingTextStyle() else style.toTextStyle()
     // Only paragraph splitting gets the per-sentence tint; other kinds keep the
@@ -251,6 +267,7 @@ private fun TranslatedText(
                                 end = span.end,
                                 isTranslated = true,
                                 highlight = highlight,
+                                bleed = bleed,
                             ),
                         ),
                 ) {
@@ -336,6 +353,7 @@ private fun ParallelTranslation(
     style: ReaderStyle,
     translationFirst: Boolean,
     highlight: TtsHighlight? = null,
+    bleed: Dp = 0.dp,
 ) {
     val translatedStyle = if (block.kind == BlockKind.Heading) {
         style.headingTextStyle()
@@ -358,7 +376,7 @@ private fun ParallelTranslation(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .then(parallelPairHighlightModifier(block.id, copy, highlight)),
+                        .then(parallelPairHighlightModifier(block.id, copy, highlight, bleed)),
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(copyGap)) {
                         ParallelPairCopy(
@@ -751,6 +769,7 @@ private fun sentenceHighlightModifier(
     end: Int,
     isTranslated: Boolean,
     highlight: TtsHighlight?,
+    bleed: Dp,
 ): Modifier {
     if (highlight == null ||
         highlight.blockId != blockId ||
@@ -759,10 +778,15 @@ private fun sentenceHighlightModifier(
         return Modifier
     }
     if (!containsCursor(start, end, highlight.start)) return Modifier
-    return Modifier.background(
-        Color(highlight.colorArgb).copy(alpha = 0.10f),
-        RoundedCornerShape(6.dp),
-    )
+    return Modifier.drawBehind {
+        val bleedPx = bleed.toPx()
+        drawRoundRect(
+            color = Color(highlight.colorArgb).copy(alpha = 0.10f),
+            topLeft = Offset(-bleedPx, 0f),
+            size = Size(size.width + bleedPx * 2f, size.height),
+            cornerRadius = CornerRadius(6.dp.toPx()),
+        )
+    }
 }
 
 /** Tints one parallel pair when the cursor is inside either of its copies. */
@@ -770,6 +794,7 @@ private fun parallelPairHighlightModifier(
     blockId: BlockId,
     copy: FeedPairCopy,
     highlight: TtsHighlight?,
+    bleed: Dp,
 ): Modifier {
     if (highlight == null || highlight.blockId != blockId) return Modifier
     val active = if (highlight.translated) {

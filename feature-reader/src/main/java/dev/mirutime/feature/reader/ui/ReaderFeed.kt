@@ -233,6 +233,7 @@ internal fun ReaderFeed(
                         translationFirst = translationFirst,
                         ttsHighlight = ttsHighlight,
                         onSearchSelection = onSearchSelection,
+                        bleed = maxOf(startPadding, endPadding),
                     )
                 }
                 is FeedEntry.Gap -> {
