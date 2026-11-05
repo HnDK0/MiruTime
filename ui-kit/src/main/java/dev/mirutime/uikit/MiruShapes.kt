@@ -71,6 +71,15 @@ object MiruSize {
     val Stroke = 1.dp
     val ContentMaxWidth = 600.dp
     const val SheetMaxFraction = 0.7f
+    // Compact sheet handle: the visual bar sits in a short box so the header
+    // keeps its height for content instead of a 48dp native handle.
+    val SheetHandleBox = 24.dp
+    val SheetHandleWidth = 32.dp
+    val SheetHandleHeight = 4.dp
+    // Speed/pitch rows: the label and the value keep the slider on the same
+    // axis across rows.
+    val SliderLabelWidth = 56.dp
+    val SliderValueWidth = 56.dp
 }
 
 // Legacy names kept so existing imports keep compiling.

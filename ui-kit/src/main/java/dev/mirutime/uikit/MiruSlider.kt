@@ -16,6 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -29,9 +31,9 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-// MiruTime's compact slider: a 2dp pill track, a 15dp thumb and a 48dp touch
-// lane. Material's thumb and overlay are much heavier than the rest of the
-// settings rows, so this keeps the same progress semantics without the bulk.
+// MiruTime's slider: an 8dp pill track and a 26dp iOS/Telegram-style white
+// knob with a soft shadow, inside the 48dp touch lane. The value label lives
+// in the settings row (right side), never above the thumb.
 @Composable
 fun MiruSlider(
     value: Float,
@@ -47,10 +49,10 @@ fun MiruSlider(
     val currentOnValueChange by rememberUpdatedState(onValueChange)
     val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
     val density = LocalDensity.current
-    val thumbRadius = with(density) { 7.5.dp.toPx() }
-    val trackHeight = with(density) { 2.dp.toPx() }
+    val thumbRadius = with(density) { 13.dp.toPx() }
+    val trackHeight = with(density) { 8.dp.toPx() }
     val activeColor = if (enabled) extra.accent else extra.muted
-    val trackColor = extra.muted.copy(alpha = 0.30f)
+    val trackColor = extra.muted.copy(alpha = 0.20f)
     var dragValue by remember { mutableStateOf<Float?>(null) }
 
     fun valueAt(x: Float, width: Float): Float {
@@ -173,10 +175,26 @@ fun MiruSlider(
                 cornerRadius = CornerRadius(trackHeight / 2f),
             )
         }
+        val pressed = dragValue != null
+        val radius = thumbRadius * if (pressed) 1.08f else 1f
+        val thumbCenter = Offset(trackLeft + activeWidth, centerY)
+        // iOS/Telegram knob: white circle, hairline ring and a soft drop shadow,
+        // so it reads on both light and dark sheets.
         drawCircle(
-            color = activeColor,
-            radius = thumbRadius,
-            center = Offset(trackLeft + activeWidth, centerY),
+            color = Color.Black.copy(alpha = 0.18f),
+            radius = radius,
+            center = Offset(thumbCenter.x, thumbCenter.y + 1.5.dp.toPx()),
+        )
+        drawCircle(
+            color = if (enabled) Color.White else extra.muted.copy(alpha = 0.55f),
+            radius = radius,
+            center = thumbCenter,
+        )
+        drawCircle(
+            color = extra.muted.copy(alpha = 0.28f),
+            radius = radius,
+            center = thumbCenter,
+            style = Stroke(width = 1.dp.toPx()),
         )
     }
 }

@@ -28,7 +28,7 @@ class ControlLayoutRegressionTest {
         assertFalse("A screen-height cap on only the inner column is not a whole-sheet cap", sheet.contains("LocalConfiguration.current.screenHeightDp"))
         assertTrue(sheet.contains("BoxWithConstraints"))
         assertTrue(sheet.contains("sheetContentMaxHeight("))
-        assertTrue(sheet.contains("BottomSheetDefaults.DragHandle()"))
+        assertTrue(sheet.contains("MiruSize.SheetHandleBox"))
         assertTrue(sheet.contains("onSizeChanged"))
         assertTrue(sheet.contains("contentWindowInsets = { WindowInsets(0) }"))
         assertTrue(sheet.contains("windowInsetsPadding(WindowInsets.navigationBars)"))

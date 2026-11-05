@@ -186,6 +186,10 @@ fun MiruBookCard(
             contentTypeDescription = contentTypeDescription,
             updateDescription = updateDescription,
             selectionDescription = selectionDescription,
+            // Progress-above cards carry the source on the cover's bottom-left
+            // instead of a line under the title.
+            bottomSource = if (spec.progressFullWidth) source else null,
+            bottomNewChapters = if (spec.progressFullWidth) newChapters else 0,
             cover = cover,
         )
         if (spec.titleOnCover) {
@@ -207,25 +211,16 @@ fun MiruBookCard(
                 )
             }
         }
-        when {
-            spec.progressFullWidth && !source.isNullOrBlank() -> {
-                MiruSourceLabel(
-                    text = source,
-                    newChapters = newChapters,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-            !spec.statusAbove && !source.isNullOrBlank() -> {
-                StatusRow(
-                    source = source,
-                    read = readChapters,
-                    total = totalChapters,
-                    newChapters = newChapters,
-                    progressDescription = progressDescription,
-                    splitWidth = splitWidth,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
+        if (!spec.progressFullWidth && !spec.statusAbove && !source.isNullOrBlank()) {
+            StatusRow(
+                source = source,
+                read = readChapters,
+                total = totalChapters,
+                newChapters = newChapters,
+                progressDescription = progressDescription,
+                splitWidth = splitWidth,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
         }
         footer?.invoke()
     }
@@ -397,6 +392,8 @@ private fun CoverBox(
     contentTypeDescription: String,
     updateDescription: String,
     selectionDescription: String,
+    bottomSource: String? = null,
+    bottomNewChapters: Int = 0,
     cover: @Composable BoxScope.() -> Unit,
 ) {
     Box(
@@ -442,13 +439,24 @@ private fun CoverBox(
                     .padding(4.dp),
             )
         }
-        if (hasUpdate) {
-            MiruUpdateDot(
-                contentDescription = updateDescription,
+        if (hasUpdate || !bottomSource.isNullOrBlank()) {
+            Column(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(6.dp),
-            )
+                    .padding(MiruSpace.S)
+                    .fillMaxWidth(0.6f),
+                verticalArrangement = Arrangement.spacedBy(MiruSpace.Xxs),
+            ) {
+                if (hasUpdate) {
+                    MiruUpdateDot(contentDescription = updateDescription)
+                }
+                if (!bottomSource.isNullOrBlank()) {
+                    MiruSourceLabel(
+                        text = bottomSource,
+                        newChapters = bottomNewChapters,
+                    )
+                }
+            }
         }
         if (selected) {
             MiruSelectionCheck(
