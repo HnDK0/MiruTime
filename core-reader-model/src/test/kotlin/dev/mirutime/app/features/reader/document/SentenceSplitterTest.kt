@@ -133,9 +133,10 @@ class SentenceSplitterTest {
     }
 
     @Test
-    fun `paragraph wrapped in quotes is a frame and stays whole`() {
+    fun `paragraph wrapped in quotes is split into sentences`() {
         val input = "\"Junior Brothers and Sisters, you must cross the Daluo Immortal Bridge every morning to attend the lectures given by the Elders, and you must remember this rule well and never forget it. Otherwise, unless there is a truly valid reason, missing the morning class will result in a serious punishment for the whole group of newly inducted disciples.\""
-        assertEquals(listOf(input), segments(input))
+        assertEquals(2, segments(input).size)
+        assertTrue(segments(input).last().endsWith("\""))
     }
 
     @Test
@@ -302,9 +303,17 @@ class SentenceSplitterTest {
     }
 
     @Test
-    fun `shadow slave quoted dialogue stays one sentence`() {
+    fun `quoted paragraph with a trailing sentence period is split`() {
+        val input = "«Большинство из нас не встретит Потустороннего за всю свою жизнь. Это заставило церкви заподозрить то же самое. Хотя это и так, я уверен, что они всё ещё существуют»."
+        assertEquals(3, segments(input).size)
+        assertTrue(segments(input).last().endsWith("»."))
+        assertValidSpans(input)
+    }
+
+    @Test
+    fun `shadow slave quoted dialogue splits into sentences`() {
         val input = "\"These berries are called Bloodbane. They grow in the places where human blood was spilled. That's why there's always a lot of them along the slave trade routes.\""
-        assertEquals(listOf(input), segments(input))
+        assertEquals(3, segments(input).size)
         assertValidSpans(input)
     }
 

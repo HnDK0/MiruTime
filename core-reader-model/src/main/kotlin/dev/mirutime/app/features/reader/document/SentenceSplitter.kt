@@ -183,7 +183,21 @@ object SentenceSplitter {
      * boundary, basic ones ( . ! ? ) are validated.
      */
     private fun findValidBoundaries(text: String): List<Int> {
-        val stack = ArrayDeque<Char>()
+        // A paragraph that is one quoted block may contain several sentences
+        // (long dialogue). An inline quote or a quote followed by an
+        // attribution is part of a sentence and stays whole.
+        val trimmedStart = text.indexOfFirst { !it.isWhitespace() }
+        val trimmedEnd = text.indexOfLast { !it.isWhitespace() }
+        val closingOuterQuote = if (trimmedStart >= 0) quotedBlockEnd(text, trimmedStart) else null
+        // `».` is a quoted paragraph with the sentence period outside the quote.
+        val quoteWrappedParagraph = closingOuterQuote != null &&
+            text.substring(closingOuterQuote + 1).none { it.isLetterOrDigit() }
+
+        // Quotes and brackets are tracked separately: a quoted paragraph may
+        // contain several sentences, so a quote must not suppress boundaries.
+        // Brackets still do (an aside is kept whole).
+        val quotes = ArrayDeque<Char>()
+        val brackets = ArrayDeque<Char>()
         val boundaries = mutableListOf<Int>()
 
         var i = 0
@@ -192,43 +206,80 @@ object SentenceSplitter {
             when {
                 CLOSING_TO_OPENING_QUOTES.containsKey(ch) -> {
                     val opener = CLOSING_TO_OPENING_QUOTES.getValue(ch)
-                    if (stack.isNotEmpty() && stack.last() == opener) {
-                        stack.removeLast()
+                    if (quotes.isNotEmpty() && quotes.last() == opener) {
+                        quotes.removeLast()
                         // A terminator directly before a closing quote-pair is
                         // attached to it: the boundary is placed right after the
                         // closing quote ("大丈夫だ。」 そして去った。" → 2 segments).
                         val prev = text.getOrNull(i - 1)
-                        if (stack.isEmpty() && prev != null && prev in ALL_TERMINATORS &&
+                        if (quotes.isEmpty() && brackets.isEmpty() && prev != null &&
+                            prev in ALL_TERMINATORS &&
                             i + 1 < text.length &&
+                            text[i + 1] !in ALL_TERMINATORS &&
                             isBoundaryValid(text, prev, i - 1, i + 1)
                         ) {
                             boundaries.add(i)
                         }
                     } else if (ch in OPENING_QUOTES) {
-                        stack.addLast(ch)
+                        quotes.addLast(ch)
                     }
                 }
-                ch in OPENING_QUOTES -> stack.addLast(ch)
+                ch in OPENING_QUOTES -> quotes.addLast(ch)
                 CLOSING_TO_OPENING_BRACKETS.containsKey(ch) -> {
                     val opener = CLOSING_TO_OPENING_BRACKETS.getValue(ch)
-                    if (stack.isNotEmpty() && stack.last() == opener) stack.removeLast()
+                    if (brackets.isNotEmpty() && brackets.last() == opener) brackets.removeLast()
                 }
-                ch in OPENING_BRACKETS -> stack.addLast(ch)
+                ch in OPENING_BRACKETS -> brackets.addLast(ch)
                 ch in ALL_TERMINATORS -> {
                     // Adjacent punctuation runs ("?!", "!?", "....") belong together: the
                     // boundary is placed on the last terminator only, otherwise empty
                     // "!" / "." / "?" segments are produced.
                     val rightAfter = text.getOrNull(i + 1)
                     if (rightAfter == null || rightAfter !in ALL_TERMINATORS) {
-                        // Only at quote/bracket stack depth 0 can a terminator become
-                        // a sentence boundary; text inside quotes is never cut.
-                        if (stack.isEmpty() && isBoundaryValid(text, ch, i, i + 1)) boundaries.add(i)
+                        // The closing quote owns a terminator right before it; adding
+                        // a boundary here as well would produce a "»"-only span.
+                        val nextSig = nextSignificantChar(text, i + 1)
+                        val closingQuoteNext = nextSig != null &&
+                            quotes.isNotEmpty() &&
+                            CLOSING_TO_OPENING_QUOTES[nextSig]?.let { it == quotes.last() } == true
+                        val insideSplittableQuote = quotes.isEmpty() || quoteWrappedParagraph
+                        if (!closingQuoteNext && brackets.isEmpty() &&
+                            insideSplittableQuote &&
+                            isBoundaryValid(text, ch, i, i + 1)
+                        ) {
+                            boundaries.add(i)
+                        }
                     }
                 }
             }
             i++
         }
         return boundaries
+    }
+
+    /**
+     * Index of the closing quote that ends the quote block opened at [start],
+     * or null if that quote never closes. Used to detect a paragraph that is
+     * exactly one quoted block (it may then be split into sentences).
+     */
+    private fun quotedBlockEnd(text: String, start: Int): Int? {
+        val opener = text.getOrNull(start) ?: return null
+        if (opener !in OPENING_QUOTES) return null
+        val stack = ArrayDeque<Char>()
+        stack.addLast(opener)
+        var i = start + 1
+        while (i < text.length) {
+            val ch = text[i]
+            val openerForClose = CLOSING_TO_OPENING_QUOTES[ch]
+            if (openerForClose != null && stack.isNotEmpty() && stack.last() == openerForClose) {
+                stack.removeLast()
+                if (stack.isEmpty()) return i
+            } else if (ch in OPENING_QUOTES) {
+                stack.addLast(ch)
+            }
+            i++
+        }
+        return null
     }
 
     /**
