@@ -233,6 +233,11 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             pluginBookProvider,
             libraryRepository,
             pluginGraph::imageHeadersFor,
+            { url, headers ->
+                // Manga pages are larger than covers; the grid timeout would
+                // cut long strips off on slow CDNs.
+                pluginGraph.fetchImage("", url, headers, timeoutMs = MangaPageFetchTimeoutMs).bytes
+            },
             pluginGraph.cfGate,
             pluginGraph.plainEngine,
         )
@@ -546,3 +551,5 @@ private const val MAX_COVER_BACKFILL = 30
 // long enough to collapse a slider drag or a multi-field pair edit into one
 // SharedPreferences commit.
 private const val SETTINGS_DEBOUNCE_MS = 400L
+
+private const val MangaPageFetchTimeoutMs = 30_000L

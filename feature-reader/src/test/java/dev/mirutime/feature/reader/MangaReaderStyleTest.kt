@@ -15,7 +15,7 @@ class MangaReaderStyleTest {
         assertFalse(s.tapZoneInvert)
         assertTrue(s.showPageCounter)
         assertEquals(MangaWebtoonPadding.Medium, s.webtoonPadding)
-        assertTrue(s.doubleTapZoom)
+        assertFalse(s.doubleTapMenu)
         assertEquals(1f, s.brightness, 0.001f)
         assertEquals(MangaColorFilter.None, s.colorFilter)
         assertEquals(MangaPagedNavigation.Both, s.pagedNavigation)

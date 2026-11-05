@@ -24,6 +24,13 @@ class ReaderWindowTest {
     }
 
     @Test
+    fun `back closes a sheet but leaves the reader from the menu`() {
+        assertTrue(readerBackClosesOverlay(panelOpen = true))
+        // The menu overlay is not modal: back exits instead of hiding it.
+        assertFalse(readerBackClosesOverlay(panelOpen = false))
+    }
+
+    @Test
     fun `fullscreen padding ignores safe insets and stays stable`() {
         assertEquals(8f, readerTopPaddingDp(fullscreen = true, safeTopDp = 28f), 0.001f)
         assertEquals(24f, readerBottomPaddingDp(fullscreen = true, safeBottomDp = 32f), 0.001f)

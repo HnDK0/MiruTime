@@ -1,6 +1,7 @@
 package dev.mirutime.feature.reader.ui
 
 import androidx.compose.ui.unit.IntSize
+import dev.mirutime.feature.reader.MangaPagedNavigation
 import kotlin.math.roundToInt
 
 /**
@@ -75,33 +76,5 @@ internal fun mangaWebtoonPreloadIndices(
     return ahead + behind
 }
 
-/**
- * Exact decode size shared by the visible paged page and its prefetch. Coil
- * validates a memory-cache hit against the requested size, so a mismatch turns
- * the prefetch into a second decode and a visible flash at the page joint.
- */
-internal fun mangaPagedRequestSize(widthPx: Int, heightPx: Int): IntSize? =
-    if (widthPx > 0 && heightPx > 0) IntSize(widthPx, heightPx) else null
-
-/**
- * Webtoon decode size: width plus the shared fallback ratio, chosen before the
- * first decode. The measured height ratio is deliberately not an input: a page
- * decoded first and measured on success would otherwise change its request key
- * and decode a second time. The ratio only reserves layout height.
- */
-internal fun mangaWebtoonRequestSize(pageWidthPx: Int): IntSize? =
-    if (pageWidthPx <= 0) {
-        null
-    } else {
-        IntSize(
-            pageWidthPx,
-            (pageWidthPx * MangaWebtoonFallbackRatio).roundToInt().coerceAtLeast(1),
-        )
-    }
-
 internal fun mangaScrubberPage(value: Float, pageCount: Int): Int =
     if (pageCount <= 0) 0 else value.roundToInt().coerceIn(0, pageCount - 1)
-
-/** Local page files and content URIs never carry plugin request headers. */
-internal fun mangaImageNeedsHeaders(url: String): Boolean =
-    url.startsWith("http://") || url.startsWith("https://")

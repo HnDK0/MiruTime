@@ -89,6 +89,7 @@ class AppReaderTranslationPort(
                     },
                     translations = cleanTranslatedBlocks(value.bookUrl, value.translations),
                     configKey = value.configKey,
+                    bookUrl = value.bookUrl,
                     failure = when (value.failure) {
                         dev.mirutime.app.features.translation.data.ChapterTranslationFailure.LocalNetworkRequired ->
                             ReaderTranslationFailure.LocalNetworkRequired

@@ -6,6 +6,7 @@ import dev.mirutime.app.features.reader.data.AppReaderAssetPort
 import dev.mirutime.app.features.reader.data.AppReaderSettingsPort
 import dev.mirutime.app.features.reader.data.AppReaderTranslationPort
 import dev.mirutime.app.features.reader.data.DefaultReaderRepository
+import dev.mirutime.app.features.reader.data.MangaPageFileCache
 import dev.mirutime.app.features.reader.data.PrefsReaderConfigStore
 import dev.mirutime.app.features.reader.data.PrefsReadingPositionRepository
 import dev.mirutime.app.features.reader.data.ReadingPositionRepository
@@ -49,6 +50,9 @@ class ReaderGraph(
     bookProvider: BookDataProvider,
     private val libraryRepository: LibraryRepository? = null,
     private val imageHeaders: (String) -> Map<String, String> = { emptyMap() },
+    // Page bytes for the tiled manga viewer (the app owns the network client).
+    private val fetchImageBytes: suspend (String, Map<String, String>) -> ByteArray? =
+        { _, _ -> null },
     // Process-wide CF gate shared with the host fetcher and plugin clients,
     // so a cooldown entered from the reader blocks a second WebView there too.
     cfGate: CfGate,
@@ -114,6 +118,34 @@ class ReaderGraph(
 
     override fun imageHeadersFor(url: String): Map<String, String> = imageHeaders(url)
 
+    private val mangaPageFiles = MangaPageFileCache(
+        directory = java.io.File(appContext.cacheDir, "manga_pages"),
+        fetchRemote = fetchImageBytes,
+        headersFor = imageHeaders,
+        readLocalBytes = { url ->
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    appContext.contentResolver.openInputStream(android.net.Uri.parse(url))
+                        ?.use { input ->
+                            val out = java.io.ByteArrayOutputStream()
+                            val buffer = ByteArray(64 * 1024)
+                            var total = 0L
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                total += read
+                                if (total > MaxLocalPageBytes) return@use null
+                                out.write(buffer, 0, read)
+                            }
+                            out.toByteArray()
+                        }
+                }.getOrNull()
+            }
+        },
+    )
+
+    override suspend fun mangaPageFile(url: String): java.io.File? = mangaPageFiles.file(url)
+
     /** Keeps TTS alive in the background; idempotent while already running. */
     override fun startTtsPlayback(
         bookTitle: String,
@@ -144,3 +176,5 @@ class ReaderGraph(
         scope.launch { ttsSessionTracker?.stop() }
     }
 }
+
+private const val MaxLocalPageBytes = 64L * 1024 * 1024

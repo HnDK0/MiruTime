@@ -1,6 +1,5 @@
 package dev.mirutime.feature.reader.ui
 
-import android.content.Context
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -11,10 +10,6 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.calculatePan
-import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
@@ -44,7 +39,6 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -57,31 +51,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.painter.ColorPainter
-import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChanged
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import coil3.SingletonImageLoader
-import coil3.compose.AsyncImage
-import coil3.network.NetworkHeaders
-import coil3.network.httpHeaders
-import coil3.request.ImageRequest
-import coil3.size.Scale
-import dev.mirutime.feature.reader.R
 import dev.mirutime.app.features.reader.document.ReaderBlock
 import dev.mirutime.app.features.reader.document.ReaderDocument
 import dev.mirutime.app.features.reader.document.ReadingAnchor
@@ -97,21 +77,18 @@ import dev.mirutime.feature.reader.MangaReadingDirection
 import dev.mirutime.feature.reader.MangaReadingMode
 import dev.mirutime.feature.reader.MangaTapSide
 import dev.mirutime.feature.reader.MangaWebtoonPadding
+import dev.mirutime.feature.reader.R
 import dev.mirutime.feature.reader.mangaEndAction
 import dev.mirutime.feature.reader.mangaTapSide
 import dev.mirutime.feature.reader.tapTurn
-import kotlinx.coroutines.Job
+import dev.mirutime.feature.reader.ui.manga.MangaTiledImage
+import dev.mirutime.feature.reader.ui.manga.MangaZoomState
+import dev.mirutime.feature.reader.ui.manga.mangaColorFilter
+import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
-
-private const val MinMangaScale = 1f
-private const val MaxMangaScale = 4f
-private const val DoubleTapZoomScale = 2f
-
-// One stable painter for every loading page: the frame stays black instead of
-// flashing an empty surface while Coil swaps painters.
-private val MangaPagePlaceholder = ColorPainter(Color.Black)
 
 /**
  * Dedicated manga viewer. Paged mode is one image per screen with optional
@@ -147,7 +124,8 @@ internal fun ReaderMangaPager(
     feed: List<MangaFeedPage> = emptyList(),
     onVisibleChapter: (Int, ReadingAnchor?) -> Unit = { _, _ -> },
     onNearStart: (Int) -> Unit = {},
-    imageHeadersFor: (String) -> Map<String, String> = { emptyMap() },
+    // Local file for one page (the tiled viewer decodes regions from a file).
+    pageFile: suspend (String) -> File? = { null },
     // One chapter-pages refresh after a page exhausted its automatic retries.
     onRefreshPages: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -165,7 +143,6 @@ internal fun ReaderMangaPager(
     val endAction = mangaEndAction(visiblePage, pages.lastIndex, canNextChapter)
     val currentOnVisiblePage by rememberUpdatedState(onVisiblePage)
     val currentOnNearEnd by rememberUpdatedState(onNearEnd)
-    val context = LocalContext.current
     var readerSize by remember { mutableStateOf(IntSize.Zero) }
     val webtoonPaddingPx = with(LocalDensity.current) { style.webtoonPadding.toDp().roundToPx() }
 
@@ -185,27 +162,10 @@ internal fun ReaderMangaPager(
     LaunchedEffect(nearEnd) {
         if (nearEnd) currentOnNearEnd()
     }
-    LaunchedEffect(
-        nearEnd,
-        nextChapterFirstPage,
-        readerSize,
-        style.mode,
-        webtoonPaddingPx,
-        imageHeadersFor,
-    ) {
+    LaunchedEffect(nearEnd, nextChapterFirstPage, pageFile) {
         val ref = nextChapterFirstPage?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
         if (!nearEnd) return@LaunchedEffect
-        // Same size the first page will request once it is visible; display
-        // metrics include areas the reader does not draw into.
-        val size = when (style.mode) {
-            MangaReadingMode.Paged -> mangaPagedRequestSize(readerSize.width, readerSize.height)
-            MangaReadingMode.Webtoon -> mangaWebtoonRequestSize(
-                (readerSize.width - webtoonPaddingPx * 2).coerceAtLeast(1),
-            )
-        } ?: return@LaunchedEffect
-        SingletonImageLoader.get(context).enqueue(
-            mangaImageRequest(context, ref, size, style.mode.imageScale(), imageHeadersFor),
-        )
+        pageFile(ref)
     }
 
     Box(
@@ -236,7 +196,7 @@ internal fun ReaderMangaPager(
                     onToggleChrome = onToggleChrome,
                     onVisiblePage = { visiblePage = it },
                     scrubber = scrubber,
-                    imageHeadersFor = imageHeadersFor,
+                    pageFile = pageFile,
                     retryPolicy = pageRetryPolicy,
                     onRefreshPages = onRefreshPages,
                     viewportSize = readerSize,
@@ -258,7 +218,7 @@ internal fun ReaderMangaPager(
                     onToggleChrome = onToggleChrome,
                     onVisiblePage = { visiblePage = it },
                     scrubber = scrubber,
-                    imageHeadersFor = imageHeadersFor,
+                    pageFile = pageFile,
                     retryPolicy = pageRetryPolicy,
                     onRefreshPages = onRefreshPages,
                     viewportSize = readerSize,
@@ -344,7 +304,7 @@ private fun MangaPagedView(
     onToggleChrome: () -> Unit,
     onVisiblePage: (Int) -> Unit,
     scrubber: MangaScrubberState,
-    imageHeadersFor: (String) -> Map<String, String>,
+    pageFile: suspend (String) -> File?,
     retryPolicy: MangaPageRetryPolicy,
     onRefreshPages: () -> Unit,
     viewportSize: IntSize,
@@ -395,7 +355,7 @@ private fun MangaPagedView(
             onToggleChrome = onToggleChrome,
             onVisiblePage = onVisiblePage,
             scrubber = scrubber,
-            imageHeadersFor = imageHeadersFor,
+            pageFile = pageFile,
             retryPolicy = retryPolicy,
             onRefreshPages = onRefreshPages,
             viewportSize = viewportSize,
@@ -423,7 +383,7 @@ private fun MangaChapterPager(
     onToggleChrome: () -> Unit,
     onVisiblePage: (Int) -> Unit,
     scrubber: MangaScrubberState,
-    imageHeadersFor: (String) -> Map<String, String>,
+    pageFile: suspend (String) -> File?,
     retryPolicy: MangaPageRetryPolicy,
     onRefreshPages: () -> Unit,
     viewportSize: IntSize,
@@ -435,7 +395,6 @@ private fun MangaChapterPager(
     val initialPage = remember(document, pages, anchor) {
         document.pageIndexForAnchor(anchor)
     }
-    val context = LocalContext.current
     // Keyed by chapter: a new chapter gets a pager created at the correct page
     // (first page going forward, last page going back) instead of keeping the
     // previous chapter's index (out of range) and jumping with scrollToPage(0).
@@ -443,9 +402,9 @@ private fun MangaChapterPager(
         rememberPagerState(initialPage = initialPage, pageCount = { pages.size })
     }
     val scope = rememberCoroutineScope()
-    var scale by remember { mutableFloatStateOf(MinMangaScale) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-    val zoomed by rememberUpdatedState(scale > MinMangaScale + 0.01f)
+    // One zoom handle per page: the tiled view owns pan/pinch, Compose owns
+    // taps and decides whether a horizontal drag pages or pans.
+    val zoomStates = remember(pages) { List(pages.size) { MangaZoomState() } }
     val currentOnVisiblePage by rememberUpdatedState(onVisiblePage)
     val currentChromeVisible by rememberUpdatedState(chromeVisible)
 
@@ -457,8 +416,7 @@ private fun MangaChapterPager(
     }
 
     LaunchedEffect(pagerState.settledPage) {
-        scale = MinMangaScale
-        offset = Offset.Zero
+        zoomStates.forEach(MangaZoomState::reset)
     }
 
     LaunchedEffect(pagerState) {
@@ -489,15 +447,12 @@ private fun MangaChapterPager(
         }
     }
 
-    // Warm the 4-6 surrounding pages at the exact size the visible page asks
-    // for, so the memory-cache hit is valid instead of decoding twice.
-    val pageRequestSize = mangaPagedRequestSize(viewportSize.width, viewportSize.height)
-    LaunchedEffect(pagerState.currentPage, pages, pageRequestSize, imageHeadersFor) {
-        val requestSize = pageRequestSize ?: return@LaunchedEffect
-        val loader = SingletonImageLoader.get(context)
+    // Warm the surrounding page files; the tiled viewer then decodes only the
+    // region it needs instead of a whole downscaled bitmap.
+    LaunchedEffect(pagerState.currentPage, pages, pageFile) {
         mangaPagedPreloadIndices(pagerState.currentPage, pages.size).forEach { index ->
             val ref = pages[index].imageRef?.takeIf { it.isNotBlank() } ?: return@forEach
-            loader.enqueue(mangaImageRequest(context, ref, requestSize, Scale.FIT, imageHeadersFor))
+            pageFile(ref)
         }
     }
 
@@ -521,105 +476,69 @@ private fun MangaChapterPager(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(
-                pages,
-                style.direction,
-                style.tapZoneInvert,
-                style.doubleTapZoom,
-                style.pagedNavigation,
-                canPrevChapter,
-                canNextChapter,
-            ) {
-                // Main-pass taps: the chrome overlay above consumes its own
-                // buttons first, so the pager never steals them.
-                detectTapGestures(
-                    onTap = { position ->
-                        if (currentChromeVisible) {
-                            onToggleChrome()
-                        } else {
-                            val side = mangaTapSide(position.x, size.width.toFloat())
-                            if (side == MangaTapSide.Center) {
-                                onToggleChrome()
-                            } else if (style.pagedNavigation != MangaPagedNavigation.Swipe) {
-                                style.tapTurn(side)?.let { pageTurn -> turnTo(pageTurn) }
-                            }
-                        }
-                    },
-                    onDoubleTap = if (style.doubleTapZoom) {
-                        {
-                            if (currentChromeVisible) {
-                                onToggleChrome()
-                            } else if (scale > MinMangaScale + 0.01f) {
-                                scale = MinMangaScale
-                                offset = Offset.Zero
-                            } else {
-                                scale = DoubleTapZoomScale
-                                offset = Offset.Zero
-                            }
-                        }
-                    } else {
-                        null
-                    },
-                )
-            },
-    ) {
+    // Taps are decoded inside the tiled page (it owns pointer interop), so the
+    // pager itself keeps no tap handler: a full-screen detector here would be
+    // swallowed by the AndroidView and the menu would never open.
+    fun handleTap(xFraction: Float) {
+        if (viewportSize.width <= 0) return
+        if (currentChromeVisible) {
+            onToggleChrome()
+            return
+        }
+        val side = mangaTapSide(xFraction * viewportSize.width, viewportSize.width.toFloat())
+        if (side == MangaTapSide.Center) {
+            onToggleChrome()
+        } else if (style.pagedNavigation != MangaPagedNavigation.Swipe) {
+            style.tapTurn(side)?.let { pageTurn -> turnTo(pageTurn) }
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
             reverseLayout = style.direction == MangaReadingDirection.Rtl,
             beyondViewportPageCount = 2,
-            userScrollEnabled = style.pagedNavigation != MangaPagedNavigation.TapEdges &&
-                scale <= MinMangaScale + 0.01f,
+            // Single-finger swipes are handled by the tiled page so pinch zoom
+            // and paging never fight over the same pointer stream.
+            userScrollEnabled = false,
         ) { pageIndex ->
             val page = pages.getOrNull(pageIndex) ?: return@HorizontalPager
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(page.id) {
-                        detectMangaGestures(
-                            zoomed = { zoomed },
-                            onGesture = { zoomChange, panChange ->
-                                val nextScale = (scale * zoomChange)
-                                    .coerceIn(MinMangaScale, MaxMangaScale)
-                                scale = nextScale
-                                offset = if (nextScale <= MinMangaScale + 0.01f) {
-                                    Offset.Zero
-                                } else {
-                                    clampMangaOffset(offset + panChange, nextScale, viewportSize)
-                                }
-                            },
-                        )
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                MangaPageImage(
-                    url = page.imageRef.orEmpty(),
-                    contentDescription = page.original.ifBlank {
-                        stringResource(
-                            R.string.rd_manga_page_fmt,
-                            pageIndex + 1,
-                            pages.size,
-                        )
-                    },
-                    contentScale = ContentScale.Fit,
-                    colorFilter = colorFilter,
-                    imageHeadersFor = imageHeadersFor,
-                    retryPolicy = retryPolicy,
-                    onRefreshPages = onRefreshPages,
-                    requestSize = pageRequestSize,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                            translationX = offset.x
-                            translationY = offset.y
-                        },
-                )
-            }
+            MangaPageFileImage(
+                url = page.imageRef.orEmpty(),
+                contentDescription = page.original.ifBlank {
+                    stringResource(
+                        R.string.rd_manga_page_fmt,
+                        pageIndex + 1,
+                        pages.size,
+                    )
+                },
+                paged = true,
+                colorFilter = colorFilter,
+                pageFile = pageFile,
+                retryPolicy = retryPolicy,
+                onRefreshPages = onRefreshPages,
+                zoomState = zoomStates.getOrNull(pageIndex),
+                onTap = { xFraction -> handleTap(xFraction) },
+                onDoubleTap = if (style.doubleTapMenu) onToggleChrome else null,
+                onSwipe = if (style.pagedNavigation != MangaPagedNavigation.TapEdges) {
+                    { direction ->
+                        val forward = if (style.direction == MangaReadingDirection.Rtl) {
+                            -direction
+                        } else {
+                            direction
+                        }
+                        if (forward > 0) {
+                            turnTo(MangaPageTurn.Next)
+                        } else {
+                            turnTo(MangaPageTurn.Previous)
+                        }
+                    }
+                } else {
+                    null
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
@@ -642,7 +561,7 @@ private fun MangaWebtoonView(
     onToggleChrome: () -> Unit,
     onVisiblePage: (Int) -> Unit,
     scrubber: MangaScrubberState,
-    imageHeadersFor: (String) -> Map<String, String>,
+    pageFile: suspend (String) -> File?,
     retryPolicy: MangaPageRetryPolicy,
     onRefreshPages: () -> Unit,
     viewportSize: IntSize,
@@ -668,7 +587,6 @@ private fun MangaWebtoonView(
     val currentOnFinished by rememberUpdatedState(onChapterFinished)
     val currentOnNearStart by rememberUpdatedState(onNearStart)
     val currentOnNearEnd by rememberUpdatedState(onNearEnd)
-    val context = LocalContext.current
     // Measured page heights are cached by URL, so a page keeps its height across
     // chapter stitches and scroll-backs.
     val pageRatios = remember { mutableStateMapOf<String, Float>() }
@@ -747,7 +665,6 @@ private fun MangaWebtoonView(
     val horizontalPadding = style.webtoonPadding.toDp()
     val horizontalPaddingPx = with(LocalDensity.current) { horizontalPadding.roundToPx() }
     val pageWidth = (viewportSize.width - horizontalPaddingPx * 2).coerceAtLeast(1)
-    val webtoonRequestSize = mangaWebtoonRequestSize(pageWidth)
 
     // Screen-height budget over the whole strip: only what the viewport can
     // actually reach is warmed, with known heights from decoded pages.
@@ -756,12 +673,10 @@ private fun MangaWebtoonView(
         strip,
         viewportSize,
         horizontalPaddingPx,
-        imageHeadersFor,
+        pageFile,
     ) {
         if (viewportSize.width <= 0 || viewportSize.height <= 0) return@LaunchedEffect
-        val requestSize = webtoonRequestSize ?: return@LaunchedEffect
         val ratios = strip.map { item -> item.page.imageRef?.let { pageRatios[it] } }
-        val loader = SingletonImageLoader.get(context)
         mangaWebtoonPreloadIndices(
             currentPage = listState.firstVisibleItemIndex,
             pageCount = strip.size,
@@ -771,20 +686,26 @@ private fun MangaWebtoonView(
         ).forEach { index ->
             val ref = strip.getOrNull(index)?.page?.imageRef?.takeIf { it.isNotBlank() }
                 ?: return@forEach
-            loader.enqueue(mangaImageRequest(context, ref, requestSize, Scale.FILL, imageHeadersFor))
+            pageFile(ref)
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(Unit) {
-                detectTapGestures { onToggleChrome() }
-            },
-    ) {
-        LazyColumn(
+    LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                // The page view returns false from onTouchEvent, so the list
+                // receives the gesture; this tap never competes with scrolling.
+                .pointerInput(style.doubleTapMenu) {
+                    detectTapGestures(
+                        onTap = { onToggleChrome() },
+                        onDoubleTap = if (style.doubleTapMenu) {
+                            { onToggleChrome() }
+                        } else {
+                            null
+                        },
+                    )
+                },
             contentPadding = PaddingValues(
                 start = horizontalPadding,
                 end = horizontalPadding,
@@ -802,7 +723,7 @@ private fun MangaWebtoonView(
                 // size stays the pre-decode fallback so onSuccess cannot
                 // recreate the request and flash a second decode.
                 val effectiveRatio = ratio ?: MangaWebtoonFallbackRatio
-                MangaPageImage(
+                MangaPageFileImage(
                     url = item.page.imageRef.orEmpty(),
                     contentDescription = item.page.original.ifBlank {
                         stringResource(
@@ -811,15 +732,14 @@ private fun MangaWebtoonView(
                             item.chapterPageCount,
                         )
                     },
-                    contentScale = ContentScale.FillWidth,
+                    paged = false,
                     colorFilter = colorFilter,
-                    imageHeadersFor = imageHeadersFor,
+                    pageFile = pageFile,
                     retryPolicy = retryPolicy,
                     onRefreshPages = onRefreshPages,
                     onImageRatio = { loaded ->
                         item.page.imageRef?.let { pageRatios[it] = loaded }
                     },
-                    requestSize = webtoonRequestSize,
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(1f / effectiveRatio)
@@ -841,7 +761,6 @@ private fun MangaWebtoonView(
                     )
                 }
             }
-        }
     }
 }
 
@@ -926,70 +845,79 @@ private fun MangaChapterEnd(
 }
 
 @Composable
-private fun MangaPageImage(
+private fun MangaPageFileImage(
     url: String,
     contentDescription: String,
-    contentScale: ContentScale,
+    paged: Boolean,
     colorFilter: ColorFilter?,
-    imageHeadersFor: (String) -> Map<String, String>,
+    pageFile: suspend (String) -> File?,
     retryPolicy: MangaPageRetryPolicy,
     onRefreshPages: () -> Unit,
-    requestSize: IntSize? = null,
+    zoomState: MangaZoomState? = null,
+    onTap: ((Float) -> Unit)? = null,
+    onDoubleTap: (() -> Unit)? = null,
+    onSwipe: ((Int) -> Unit)? = null,
     onImageRatio: ((Float) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var attempt by remember(url) { mutableIntStateOf(0) }
+    var file by remember(url) { mutableStateOf<File?>(null) }
     var failed by remember(url) { mutableStateOf(false) }
-    var autoRetryJob by remember(url) { mutableStateOf<Job?>(null) }
-    // Same scale AsyncImage would derive from contentScale, but fixed on the
-    // request so prefetch and visible page decode identically.
-    val requestScale = if (contentScale == ContentScale.Fit) Scale.FIT else Scale.FILL
-    val request = remember(url, attempt, requestSize, requestScale, imageHeadersFor) {
-        requestSize?.let { mangaImageRequest(context, url, it, requestScale, imageHeadersFor) }
-            ?: ImageRequest.Builder(context)
-                .data(url)
-                .withMangaHeaders(url, imageHeadersFor)
-                .build()
-    }
-    Box(modifier, contentAlignment = Alignment.Center) {
-        // key() restarts Coil after a retry: the request differs, but AsyncImage
-        // also needs a new painter for a failed previous load.
-        key(attempt) {
-            AsyncImage(
-                model = request,
-                contentDescription = contentDescription,
-                contentScale = contentScale,
-                colorFilter = colorFilter,
-                placeholder = MangaPagePlaceholder,
-                modifier = Modifier.fillMaxSize(),
-                onSuccess = { success ->
-                    failed = false
-                    val size = success.painter.intrinsicSize
-                    if (onImageRatio != null && size.width > 0f && size.height > 0f) {
-                        onImageRatio(size.height / size.width)
-                    }
-                },
-                onError = {
-                    failed = true
-                    when (val decision = retryPolicy.onError(url)) {
-                        is MangaPageRetry.Retry -> {
-                            autoRetryJob?.cancel()
-                            autoRetryJob = scope.launch {
-                                delay(decision.delayMs)
-                                failed = false
-                                attempt++
-                            }
-                        }
-                        // The page list is stale (rotated CDN tokens): ask for
-                        // one refresh, the tile stays until it lands.
-                        MangaPageRetry.RefreshPages -> onRefreshPages()
-                        MangaPageRetry.Stop -> Unit
-                    }
-                },
-            )
+
+    fun retryNow() {
+        scope.launch {
+            when (val decision = retryPolicy.onError(url)) {
+                is MangaPageRetry.Retry -> {
+                    delay(decision.delayMs)
+                    attempt++
+                }
+                // The page list is stale (rotated CDN tokens): ask for one
+                // refresh, the tile stays until it lands.
+                MangaPageRetry.RefreshPages -> onRefreshPages()
+                MangaPageRetry.Stop -> Unit
+            }
         }
+    }
+
+    LaunchedEffect(url, attempt) {
+        failed = false
+        file = null
+        val loaded = if (url.isBlank()) {
+            null
+        } else {
+            try {
+                pageFile(url)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+        }
+        if (loaded != null) {
+            file = loaded
+        } else {
+            failed = true
+            retryNow()
+        }
+    }
+
+    Box(modifier.mangaColorFilter(colorFilter), contentAlignment = Alignment.Center) {
+        MangaTiledImage(
+            file = file,
+            contentDescription = contentDescription,
+            paged = paged,
+            zoomState = zoomState,
+            onTap = onTap,
+            onDoubleTap = onDoubleTap,
+            onSwipe = onSwipe,
+            onRatio = onImageRatio,
+            onError = {
+                failed = true
+                retryNow()
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
         if (failed) {
             Column(
                 modifier = Modifier
@@ -1020,53 +948,11 @@ private fun MangaPageImage(
     }
 }
 
-/**
- * One request shape for a visible page and its prefetch: same data, size,
- * scale and headers. The explicit scale stops AsyncImage from deriving FILL
- * from ContentScale.FillWidth (webtoon) while the prefetch used the default
- * FIT, which made the prefetched bitmap fail Coil's size validation.
- */
-private fun mangaImageRequest(
-    context: Context,
-    url: String,
-    size: IntSize,
-    scale: Scale,
-    headersFor: (String) -> Map<String, String>,
-): ImageRequest = ImageRequest.Builder(context)
-    .data(url)
-    .size(size.width, size.height)
-    .scale(scale)
-    .withMangaHeaders(url, headersFor)
-    .build()
-
-private fun MangaReadingMode.imageScale(): Scale =
-    if (this == MangaReadingMode.Webtoon) Scale.FILL else Scale.FIT
-
 private fun MangaWebtoonPadding.toDp(): Dp = when (this) {
     MangaWebtoonPadding.None -> 0.dp
     MangaWebtoonPadding.Small -> 8.dp
     MangaWebtoonPadding.Medium -> 16.dp
     MangaWebtoonPadding.Large -> 28.dp
-}
-
-// Remote pages carry the plugin's per-host Referer/User-Agent; local page
-// files (file:/content:) never need request headers.
-// shortcut: cookies are overridden in fetchImage now, so this header path is
-// redundant and should be removed in a separate change.
-private fun ImageRequest.Builder.withMangaHeaders(
-    url: String,
-    headersFor: (String) -> Map<String, String>,
-): ImageRequest.Builder {
-    if (!mangaImageNeedsHeaders(url)) return this
-    val headers = headersFor(url)
-    if (headers.isNotEmpty()) {
-        httpHeaders(
-            NetworkHeaders.Builder().apply {
-                headers.forEach { (key, value) -> set(key, value) }
-            }.build(),
-        )
-    }
-    return this
 }
 
 @Composable
@@ -1109,42 +995,5 @@ private fun mangaColorFilter(filter: MangaColorFilter): ColorFilter? = when (fil
                 0f, 0f, 0f, 1f, 0f,
             ),
         ),
-    )
-}
-
-/**
- * Pinch-to-zoom and pan that only consumes gestures when there are two touches
- * or the page is already zoomed. At 1x a single-finger drag is left alone so
- * HorizontalPager keeps its swipe.
- *
- * A plain detectTransformGestures consumes every drag past touch slop, which
- * killed pager swipes at 1x; this detector needs no separate gesture arena.
- */
-private suspend fun PointerInputScope.detectMangaGestures(
-    zoomed: () -> Boolean,
-    onGesture: (zoomChange: Float, panChange: Offset) -> Unit,
-) {
-    awaitEachGesture {
-        awaitFirstDown(requireUnconsumed = false)
-        do {
-            val event = awaitPointerEvent()
-            val pressed = event.changes.count { it.pressed }
-            if (pressed >= 2 || zoomed()) {
-                onGesture(event.calculateZoom(), event.calculatePan())
-                event.changes.forEach { change ->
-                    if (change.positionChanged()) change.consume()
-                }
-            }
-        } while (event.changes.any { it.pressed })
-    }
-}
-
-private fun clampMangaOffset(offset: Offset, scale: Float, size: IntSize): Offset {
-    if (size == IntSize.Zero) return offset
-    val maxX = size.width * (scale - 1f) / 2f
-    val maxY = size.height * (scale - 1f) / 2f
-    return Offset(
-        offset.x.coerceIn(-maxX, maxX),
-        offset.y.coerceIn(-maxY, maxY),
     )
 }

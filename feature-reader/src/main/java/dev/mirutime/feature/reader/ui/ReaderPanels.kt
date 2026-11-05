@@ -28,8 +28,10 @@ import dev.mirutime.feature.tts.TtsStatus
 import dev.mirutime.feature.tts.ui.TtsSettingsPanel
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.uikit.MiruActionRow
+import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.SettingsSwitchRow
+import dev.mirutime.uikit.SheetHeaderAction
 import dev.mirutime.uikit.SheetSection
 import kotlinx.coroutines.flow.StateFlow
 
@@ -158,11 +160,17 @@ private fun MangaStylePanel(
             onStyleChange(draft.sanitized())
             onDismiss()
         },
+        // Reset is a sheet-header action, never a section at the bottom.
+        headerAction = {
+            SheetHeaderAction(
+                label = stringResource(R.string.rd_reset),
+                onClick = { draft = MangaReaderStyle.Default },
+            )
+        },
     ) {
         MangaReaderSettingsControls(
             style = draft,
             onStyleChange = { draft = it },
-            onReset = { draft = MangaReaderStyle.Default },
         )
         // Reader-wide and applied at once: fullscreen is a screen mode, not a
         // manga style value, so it does not wait for the sheet's Save.
@@ -186,6 +194,7 @@ private fun ReaderStylePanel(
     assets: ReaderAssetPort,
 ) {
     var draft by remember(style) { mutableStateOf(style) }
+    var resetConfirm by remember { mutableStateOf(false) }
 
     AppBottomSheet(
         title = stringResource(R.string.rd_style),
@@ -196,6 +205,13 @@ private fun ReaderStylePanel(
             onStyleChange(draft)
             onDismiss()
         },
+        // Reset is the sheet-header action; it still asks before discarding.
+        headerAction = {
+            SheetHeaderAction(
+                label = stringResource(R.string.rd_reset_style),
+                onClick = { resetConfirm = true },
+            )
+        },
     ) {
         ReaderStyleControls(
             style = draft,
@@ -203,6 +219,22 @@ private fun ReaderStylePanel(
             onReset = { draft = ReaderStyle.Default },
             assets = assets,
             hostedInSheet = true,
+        )
+    }
+
+    if (resetConfirm) {
+        AppBottomSheet(
+            title = stringResource(R.string.rd_reset_confirm_title),
+            description = stringResource(R.string.rd_reset_confirm_desc),
+            onClose = { resetConfirm = false },
+            doneLabel = stringResource(R.string.rd_reset_style),
+            doneDanger = true,
+            closeLabel = stringResource(R.string.lib_cancel),
+            onDone = {
+                resetConfirm = false
+                draft = ReaderStyle.Default
+            },
+            content = {},
         )
     }
 }
@@ -251,15 +283,15 @@ private fun ReaderMorePanel(
                     horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    FilterChip(
+                    MiruFilterChip(
                         selected = mode == ReaderMode.Feed,
                         onClick = { onModeChange(ReaderMode.Feed) },
-                        label = { Text(stringResource(R.string.rd_mode_feed)) },
+                        label = stringResource(R.string.rd_mode_feed),
                     )
-                    FilterChip(
+                    MiruFilterChip(
                         selected = mode == ReaderMode.Paged,
                         onClick = { onModeChange(ReaderMode.Paged) },
-                        label = { Text(stringResource(R.string.rd_mode_paged)) },
+                        label = stringResource(R.string.rd_mode_paged),
                     )
                 }
             }
@@ -279,15 +311,15 @@ private fun ReaderMorePanel(
                 horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                FilterChip(
+                MiruFilterChip(
                     selected = !draft.doubleTapMenu,
                     onClick = { draft = draft.copy(doubleTapMenu = false) },
-                    label = { Text(stringResource(R.string.rd_tap_one)) },
+                    label = stringResource(R.string.rd_tap_one),
                 )
-                FilterChip(
+                MiruFilterChip(
                     selected = draft.doubleTapMenu,
                     onClick = { draft = draft.copy(doubleTapMenu = true) },
-                    label = { Text(stringResource(R.string.rd_tap_two)) },
+                    label = stringResource(R.string.rd_tap_two),
                 )
             }
         }

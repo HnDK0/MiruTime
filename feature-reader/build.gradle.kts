@@ -9,6 +9,7 @@ android {
 
     defaultConfig {
         minSdk = 26
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     compileOptions {
@@ -44,6 +45,7 @@ dependencies {
     implementation(libs.compose.material.icons.extended)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    implementation(libs.subsampling.scale.image.view)
     implementation(libs.androidx.core)
     implementation(libs.activity.compose)
     implementation(libs.kotlinx.coroutines.core)

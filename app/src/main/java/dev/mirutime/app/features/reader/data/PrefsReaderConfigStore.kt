@@ -27,7 +27,6 @@ import kotlinx.serialization.json.put
 class PrefsReaderConfigStore(
     context: Context,
     private val initialStyle: ReaderStyle = ReaderStyle.Default,
-    private val freshInstall: Boolean = context.isFreshInstall(),
 ) : ReaderConfigStore {
     private val prefs = context.applicationContext
         .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -46,29 +45,32 @@ class PrefsReaderConfigStore(
     )
 
     /**
-     * A saved style always wins. Without one, the Webtoon default is only for
-     * fresh installs: an upgraded install keeps the historical Paged default.
-     * The resolved choice is persisted so restore/data changes cannot flip it.
+     * Webtoon is the standard mode. Installs that still carry the historical
+     * Paged default are switched once; an explicit mode choice (a Save from the
+     * settings sheet) is never overridden.
      */
     private fun loadMangaStyle(): MangaReaderStyle {
-        prefs.getString(KEY_MANGA_STYLE, null)?.let { raw ->
-            runCatching { mangaStyleFromJson(raw.toJsonObject()) }.getOrNull()
-                ?.let { return it }
-        }
-        val style = resolveInitialMangaStyle(
-            stored = null,
-            marker = prefs.getString(KEY_MANGA_DEFAULT, null),
-            freshInstall = freshInstall,
+        val stored = prefs.getString(KEY_MANGA_STYLE, null)
+            ?.let { raw -> runCatching { mangaStyleFromJson(raw.toJsonObject()) }.getOrNull() }
+        val style = resolveMangaMode(
+            stored = stored,
+            explicitModeChoice = prefs.getBoolean(KEY_MANGA_MODE_EXPLICIT, false),
         )
-        prefs.edit()
-            .putString(KEY_MANGA_STYLE, mangaStyleToJson(style).toString())
-            .putString(KEY_MANGA_DEFAULT, style.mode.name)
-            .apply()
+        if (style != stored) {
+            prefs.edit()
+                .putString(KEY_MANGA_STYLE, mangaStyleToJson(style).toString())
+                .apply()
+        }
         return style
     }
 
     /** Re-reads SharedPreferences after a restore wrote them. */
     fun reload() {
+        // A restored backup carries the user's own choice; never run the
+        // one-time default switch on top of it.
+        if (prefs.contains(KEY_MANGA_STYLE)) {
+            prefs.edit().putBoolean(KEY_MANGA_MODE_EXPLICIT, true).apply()
+        }
         _config.value = loadConfig()
     }
 
@@ -89,6 +91,9 @@ class PrefsReaderConfigStore(
         val sanitized = style.sanitized()
         prefs.edit()
             .putString(KEY_MANGA_STYLE, mangaStyleToJson(sanitized).toString())
+            // The user chose this style; the one-time default switch must not
+            // touch it again.
+            .putBoolean(KEY_MANGA_MODE_EXPLICIT, true)
             .apply()
         _config.update { it.copy(mangaStyle = sanitized) }
     }
@@ -99,39 +104,26 @@ class PrefsReaderConfigStore(
         const val KEY_STYLE = "style"
         const val KEY_MANGA_STYLE = "manga_style"
 
-        // Not a backup key: the marker is local to this install and survives a
-        // restore that removes manga_style.
-        const val KEY_MANGA_DEFAULT = "manga_default"
+        // Local only (never restored from a backup): records that the user
+        // picked a manga mode themselves.
+        const val KEY_MANGA_MODE_EXPLICIT = "manga_mode_explicit"
         val BackupKeys = setOf(KEY_MODE, KEY_STYLE, KEY_MANGA_STYLE)
     }
 }
 
 /**
- * The default chosen once per install. Explicit styles and a previously
- * resolved marker win; only then does a fresh install get Webtoon while an
- * upgraded install keeps the historical Paged default.
+ * Webtoon is the one standard mode. A stored style without an explicit choice
+ * is migrated once (only the mode changes, every other preference survives).
  */
-internal fun resolveInitialMangaStyle(
-    stored: String?,
-    marker: String?,
-    freshInstall: Boolean,
-): MangaReaderStyle {
-    stored?.let { raw ->
-        runCatching { mangaStyleFromJson(raw.toJsonObject()) }.getOrNull()
-            ?.let { return it }
-    }
-    if (marker != null) {
-        return MangaReaderStyle.Default.copy(mode = parseMangaReadingMode(marker))
-    }
-    val mode = if (freshInstall) MangaReadingMode.Webtoon else MangaReadingMode.Paged
-    return MangaReaderStyle.Default.copy(mode = mode)
+internal fun resolveMangaMode(
+    stored: MangaReaderStyle?,
+    explicitModeChoice: Boolean,
+): MangaReaderStyle = when {
+    stored == null -> MangaReaderStyle.Default
+    !explicitModeChoice && stored.mode != MangaReadingMode.Webtoon ->
+        stored.copy(mode = MangaReadingMode.Webtoon)
+    else -> stored
 }
-
-// Android sets lastUpdateTime at install; only an update makes it differ.
-private fun Context.isFreshInstall(): Boolean = runCatching {
-    val info = packageManager.getPackageInfo(packageName, 0)
-    info.firstInstallTime == info.lastUpdateTime
-}.getOrDefault(false)
 
 // kotlinx JSON (already used by backups) keeps the codec runnable in JVM unit
 // tests; org.json only exists as Android stubs there. The stored field names
@@ -145,7 +137,7 @@ internal fun mangaStyleToJson(style: MangaReaderStyle): JsonObject = buildJsonOb
     put("tapZoneInvert", style.tapZoneInvert)
     put("showPageCounter", style.showPageCounter)
     put("webtoonPadding", style.webtoonPadding.name)
-    put("doubleTapZoom", style.doubleTapZoom)
+    put("doubleTapMenu", style.doubleTapMenu)
     put("brightness", style.brightness)
     put("colorFilter", style.colorFilter.name)
     put("pagedNavigation", style.pagedNavigation.name)
@@ -155,13 +147,9 @@ internal fun mangaStyleToJson(style: MangaReaderStyle): JsonObject = buildJsonOb
 internal fun mangaStyleFromJson(json: JsonObject): MangaReaderStyle {
     val defaults = MangaReaderStyle.Default
     return MangaReaderStyle(
-        // A style saved before modes existed cannot have been Webtoon: the old
-        // default was Paged. Current saves always write the mode field.
-        mode = if (json.containsKey("mode")) {
-            parseMangaReadingMode(json.str("mode", defaults.mode.name))
-        } else {
-            MangaReadingMode.Paged
-        },
+        // A style saved before modes existed used the old Paged default; the
+        // one-time mode switch in loadMangaStyle moves it to Webtoon.
+        mode = parseMangaReadingMode(json.str("mode", defaults.mode.name)),
         direction = parseMangaReadingDirection(
             json.str("direction", defaults.direction.name),
         ),
@@ -170,7 +158,7 @@ internal fun mangaStyleFromJson(json: JsonObject): MangaReaderStyle {
         webtoonPadding = parseMangaWebtoonPadding(
             json.str("webtoonPadding", defaults.webtoonPadding.name),
         ),
-        doubleTapZoom = json.bool("doubleTapZoom", defaults.doubleTapZoom),
+        doubleTapMenu = json.bool("doubleTapMenu", defaults.doubleTapMenu),
         brightness = json.float("brightness", defaults.brightness),
         colorFilter = parseMangaColorFilter(
             json.str("colorFilter", defaults.colorFilter.name),

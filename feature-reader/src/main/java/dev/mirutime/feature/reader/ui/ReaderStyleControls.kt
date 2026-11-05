@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -46,6 +47,7 @@ import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.uikit.ChoiceOption
 import dev.mirutime.uikit.ChoiceSheet
+import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
 import dev.mirutime.uikit.SettingsSliderRow
@@ -378,16 +380,20 @@ fun ReaderStyleControls(
             )
         }
 
-        ReaderStyleSection(
-            title = stringResource(R.string.rd_reset),
-            inSheet = hostedInSheet,
-        ) {
-            SettingsValueRow(
-                title = stringResource(R.string.rd_reset_style),
-                value = "",
-                onClick = { resetConfirm = true },
-                horizontalPadding = rowPad,
-            )
+        // Inside a sheet Reset lives in the header (see ReaderStylePanel); the
+        // Settings page keeps its row because it is not a sheet.
+        if (!hostedInSheet) {
+            ReaderStyleSection(
+                title = stringResource(R.string.rd_reset),
+                inSheet = false,
+            ) {
+                SettingsValueRow(
+                    title = stringResource(R.string.rd_reset_style),
+                    value = "",
+                    onClick = { resetConfirm = true },
+                    horizontalPadding = rowPad,
+                )
+            }
         }
     }
 
@@ -413,7 +419,7 @@ fun ReaderStyleControls(
             onClose = { fontSheet = false },
         )
     }
-    if (resetConfirm) {
+    if (resetConfirm && !hostedInSheet) {
         AppBottomSheet(
             title = stringResource(R.string.rd_reset_confirm_title),
             description = stringResource(R.string.rd_reset_confirm_desc),
@@ -470,6 +476,30 @@ fun ReaderReadingControls(
             onChange = { update(style.copy(selectableText = it)) },
             horizontalPadding = rowPad,
         )
+        MiruRowDivider()
+        // The same gesture choice as the reader's More sheet, now also in
+        // Settings → Reader.
+        Text(
+            text = stringResource(R.string.rd_menu_opens_with),
+            style = MaterialTheme.typography.labelSmall,
+            color = LocalMiruExtraColors.current.muted,
+            modifier = Modifier.padding(start = rowPad, top = MiruSpace.S),
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+            modifier = Modifier.padding(horizontal = rowPad, vertical = MiruSpace.S),
+        ) {
+            MiruFilterChip(
+                selected = !style.doubleTapMenu,
+                onClick = { update(style.copy(doubleTapMenu = false)) },
+                label = stringResource(R.string.rd_tap_one),
+            )
+            MiruFilterChip(
+                selected = style.doubleTapMenu,
+                onClick = { update(style.copy(doubleTapMenu = true)) },
+                label = stringResource(R.string.rd_tap_two),
+            )
+        }
         if (onAutoScrollChange != null) {
             MiruRowDivider()
             SettingsSwitchRow(

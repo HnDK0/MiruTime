@@ -10,14 +10,13 @@
     <string name="webview_no_app">Нет приложения, которое откроет эту ссылку</string>
 
     <string name="rd_manga_settings">Настройки манги</string>
-    <string name="rd_manga_mode">Раскладка страниц</string>
+    <string name="rd_manga_mode">Режим чтения</string>
     <string name="rd_manga_paged">Постранично</string>
     <string name="rd_manga_webtoon">Вебтун</string>
     <string name="rd_manga_display">Отображение</string>
     <string name="rd_manga_ltr">Слева направо</string>
     <string name="rd_manga_rtl">Справа налево</string>
     <string name="rd_manga_invert_taps">Инвертировать зоны касания</string>
-    <string name="rd_manga_double_tap_zoom">Масштаб двойным касанием</string>
     <string name="rd_manga_page_counter">Счётчик страниц</string>
     <string name="rd_manga_navigation">Навигация</string>
     <string name="rd_manga_nav_swipe">Свайп</string>
@@ -35,6 +34,15 @@
     <string name="rd_manga_padding_medium">Средние</string>
     <string name="rd_manga_padding_large">Большие</string>
     <string name="rd_manga_reset">Сбросить настройки манги</string>
+    <string name="rd_manga_padding_title">Отступы</string>
+    <string name="rd_manga_padding_desc">Боковые отступы ленты вебтуна</string>
+    <string name="rd_manga_counter_show">Показывать номер</string>
+    <string name="rd_manga_counter_desc">Показывать номер страницы, когда меню скрыто</string>
+    <string name="rd_manga_double_tap">Двойное касание</string>
+    <string name="rd_manga_double_tap_menu">Меню</string>
+    <string name="rd_manga_double_tap_none">Ничего</string>
+    <string name="rd_on">Вкл.</string>
+    <string name="rd_off">Выкл.</string>
     <!-- Reader UI entry strings moved from :app. -->
     <string name="header_back">Назад</string>
     <string name="lib_cancel">Отмена</string>

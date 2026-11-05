@@ -50,48 +50,38 @@ class ReaderConfigCodecTest {
     }
 
     @Test
-    fun `fresh install gets webtoon while an upgraded install keeps paged`() {
+    fun `webtoon is the standard mode for every install`() {
         assertEquals(
             MangaReadingMode.Webtoon,
-            resolveInitialMangaStyle(stored = null, marker = null, freshInstall = true).mode,
+            resolveMangaMode(stored = null, explicitModeChoice = false).mode,
         )
         assertEquals(
-            MangaReadingMode.Paged,
-            resolveInitialMangaStyle(stored = null, marker = null, freshInstall = false).mode,
+            MangaReadingMode.Webtoon,
+            resolveMangaMode(MangaReaderStyle.Default, explicitModeChoice = true).mode,
         )
     }
 
     @Test
-    fun `explicit saved manga mode survives the default migration`() {
-        val paged = buildJsonObject { put("mode", "Paged") }.toString()
-        val webtoon = buildJsonObject { put("mode", "Webtoon") }.toString()
+    fun `a saved paged mode switches to webtoon once unless the user chose it`() {
+        val paged = MangaReaderStyle.Default.copy(
+            mode = MangaReadingMode.Paged,
+            brightness = 0.8f,
+        )
+
+        val migrated = resolveMangaMode(paged, explicitModeChoice = false)
+        assertEquals(MangaReadingMode.Webtoon, migrated.mode)
+        assertEquals(0.8f, migrated.brightness, 0.001f)
 
         assertEquals(
             MangaReadingMode.Paged,
-            resolveInitialMangaStyle(paged, marker = null, freshInstall = true).mode,
-        )
-        assertEquals(
-            MangaReadingMode.Webtoon,
-            resolveInitialMangaStyle(webtoon, marker = null, freshInstall = false).mode,
+            resolveMangaMode(paged, explicitModeChoice = true).mode,
         )
     }
 
     @Test
-    fun `resolved marker keeps the first default on an existing install`() {
-        assertEquals(
-            MangaReadingMode.Paged,
-            resolveInitialMangaStyle(stored = null, marker = "Paged", freshInstall = true).mode,
-        )
-        assertEquals(
-            MangaReadingMode.Webtoon,
-            resolveInitialMangaStyle(stored = null, marker = "Webtoon", freshInstall = false).mode,
-        )
-    }
-
-    @Test
-    fun `stored style without a mode field is a legacy paged save`() {
+    fun `stored style without a mode field is webtoon`() {
         val legacy = mangaStyleFromJson(buildJsonObject { put("brightness", 0.8f) })
-        assertEquals(MangaReadingMode.Paged, legacy.mode)
+        assertEquals(MangaReadingMode.Webtoon, legacy.mode)
         assertEquals(0.8f, legacy.brightness, 0.001f)
     }
 
@@ -100,10 +90,12 @@ class ReaderConfigCodecTest {
         val style = MangaReaderStyle.Default.copy(
             pagedNavigation = MangaPagedNavigation.TapEdges,
             pageTransition = false,
+            doubleTapMenu = true,
         )
         val decoded = mangaStyleFromJson(mangaStyleToJson(style))
         assertEquals(MangaPagedNavigation.TapEdges, decoded.pagedNavigation)
         assertEquals(false, decoded.pageTransition)
+        assertEquals(true, decoded.doubleTapMenu)
     }
 
     @Test

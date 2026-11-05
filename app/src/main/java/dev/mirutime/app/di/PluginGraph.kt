@@ -870,6 +870,7 @@ class PluginGraph(
         sourceId: String,
         url: String,
         headers: Map<String, String>,
+        timeoutMs: Long = COVER_FETCH_TIMEOUT_MS,
     ): FetchedImage = withContext(Dispatchers.IO) {
         try {
             val response = imageClient.get(
@@ -878,7 +879,7 @@ class PluginGraph(
                 headers,
                 // One attempt inside ten seconds: a cover is not worth the
                 // status ladder, and a dead CDN must not hold the grid.
-                timeoutMs = COVER_FETCH_TIMEOUT_MS,
+                timeoutMs = timeoutMs,
                 operation = "fetchImage",
                 argNames = listOf("url"),
                 solveChallenges = false,

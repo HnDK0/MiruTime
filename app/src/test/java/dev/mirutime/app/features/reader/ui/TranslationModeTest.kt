@@ -287,13 +287,15 @@ class TranslationModeTest {
                 status = ReaderTranslationStatus.Ready,
                 translations = mapOf(0 to "перевод"),
                 configKey = "key",
+                bookUrl = "book",
             ),
         )
 
-        assertTrue(visibleTranslations(null, cached).isEmpty())
+        assertTrue(visibleTranslations(null, "book", cached).isEmpty())
         assertTrue(
             visibleTranslations(
                 ReaderTranslationMode(source = "en", target = "", provider = "GOOGLE_PA"),
+                "book",
                 cached,
             ).isEmpty(),
         )
@@ -301,8 +303,29 @@ class TranslationModeTest {
             cached,
             visibleTranslations(
                 ReaderTranslationMode(source = "en", target = "ru", provider = "GOOGLE_PA"),
+                "book",
                 cached,
             ),
+        )
+    }
+
+    @Test
+    fun `translation from another book is never painted`() {
+        val foreign = mapOf(
+            "shared-chapter" to ReaderChapterTranslation(
+                status = ReaderTranslationStatus.Ready,
+                translations = mapOf(0 to "чужой перевод"),
+                configKey = "key",
+                bookUrl = "fake://a/other",
+            ),
+        )
+
+        assertTrue(
+            visibleTranslations(
+                ReaderTranslationMode(source = "en", target = "ru", provider = "GOOGLE_PA"),
+                "fake://a/current",
+                foreign,
+            ).isEmpty(),
         )
     }
 

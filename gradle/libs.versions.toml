@@ -13,6 +13,8 @@ activity = "1.12.3"
 # coil-compose 3.6.3 and palette 1.0.0 are the current stable releases.
 coil3 = "3.6.3"
 palette = "1.0.0"
+# Tiled manga viewer (same release as the NoveLA reference).
+subsampling-scale-image-view = "3.10.0"
 # 2.12.0 is the current stable release of androidx.work:work-runtime-ktx.
 work = "2.12.0"
 # Window insets/controller compat used by the extracted reader fullscreen UI;
@@ -61,6 +63,7 @@ coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil3"
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil3" }
 coil-network-core = { module = "io.coil-kt.coil3:coil-network-core", version.ref = "coil3" }
 palette = { module = "androidx.palette:palette", version.ref = "palette" }
+subsampling-scale-image-view = { module = "com.davemorrissey.labs:subsampling-scale-image-view", version.ref = "subsampling-scale-image-view" }
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 androidx-core = { module = "androidx.core:core", version.ref = "core" }
 junit = { module = "junit:junit", version.ref = "junit" }

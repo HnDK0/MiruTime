@@ -10,14 +10,13 @@
     <string name="webview_no_app">No app can open this link</string>
 
     <string name="rd_manga_settings">Manga settings</string>
-    <string name="rd_manga_mode">Page layout</string>
+    <string name="rd_manga_mode">Reading mode</string>
     <string name="rd_manga_paged">Paged</string>
     <string name="rd_manga_webtoon">Webtoon</string>
     <string name="rd_manga_display">Display</string>
     <string name="rd_manga_ltr">Left to right</string>
     <string name="rd_manga_rtl">Right to left</string>
     <string name="rd_manga_invert_taps">Invert tap zones</string>
-    <string name="rd_manga_double_tap_zoom">Double-tap zoom</string>
     <string name="rd_manga_page_counter">Page counter</string>
     <string name="rd_manga_navigation">Navigation</string>
     <string name="rd_manga_nav_swipe">Swipe</string>
@@ -35,6 +34,15 @@
     <string name="rd_manga_padding_medium">Medium</string>
     <string name="rd_manga_padding_large">Large</string>
     <string name="rd_manga_reset">Reset manga settings</string>
+    <string name="rd_manga_padding_title">Margins</string>
+    <string name="rd_manga_padding_desc">Side margins of the webtoon strip</string>
+    <string name="rd_manga_counter_show">Show number</string>
+    <string name="rd_manga_counter_desc">Show the page number while the menu is hidden</string>
+    <string name="rd_manga_double_tap">Double tap</string>
+    <string name="rd_manga_double_tap_menu">Menu</string>
+    <string name="rd_manga_double_tap_none">Nothing</string>
+    <string name="rd_on">On</string>
+    <string name="rd_off">Off</string>
     <!-- Reader UI entry strings moved from :app. -->
     <string name="header_back">Back</string>
     <string name="lib_cancel">Cancel</string>

@@ -32,6 +32,12 @@ internal fun shouldHideSystemBars(
 internal fun readerExitKeepsSystemBarsHidden(): Boolean = false
 
 /**
+ * Back closes an open sheet only. The menu overlay is not a modal: pressing
+ * back while it is visible leaves the reader instead of just hiding the menu.
+ */
+internal fun readerBackClosesOverlay(panelOpen: Boolean): Boolean = panelOpen
+
+/**
  * Synchronous exit path for the reader's own back buttons: show the bars
  * BEFORE the pop so the shell's Scaffold never measures a zero-inset window,
  * and post a second show because the last reader frame may still have a hide

@@ -69,6 +69,7 @@ import dev.mirutime.feature.reader.ui.ReaderPaged
 import dev.mirutime.feature.reader.ui.ReaderPanel
 import dev.mirutime.feature.reader.ui.ReaderPanelHost
 import dev.mirutime.feature.reader.ui.ReaderTap
+import dev.mirutime.feature.reader.ui.readerBackClosesOverlay
 import dev.mirutime.feature.reader.ui.awaitReaderTap
 import dev.mirutime.feature.reader.ui.isMenuDoubleTap
 import dev.mirutime.feature.reader.ui.openWebSearch
@@ -157,6 +158,9 @@ fun ReaderScreen(
     val context = LocalContext.current
     val listState = rememberLazyListState()
     val lifecycleOwner = LocalLifecycleOwner.current
+    var overlayAvailable by remember {
+        mutableStateOf(android.provider.Settings.canDrawOverlays(context))
+    }
     var panel by remember { mutableStateOf<ReaderPanel?>(null) }
     val mangaScrubber = remember { MangaScrubberState() }
     // Bumped by the player's Focus action; the feed/pager scrolls to the
@@ -243,6 +247,7 @@ fun ReaderScreen(
                 }
                 Lifecycle.Event.ON_START -> {
                     readerResumed = true
+                    overlayAvailable = android.provider.Settings.canDrawOverlays(context)
                     if (!currentTtsActive) store.resumeSession()
                 }
                 else -> Unit
@@ -267,14 +272,14 @@ fun ReaderScreen(
         onBack()
     }
 
+    // Sheets are modal and consume back first; the reader menu is an overlay,
+    // so with no sheet open back always leaves the reader.
     BackHandler {
-        when {
-            panel != null -> panel = null
-            chromeVisible -> chromeVisible = false
-            else -> {
-                store.flush()
-                exitReader()
-            }
+        if (readerBackClosesOverlay(panel != null)) {
+            panel = null
+        } else {
+            store.flush()
+            exitReader()
         }
     }
 
@@ -301,7 +306,9 @@ fun ReaderScreen(
             ?.firstOrNull()
             ?.imageRef
     }
-    val mangaHeadersFor = remember(graph) { graph::imageHeadersFor }
+    val mangaPageFile: suspend (String) -> java.io.File? = remember(graph) {
+        { url -> graph.mangaPageFile(url) }
+    }
     val view = LocalView.current
     val keepScreenOn = style.keepScreenOn || isManga
     ReaderFullscreenEffect(
@@ -374,7 +381,7 @@ fun ReaderScreen(
     val mode = graph.translation.activeMode(bookUrl)
     // A disabled mode must hide whatever is still cached from a previous
     // configuration instead of leaving translated text on screen.
-    val visibleTranslations = visibleTranslations(mode, translations)
+    val visibleTranslations = visibleTranslations(mode, bookUrl, translations)
     // The player only shows text it can point at; during a chapter hand-off or
     // before restore lands the preview stays null and the sheet says so.
     // Translations live in the chapter cache, not in ReaderBlock.translation.
@@ -909,7 +916,7 @@ fun ReaderScreen(
                             scope.launch { store.prefetch() }
                         }
                     },
-                    imageHeadersFor = mangaHeadersFor,
+                    pageFile = mangaPageFile,
                     feed = mangaFeed,
                     onVisibleChapter = { index, chapterAnchor ->
                         scope.launch { store.adoptVisibleChapter(index, chapterAnchor) }
@@ -1053,9 +1060,12 @@ fun ReaderScreen(
 
         // Optional floating player: in-app only, no system overlay. Hidden
         // while the chrome or a sheet is open so it never duplicates the
-        // bottom-menu player or sits under a modal scrim.
+        // bottom-menu player or sits under a modal scrim. With the overlay
+        // permission the player lives in the service window; the state is
+        // refreshed on every ON_START after the user returns from Settings.
         if (ttsSessionActive &&
             ttsSettings.floatingPlayer &&
+            !overlayAvailable &&
             panel == null &&
             !chromeVisible
         ) {
@@ -1163,9 +1173,14 @@ internal fun translationEnsureTargets(
  */
 fun visibleTranslations(
     mode: ReaderTranslationMode?,
+    bookUrl: String,
     translations: Map<String, ReaderChapterTranslation>,
-): Map<String, ReaderChapterTranslation> =
-    if (mode?.hasPair == true) translations else emptyMap()
+): Map<String, ReaderChapterTranslation> {
+    if (mode?.hasPair != true) return emptyMap()
+    // Entries carry their owning book now; an entry from another book (or a
+    // stale one with no owner) is never painted.
+    return translations.filterValues { it.bookUrl == bookUrl }
+}
 
 /**
  * A TTS session older than manual reading is stale. Same-spot sessions win

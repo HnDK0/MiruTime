@@ -77,6 +77,8 @@ data class ReaderChapterTranslation(
     val status: ReaderTranslationStatus,
     val translations: Map<Int, String>,
     val configKey: String,
+    // Owning book: the reader must never show another book's translation.
+    val bookUrl: String,
     val failure: ReaderTranslationFailure? = null,
 )
 
@@ -152,6 +154,14 @@ interface ReaderUiGraph {
      * pages. Empty means no headers; local files never call it.
      */
     fun imageHeadersFor(url: String): Map<String, String> = emptyMap()
+
+    /**
+     * A locally cached file for one manga page. The tiled viewer decodes from
+     * a file (region decoding is not possible from a network stream), so the
+     * app fetches bytes once and returns a stable path. Null means the page is
+     * unavailable; the viewer shows its normal retry UI.
+     */
+    suspend fun mangaPageFile(url: String): java.io.File? = null
 
     fun startTtsPlayback(
         bookTitle: String,

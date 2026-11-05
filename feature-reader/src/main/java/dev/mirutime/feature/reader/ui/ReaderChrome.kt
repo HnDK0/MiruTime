@@ -49,6 +49,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSlider
 import dev.mirutime.uikit.MiruSpace
@@ -115,6 +116,7 @@ internal fun ReaderChrome(
         )
         Surface(
             modifier = Modifier
+                .zIndex(1f)
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
                 .padding(horizontal = 12.dp)
@@ -182,6 +184,7 @@ internal fun ReaderChrome(
 
         Surface(
             modifier = Modifier
+                .zIndex(1f)
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 18.dp)
