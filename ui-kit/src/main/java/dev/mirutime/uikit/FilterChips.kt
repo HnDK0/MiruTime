@@ -85,9 +85,10 @@ fun ChipRow(
 }
 
 // One chip language AND one size grid for the whole app: compact 28dp chip
-// with a moderate 10dp radius (full ovals are banned), 12sp label, 10dp inner
-// side padding, 40dp touch box — identical in every theme. Unselected = the
-// plate + onSurface ink + outline hairline; selected = solid accent.
+// with an 8dp radius (a 12dp radius on 28dp reads as an oval), 12sp label,
+// 12dp inner side padding, 48dp touch box — identical in every theme.
+// Unselected = the plate + onSurface ink + outline hairline; selected = solid
+// accent.
 @Composable
 fun MiruFilterChip(
     selected: Boolean,
@@ -112,7 +113,7 @@ fun MiruFilterChip(
         ink = MaterialTheme.colorScheme.onSurface
         border = MaterialTheme.colorScheme.outline
     }
-    val shape = RoundedCornerShape(MiruRadius.Control)
+    val shape = RoundedCornerShape(MiruRadius.Chip)
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides MiruSize.Touch) {
         Box(
             modifier = modifier

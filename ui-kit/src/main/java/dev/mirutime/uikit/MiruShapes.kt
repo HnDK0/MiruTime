@@ -13,6 +13,7 @@ object MiruRadius {
     val Badge = 6.dp      // tiny tags on covers
     val Split = 4.dp      // split-progress and small plates
     val Cover = 6.dp      // book covers, inner thumbnails
+    val Chip = 8.dp       // filter chips (12dp on a 28dp chip reads as a pill)
     val Control = 12.dp   // buttons, outlined fields and compact controls
     val Inner = 14.dp     // tiles nested inside a card
     val Card = 12.dp      // cards, plates, panels
@@ -81,10 +82,6 @@ object MiruSize {
     val SliderLabelWidth = 56.dp
     val SliderValueWidth = 56.dp
 }
-
-// Legacy names kept so existing imports keep compiling.
-val CardCorner = MiruRadius.Card
-val SheetCorner = MiruRadius.Sheet
 
 val MiruShapes = Shapes(
     extraSmall = RoundedCornerShape(MiruRadius.Cover),

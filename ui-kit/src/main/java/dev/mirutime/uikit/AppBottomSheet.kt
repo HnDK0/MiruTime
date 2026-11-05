@@ -135,7 +135,7 @@ fun AppBottomSheet(
             .imePadding(),
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         sheetMaxWidth = MiruSize.ContentMaxWidth,
-        shape = RoundedCornerShape(SheetCorner),
+        shape = RoundedCornerShape(MiruRadius.Sheet),
         containerColor = MaterialTheme.colorScheme.surface,
         // Compact handle: the sheet still drags natively, but the header spends
         // 24dp instead of the 48dp native handle. Its measured height feeds the

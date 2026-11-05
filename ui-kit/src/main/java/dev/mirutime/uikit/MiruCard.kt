@@ -57,7 +57,7 @@ fun MiruCard(
 // === Horizontal list-card composite ===
 // THE one owner of the library's list variant "C" blueprint (LibraryCard.kt
 // VariantC delegates its shell here; dashboard continue/all-updates cards use
-// it directly): 14dp-radius card, 12dp padding, 96dp-wide 1:1.45 thumb,
+// it directly): 12dp-radius card, 12dp padding, 96dp-wide 1:1.45 thumb,
 // head row = badge plate + bare gold "★ x.x", 15sp bold title (3 lines),
 // 12sp source line, bottom-pinned thin gold bar (4dp) + "X / Y гл." counts
 // row. Optional full-width footer (the dashboard continue button) pinned
@@ -77,7 +77,7 @@ fun MiruListCard(
     footer: (@Composable () -> Unit)? = null,
 ) {
     val extra = LocalMiruExtraColors.current
-    val shape = RoundedCornerShape(MiruRadius.Inner)
+    val shape = RoundedCornerShape(MiruRadius.Card)
     val shell = modifier
         .miruCardShadow(shape)
         .clip(shape)
