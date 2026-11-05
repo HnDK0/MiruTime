@@ -355,11 +355,11 @@ val LocalMiruOnImage = compositionLocalOf { false }
 // normal theme behavior.
 val LocalMiruCardSurface = compositionLocalOf<Color?> { null }
 
-// Plates over a custom image: the theme surface at 92%. Every text color of
+// Plates over a custom image: the theme surface at 84%. Every text color of
 // the photo theme is verified against this plate composited over BOTH black
 // and white (plateBackdrops), so whatever the picture does behind it, the
 // ink on it holds its floor. Classic themes return the plain opaque surface.
-const val PlateAlpha = 0.92f
+const val PlateAlpha = 0.84f
 private const val FrostFloor = 0.86f
 
 @Composable
@@ -382,7 +382,11 @@ fun Modifier.miruCardShadow(shape: Shape): Modifier =
 // a 2dp lift and the hairline below.
 @Composable
 fun miruPlateBorder(): BorderStroke? =
-    if (LocalMiruOnImage.current) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    if (LocalMiruOnImage.current) {
+        BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.20f))
+    } else {
+        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    }
 
 private val PaperScheme = lightColorScheme(
     background = Color(0xFFF5F3ED),

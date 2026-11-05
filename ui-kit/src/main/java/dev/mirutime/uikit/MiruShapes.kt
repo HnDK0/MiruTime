@@ -5,21 +5,20 @@ import androidx.compose.material3.Shapes
 import androidx.compose.ui.unit.dp
 
 // === Shape scale ===
-// Rule: nested radius = outer radius − padding where practical. Card 12 and
-// Inner 14 are separate families (plates/tiles), so the arithmetic is not
-// universal; a card (12) with an 8 dp padding holds a cover with a 6 dp
-// radius, which reads as one concentric family.
+// Sharp geometry: cards are 8dp, controls 6dp, chips 8dp, covers 6dp.
+// Nested radius = outer radius − padding where practical; a card (8) with an
+// 8dp padding holds a cover (6), which reads as one concentric family.
 object MiruRadius {
     val Badge = 6.dp      // tiny tags on covers
     val Split = 4.dp      // split-progress and small plates
     val Cover = 6.dp      // book covers, inner thumbnails
-    val Chip = 8.dp       // filter chips (12dp on a 28dp chip reads as a pill)
-    val Control = 12.dp   // buttons, outlined fields and compact controls
-    val Inner = 14.dp     // tiles nested inside a card
-    val Card = 12.dp      // cards, plates, panels
-    val Large = 16.dp     // medium containers and overlay surfaces
-    val Plate = 24.dp     // floating chrome (header, tab bar)
-    val Sheet = 28.dp     // bottom sheets (top corners)
+    val Chip = 8.dp       // filter chips
+    val Control = 6.dp    // buttons, outlined fields and compact controls
+    val Inner = 8.dp      // tiles nested inside a card
+    val Card = 8.dp       // cards, plates, panels
+    val Large = 8.dp      // medium containers and overlay surfaces
+    val Plate = 8.dp      // floating chrome (header, tab bar)
+    val Sheet = 8.dp      // bottom sheets / compact panels
 }
 
 // === Spacing scale ===
@@ -64,8 +63,8 @@ object MiruSize {
     val SectionGap = MiruSpace.Xl
     val CardPad = MiruSpace.L
     // Book detail cover (2:3). Bigger than a library thumb, the page's hero.
-    val DetailCoverWidth = 96.dp
-    val DetailCoverHeight = 144.dp
+    val DetailCoverWidth = 104.dp
+    val DetailCoverHeight = 152.dp
     // Catalogue/global-search tile width (CatalogTile in a LazyRow).
     val Tile = 140.dp
     val IconSmall = 14.dp

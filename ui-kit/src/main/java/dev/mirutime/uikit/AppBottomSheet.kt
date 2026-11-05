@@ -115,10 +115,15 @@ fun AppBottomSheet(
     // same baseline as the title with one spacing step from the edge.
     headerAction: (@Composable () -> Unit)? = null,
     contentScrollable: Boolean = true,
+    // Compact action panels (source/login, download) drop the drag handle and
+    // tighten the header. Forms keep the handle and their opaque fields.
+    compact: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val density = LocalDensity.current
-    var dragHandleHeightPx by remember(density) { mutableIntStateOf(with(density) { MiruSize.SheetHandleBox.roundToPx() }) }
+    var dragHandleHeightPx by remember(density, compact) {
+        mutableIntStateOf(if (compact) 0 else with(density) { MiruSize.SheetHandleBox.roundToPx() })
+    }
     // Floating-sheet standard: 12dp margins all round so every corner shows
     // the 23px radius (top AND bottom) and the footer always clears gesture
     // nav. Width is capped inside the component: phones keep the full width,
@@ -127,7 +132,7 @@ fun AppBottomSheet(
         onDismissRequest = onClose,
         modifier = modifier
             .widthIn(max = MiruSize.ContentMaxWidth)
-            .padding(start = MiruSpace.M, end = MiruSpace.M, bottom = MiruSpace.M)
+            .padding(start = MiruSpace.S, end = MiruSpace.S, bottom = MiruSpace.S)
             // Lift the whole sheet above the on-screen keyboard so a focused
             // field and the footer stay visible (FR-129/FR-130). This also
             // shrinks BoxWithConstraints.maxHeight, so the 70% cap is computed
@@ -136,25 +141,29 @@ fun AppBottomSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         sheetMaxWidth = MiruSize.ContentMaxWidth,
         shape = RoundedCornerShape(MiruRadius.Sheet),
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = miruCardSurface(),
         // Compact handle: the sheet still drags natively, but the header spends
         // 24dp instead of the 48dp native handle. Its measured height feeds the
-        // seventy-percent budget like before.
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(MiruSize.SheetHandleBox)
-                    .onSizeChanged { dragHandleHeightPx = it.height },
-                contentAlignment = Alignment.Center,
-            ) {
+        // seventy-percent budget like before. Compact panels have no handle.
+        dragHandle = if (compact) {
+            null
+        } else {
+            {
                 Box(
                     modifier = Modifier
-                        .width(MiruSize.SheetHandleWidth)
-                        .height(MiruSize.SheetHandleHeight)
-                        .clip(RoundedCornerShape(MiruSize.SheetHandleHeight / 2f))
-                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)),
-                )
+                        .fillMaxWidth()
+                        .height(MiruSize.SheetHandleBox)
+                        .onSizeChanged { dragHandleHeightPx = it.height },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(MiruSize.SheetHandleWidth)
+                            .height(MiruSize.SheetHandleHeight)
+                            .clip(RoundedCornerShape(MiruSize.SheetHandleHeight / 2f))
+                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)),
+                    )
+                }
             }
         },
         // Native IME padding still bounds the modal window. Navigation padding
@@ -170,6 +179,7 @@ fun AppBottomSheet(
                 dragHandleHeight = with(density) { dragHandleHeightPx.toDp() },
                 maxHeightFraction = maxHeightFraction,
             )
+            val hPad = if (compact) MiruSpace.M else MiruSpace.L
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -179,7 +189,8 @@ fun AppBottomSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = MiruSpace.L),
+                        .padding(top = if (compact) MiruSpace.M else 0.dp)
+                        .padding(horizontal = hPad),
                 ) {
                     Text(
                         text = title,
@@ -202,7 +213,7 @@ fun AppBottomSheet(
                         color = LocalMiruExtraColors.current.muted,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = MiruSpace.L),
+                        modifier = Modifier.padding(horizontal = hPad),
                     )
                 }
                 Spacer(modifier = Modifier.height(MiruSpace.S))
@@ -219,8 +230,8 @@ fun AppBottomSheet(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = MiruSpace.L)
-                                .fadeScrollEdges(scroll, MaterialTheme.colorScheme.surface)
+                                .padding(horizontal = hPad)
+                                .fadeScrollEdges(scroll, miruCardSurface())
                                 .verticalScroll(scroll),
                         ) {
                             content()
@@ -239,7 +250,7 @@ fun AppBottomSheet(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .padding(horizontal = MiruSpace.L),
+                            .padding(horizontal = hPad),
                     ) {
                         content()
                     }
@@ -247,7 +258,7 @@ fun AppBottomSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = MiruSpace.L)
+                        .padding(horizontal = hPad)
                         .padding(top = MiruSpace.S)
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         .padding(bottom = MiruSpace.S),
