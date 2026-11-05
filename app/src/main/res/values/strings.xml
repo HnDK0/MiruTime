@@ -338,6 +338,7 @@
     <string name="lib_retry">Retry</string>
 
     <!-- Library filters -->
+    <string name="lib_filter_reset">Reset</string>
     <string name="lib_filter_title">Library filters</string>
     <string name="lib_filter_desc">Search the shelf by source and shape the grid.</string>
     <string name="lib_section_sort">Sort by</string>

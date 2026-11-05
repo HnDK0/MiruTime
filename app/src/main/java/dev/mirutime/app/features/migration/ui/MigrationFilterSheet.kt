@@ -35,6 +35,7 @@ import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.SettingsSwitchRow
+import dev.mirutime.uikit.SheetHeaderAction
 import dev.mirutime.uikit.SheetSection
 
 /**
@@ -77,6 +78,13 @@ fun MigrationFilterSheet(
         title = stringResource(R.string.migration_filter_title),
         description = stringResource(R.string.migration_filter_desc),
         onClose = onClose,
+        headerAction = {
+            SheetHeaderAction(
+                label = stringResource(R.string.migration_filter_clear),
+                enabled = draftSelected.isNotEmpty(),
+                onClick = { draftSelected = emptySet() },
+            )
+        },
         doneLabel = stringResource(R.string.finder_apply),
         onDone = {
             onApply(migrationSelectedSourceIds(draftSelected, sources), draftOptions)
@@ -123,12 +131,6 @@ fun MigrationFilterSheet(
                         enabled = filtered.isNotEmpty(),
                     ) {
                         Text(stringResource(R.string.migration_filter_select_all))
-                    }
-                    TextButton(
-                        onClick = { draftSelected = emptySet() },
-                        enabled = draftSelected.isNotEmpty(),
-                    ) {
-                        Text(stringResource(R.string.migration_filter_clear))
                     }
                 }
             }

@@ -89,6 +89,7 @@ import dev.mirutime.uikit.MiruRoundIconButton
 import dev.mirutime.uikit.MiruSlider
 import dev.mirutime.uikit.SkeletonBar
 import dev.mirutime.uikit.SkeletonBox
+import dev.mirutime.uikit.SheetHeaderAction
 import dev.mirutime.uikit.SheetSection
 import dev.mirutime.app.core.libraryListKey
 import dev.mirutime.app.core.libraryRowKey
@@ -1476,6 +1477,17 @@ private fun FilterSheet(
         title = stringResource(R.string.lib_filter_title),
         description = stringResource(R.string.lib_filter_desc),
         onClose = onClose,
+        headerAction = {
+            SheetHeaderAction(
+                label = stringResource(R.string.lib_filter_reset),
+                enabled = draftSources.isNotEmpty() || draftGenres.isNotEmpty() || draftType != null,
+                onClick = {
+                    draftSources = emptySet()
+                    draftGenres = emptySet()
+                    draftType = null
+                },
+            )
+        },
         doneLabel = stringResource(R.string.finder_apply),
         onDone = {
             onSort(draftSort, draftSortDir)

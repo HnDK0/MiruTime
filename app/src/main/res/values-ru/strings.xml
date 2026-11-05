@@ -339,6 +339,7 @@
     <string name="lib_retry">Повторить</string>
 
     <!-- Library filters -->
+    <string name="lib_filter_reset">Сброс</string>
     <string name="lib_filter_title">Фильтры библиотеки</string>
     <string name="lib_filter_desc">Ищите по источнику и настраивайте сетку.</string>
     <string name="lib_section_sort">Сортировка</string>
