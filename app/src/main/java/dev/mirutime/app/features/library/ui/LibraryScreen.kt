@@ -36,7 +36,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -66,6 +65,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.mirutime.uikit.CoverInset
+import dev.mirutime.uikit.MiruCard
+import dev.mirutime.uikit.MiruIconButton
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
@@ -1272,10 +1273,8 @@ private fun ResumeCard(book: LibraryBook, onOpen: () -> Unit) {
     // number of fully finished chapters.
     val progress = book.progressChapter.toFloat() / book.totalChapters.coerceAtLeast(1)
     val percent = (progress * 100).roundToInt()
-    Surface(
-        shape = MaterialTheme.shapes.medium,
-        color = miruCardSurface(),
-        shadowElevation = miruCardElevation(),
+    MiruCard(
+        contentPadding = PaddingValues(0.dp),
         modifier = Modifier.clickable(onClick = onOpen),
     ) {
         Row(
@@ -1347,16 +1346,15 @@ private fun ResumeCard(book: LibraryBook, onOpen: () -> Unit) {
                 )
             }
             Spacer(modifier = Modifier.width(MiruSpace.S))
-            IconButton(onClick = onOpen) {
-                Icon(
-                    imageVector = Icons.Filled.ArrowForward,
-                    contentDescription = stringResource(
-                        R.string.lib_continue_desc_fmt,
-                        book.continueLabel,
-                    ),
-                    tint = MaterialTheme.colorScheme.onBackground,
-                )
-            }
+            MiruIconButton(
+                icon = Icons.Filled.ArrowForward,
+                contentDescription = stringResource(
+                    R.string.lib_continue_desc_fmt,
+                    book.continueLabel,
+                ),
+                tint = MaterialTheme.colorScheme.onBackground,
+                onClick = onOpen,
+            )
         }
     }
 }
