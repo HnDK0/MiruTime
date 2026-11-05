@@ -3,7 +3,6 @@
 package dev.mirutime.app.features.settings.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,7 +49,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.MiruIconButton
+import dev.mirutime.uikit.MiruPairButton
 import dev.mirutime.uikit.MiruPickerHeader
+import dev.mirutime.uikit.MiruPickerRow
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
@@ -63,7 +65,6 @@ import dev.mirutime.uikit.SettingsPage
 import dev.mirutime.uikit.SettingsValueRow
 import dev.mirutime.uikit.SheetSection
 import dev.mirutime.uikit.SkeletonBar
-import dev.mirutime.uikit.miruCardSurface
 import dev.mirutime.app.features.finder.data.FinderDataProvider
 import dev.mirutime.app.features.finder.domain.CatalogSource
 import dev.mirutime.app.features.library.data.LibraryDataProvider
@@ -549,35 +550,12 @@ private fun PairButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .defaultMinSize(minHeight = MiruSize.Row)
-            .clip(RoundedCornerShape(MiruRadius.Control))
-            .background(miruCardSurface())
-            .border(
-                width = MiruSize.Stroke,
-                color = MaterialTheme.colorScheme.outline,
-                shape = RoundedCornerShape(MiruRadius.Control),
-            )
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = MiruSpace.M, vertical = MiruSpace.S),
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(
-            text = caption,
-            style = MaterialTheme.typography.labelSmall,
-            color = LocalMiruExtraColors.current.muted,
-            maxLines = 1,
-        )
-        Spacer(Modifier.height(MiruSpace.Xxs))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+    MiruPairButton(
+        caption = caption,
+        label = label,
+        onClick = onClick,
+        modifier = modifier,
+    )
 }
 
 // Language picker of the per-plugin and per-novel pairs: search, recent pairs
@@ -757,46 +735,19 @@ private fun LanguageRow(
     onToggleFavorite: () -> Unit,
 ) {
     val extra = LocalMiruExtraColors.current
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(
-                if (selected) {
-                    Modifier
-                        .clip(MaterialTheme.shapes.small)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                } else {
-                    Modifier
-                },
-            )
-            .clickable(role = Role.RadioButton, onClick = onClick)
-            .padding(start = MiruSpace.S, top = 2.dp, bottom = 2.dp),
-    ) {
-        Text(
-            text = "${uiLanguageName(code)} ($code)",
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (selected) extra.accent else MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        // Selection reads from the tinted row + accent label; the star stays
-        // the only trailing control, so a selected favorite is not two icons.
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clickable(role = Role.Button, onClick = onToggleFavorite),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = if (favorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
+    MiruPickerRow(
+        title = "${uiLanguageName(code)} ($code)",
+        selected = selected,
+        onClick = onClick,
+        trailing = {
+            MiruIconButton(
+                icon = if (favorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
                 contentDescription = stringResource(
                     if (favorite) R.string.st_pt_fav_remove else R.string.st_pt_fav_add,
                 ),
+                onClick = onToggleFavorite,
                 tint = if (favorite) extra.accent else extra.muted,
-                modifier = Modifier.size(20.dp),
             )
-        }
-    }
+        },
+    )
 }

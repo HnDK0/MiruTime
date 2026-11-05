@@ -84,7 +84,7 @@ fun MiruPickerRow(
                     style = if (selected) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium,
                     color = when {
                         !enabled -> extra.muted
-                        selected -> extra.accent
+                        selected -> scheme.onPrimaryContainer
                         else -> scheme.onSurface
                     },
                 )
