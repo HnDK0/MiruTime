@@ -28,6 +28,9 @@
     <string name="rd_tts_idle_desc">Готово озвучить эту главу.</string>
     <string name="rd_tts_finished">Озвучивание завершено. Начните заново с начала.</string>
     <string name="rd_tts_start">Начать</string>
+    <string name="rd_tts_overlay_play">Воспроизвести</string>
+    <string name="rd_tts_overlay_pause">Пауза</string>
+    <string name="rd_tts_overlay_collapse">Свернуть плеер</string>
     <string name="rd_tts_stop">Остановить</string>
     <string name="rd_tts_start_tts">Запустить TTS</string>
     <string name="rd_tts_action_play">Продолжить</string>
@@ -77,6 +80,9 @@
     <string name="rd_tts_floating_open">Открыть плавающий TTS-плеер</string>
     <string name="rd_tts_floating_collapse">Свернуть в пузырь</string>
     <string name="rd_tts_floating_desc">Показывать состояние и управление поверх страницы.</string>
+    <string name="rd_tts_overlay_permission_title">Плеер поверх других приложений</string>
+    <string name="rd_tts_overlay_permission_desc">Разрешите MiruTime рисовать поверх других приложений, чтобы плеер оставался видимым во время озвучивания. Без разрешения плеер работает только внутри читалки.</string>
+    <string name="rd_tts_overlay_permission_open">Открыть настройки</string>
     <string name="rd_tts_floating_opacity">Прозрачность</string>
     <string name="rd_tts_floating_width">Ширина</string>
     <string name="rd_tts_floating_width_value">%1$d dp</string>

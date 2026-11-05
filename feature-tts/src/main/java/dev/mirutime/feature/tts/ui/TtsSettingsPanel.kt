@@ -1,6 +1,11 @@
 package dev.mirutime.feature.tts.ui
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.speech.tts.Voice
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -30,6 +35,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -75,6 +81,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -82,12 +89,17 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.feature.tts.R
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
+import dev.mirutime.uikit.ChipRail
+import dev.mirutime.uikit.MiruFilterChip
+import dev.mirutime.uikit.MiruRadius
+import dev.mirutime.uikit.SheetHeaderAction
 import dev.mirutime.uikit.MiruButton
 import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruCompactTextField
@@ -291,6 +303,17 @@ fun TtsSettingsPanel(
     // independent translated-text voice (FR-040).
     var voiceSlotTranslated by rememberSaveable { mutableStateOf(false) }
     var deleteIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    // The floating player needs the system overlay permission; ask in our own
+    // sheet (never AlertDialog) and enable the switch only after the grant.
+    val context = LocalContext.current
+    var overlayPrompt by rememberSaveable { mutableStateOf(false) }
+    val overlayPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        if (Settings.canDrawOverlays(context)) {
+            onSettingsChange(settings.copy(floatingPlayer = true))
+        }
+    }
     // The engine accordion must also see engines installed after app start.
     LaunchedEffect(Unit) { onDiscoverVoices() }
 
@@ -372,6 +395,13 @@ fun TtsSettingsPanel(
         title = stringResource(R.string.rd_tts_panel_title),
         description = stringResource(R.string.rd_tts_panel_desc),
         onClose = onDismiss,
+        // Reset lives in the header, not inside the "Test & reset" section.
+        headerAction = {
+            SheetHeaderAction(
+                label = stringResource(R.string.rd_tts_reset),
+                onClick = onReset,
+            )
+        },
     ) {
         if (!ready) {
             if (failed) {
@@ -408,9 +438,9 @@ fun TtsSettingsPanel(
         // current chunk once, on release.
         var speedDraft by remember(settings.speed) { mutableStateOf(settings.speed) }
         var pitchDraft by remember(settings.pitch) { mutableStateOf(settings.pitch) }
-        TtsCompactSlider(
+        TtsSliderRow(
             label = stringResource(R.string.rd_tts_speed),
-            value = stringResource(R.string.rd_tts_speed_value, speedDraft),
+            valueText = stringResource(R.string.rd_tts_speed_value, speedDraft),
         ) {
             MiruSlider(
                 value = speedDraft,
@@ -426,9 +456,9 @@ fun TtsSettingsPanel(
                 },
             )
         }
-        TtsCompactSlider(
+        TtsSliderRow(
             label = stringResource(R.string.rd_tts_pitch),
-            value = stringResource(R.string.rd_tts_pitch_value, pitchDraft),
+            valueText = stringResource(R.string.rd_tts_pitch_value, pitchDraft),
         ) {
             MiruSlider(
                 value = pitchDraft,
@@ -506,7 +536,14 @@ fun TtsSettingsPanel(
             title = stringResource(R.string.rd_tts_floating_player),
             subtitle = stringResource(R.string.rd_tts_floating_desc),
             checked = settings.floatingPlayer,
-            onChange = { onSettingsChange(settings.copy(floatingPlayer = it)) },
+            onChange = { enabled ->
+                when {
+                    !enabled -> onSettingsChange(settings.copy(floatingPlayer = false))
+                    Settings.canDrawOverlays(context) ->
+                        onSettingsChange(settings.copy(floatingPlayer = true))
+                    else -> overlayPrompt = true
+                }
+            },
             horizontalPadding = 0.dp,
         )
         MiruRowDivider()
@@ -660,14 +697,28 @@ fun TtsSettingsPanel(
                 ) {
                     Text(stringResource(R.string.rd_tts_test))
                 }
-                OutlinedButton(
-                    onClick = onReset,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.rd_tts_reset))
-                }
             }
         }
+    }
+
+    if (overlayPrompt) {
+        AppBottomSheet(
+            title = stringResource(R.string.rd_tts_overlay_permission_title),
+            description = stringResource(R.string.rd_tts_overlay_permission_desc),
+            onClose = { overlayPrompt = false },
+            doneLabel = stringResource(R.string.rd_tts_overlay_permission_open),
+            closeLabel = stringResource(R.string.rd_tts_cancel),
+            onDone = {
+                overlayPrompt = false
+                overlayPermissionLauncher.launch(
+                    Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:${context.packageName}"),
+                    ),
+                )
+            },
+            content = {},
+        )
     }
 }
 
@@ -843,32 +894,41 @@ private fun TtsChip(
     }
 }
 
+/**
+ * One-line control: label on the left, slider in the middle, current value on
+ * the right. The slider owns no extra captions, so the two parameters stay a
+ * compact two-row block instead of four.
+ */
 @Composable
-private fun TtsCompactSlider(
+private fun TtsSliderRow(
     label: String,
-    value: String,
+    valueText: String,
     content: @Composable () -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth()) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = MiruSpace.Xs),
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = value,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        content()
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = MiruSize.Touch)
+            .padding(vertical = MiruSpace.Xs),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.widthIn(min = MiruSize.SliderLabelWidth),
+        )
+        Spacer(Modifier.width(MiruSpace.M))
+        Box(Modifier.weight(1f)) { content() }
+        Spacer(Modifier.width(MiruSpace.M))
+        Text(
+            text = valueText,
+            style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+            modifier = Modifier.widthIn(min = MiruSize.SliderValueWidth),
+        )
     }
 }
 

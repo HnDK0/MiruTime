@@ -28,6 +28,9 @@
     <string name="rd_tts_idle_desc">Ready to read this chapter aloud.</string>
     <string name="rd_tts_finished">Playback finished. Start again from the top.</string>
     <string name="rd_tts_start">Start</string>
+    <string name="rd_tts_overlay_play">Play</string>
+    <string name="rd_tts_overlay_pause">Pause</string>
+    <string name="rd_tts_overlay_collapse">Collapse player</string>
     <string name="rd_tts_stop">Stop</string>
     <string name="rd_tts_start_tts">Start TTS</string>
     <string name="rd_tts_action_play">Play</string>
@@ -77,6 +80,9 @@
     <string name="rd_tts_floating_open">Open floating TTS player</string>
     <string name="rd_tts_floating_collapse">Collapse to bubble</string>
     <string name="rd_tts_floating_desc">Show reading status and controls over the page.</string>
+    <string name="rd_tts_overlay_permission_title">Floating player over other apps</string>
+    <string name="rd_tts_overlay_permission_desc">Allow MiruTime to draw over other apps so the player stays visible while TTS reads. Without it, the player only works inside the reader.</string>
+    <string name="rd_tts_overlay_permission_open">Open settings</string>
     <string name="rd_tts_floating_opacity">Opacity</string>
     <string name="rd_tts_floating_width">Width</string>
     <string name="rd_tts_floating_width_value">%1$d dp</string>

@@ -41,6 +41,7 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.core)
     implementation(libs.compose.material.icons.extended)
+    implementation(libs.activity.compose)
     implementation(libs.kotlinx.coroutines.core)
     // Cover loading in the playback service uses the app's singleton loader;
     // no Compose UI or network fetcher is needed in this module.

@@ -22,6 +22,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.provider.Settings
 import android.view.KeyEvent
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
@@ -87,6 +88,7 @@ class TtsPlaybackService : Service() {
     // controller before starting this service; after process death the host is
     // empty and the service stops instead of resurrecting a dead session.
     private lateinit var ttsController: TtsController
+    private var overlay: TtsOverlayController? = null
 
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -184,6 +186,7 @@ class TtsPlaybackService : Service() {
         }
         registerNoisyReceiver()
         observeState()
+        observeOverlay()
         observeSleepTimer()
         MiruLog.event("tts", "service-create")
     }
@@ -219,6 +222,7 @@ class TtsPlaybackService : Service() {
                     ?: chapterNumber
                 chapterCount = intent?.getIntExtra(TtsPlaybackIntent.ExtraChapterCount, 0)
                     ?: chapterCount
+                overlay?.updateChapter(overlayChapter())
                 started = true
                 // A start intent also re-posts the notification after a late
                 // POST_NOTIFICATIONS grant, so force one publish.
@@ -252,6 +256,8 @@ class TtsPlaybackService : Service() {
             super.onDestroy()
             return
         }
+        overlay?.destroy()
+        overlay = null
         releaseWakeLock()
         abandonAudioFocus()
         unregisterNoisyReceiver()
@@ -265,11 +271,41 @@ class TtsPlaybackService : Service() {
     private fun observeState() {
         serviceScope.launch {
             ttsController.state.collect { state ->
+                overlay?.updateChapter(overlayChapter())
                 if (!started) return@collect
                 handleState(state)
             }
         }
     }
+
+    /**
+     * The system overlay exists only with the user's permission. It is created
+     * lazily: a session may start before the floating switch is turned on.
+     */
+    private fun observeOverlay() {
+        serviceScope.launch {
+            ttsController.settings.collect { settings ->
+                // Re-check on every emission: the user may grant the overlay
+                // permission from the settings sheet while this service runs.
+                if (settings.floatingPlayer &&
+                    overlay == null &&
+                    Settings.canDrawOverlays(this@TtsPlaybackService)
+                ) {
+                    overlay = TtsOverlayController(this@TtsPlaybackService, ttsController).also {
+                        it.updateChapter(overlayChapter())
+                        it.start()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun overlayChapter() = TtsOverlayChapter(
+        bookTitle = bookTitle,
+        chapterTitle = chapterTitle,
+        chapterNumber = chapterNumber,
+        chapterCount = chapterCount,
+    )
 
     /**
      * The timer emits every second, but the notification label is static.
