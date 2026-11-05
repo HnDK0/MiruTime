@@ -23,7 +23,19 @@ class MiruControlsContractTest {
         assertEquals(48.dp, MiruSize.Touch)
         assertEquals(40.dp, MiruSize.Control)
         assertEquals(22.dp, MiruSize.Icon)
+        assertEquals(18.dp, MiruSize.IconCompact)
         assertEquals(listOf(MiruIconButtonStyle.Bare, MiruIconButtonStyle.Plate), MiruIconButtonStyle.entries.toList())
+    }
+
+    @Test
+    fun `compact plate keeps a 36dp face on a 48dp slot and never derives enabled from busy`() {
+        val compact = source("MiruCompactButton")
+        assertEquals(36.dp, MiruSize.ButtonCompact)
+        assertEquals(48.dp, MiruSize.Touch)
+        assertTrue(compact.contains("heightIn(min = MiruSize.Touch)"))
+        assertTrue(compact.contains("height(MiruSize.ButtonCompact)"))
+        assertFalse(compact.contains("enabled && !busy"))
+        assertTrue(compact.contains("ProgressBarRangeInfo.Indeterminate"))
     }
 
     @Test

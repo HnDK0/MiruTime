@@ -141,12 +141,16 @@ fun MiruIconButton(
     enabled: Boolean = true,
     busy: Boolean = false,
     busyDescription: String? = null,
+    tint: Color? = null,
+    iconSize: Dp = MiruSize.Icon,
+    contentAlignment: Alignment = Alignment.Center,
 ) {
     val scheme = MaterialTheme.colorScheme
     val extra = LocalMiruExtraColors.current
     val shape = MaterialTheme.shapes.small
     val ink = when {
         !enabled -> extra.muted.copy(alpha = 0.38f)
+        tint != null -> tint
         selected == true && style == MiruIconButtonStyle.Plate -> extra.onAccent
         selected == true -> extra.accent
         else -> scheme.onSurface
@@ -164,7 +168,7 @@ fun MiruIconButton(
             }
             .clip(shape)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center,
+        contentAlignment = contentAlignment,
     ) {
         Box(
             modifier = Modifier
@@ -185,7 +189,7 @@ fun MiruIconButton(
                     strokeWidth = MiruSpace.Xxs,
                 )
             } else {
-                Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(MiruSize.Icon))
+                Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(iconSize))
             }
         }
     }

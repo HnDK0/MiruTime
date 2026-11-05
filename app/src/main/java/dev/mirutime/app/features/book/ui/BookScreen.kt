@@ -86,7 +86,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
@@ -122,12 +121,13 @@ import dev.mirutime.uikit.MiruCard
 import dev.mirutime.uikit.MiruActionRow
 import dev.mirutime.uikit.MiruButton
 import dev.mirutime.uikit.MiruButtonStyle
+import dev.mirutime.uikit.MiruCompactButton
+import dev.mirutime.uikit.MiruIconButton
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
 import dev.mirutime.uikit.StatCell
 import dev.mirutime.uikit.StatPanel
 import dev.mirutime.uikit.SkeletonBar
-import dev.mirutime.uikit.miruCardSurface
 import dev.mirutime.app.core.chapterRowKey
 import dev.mirutime.core.log.MiruLog
 import dev.mirutime.app.di.MigrationGraph
@@ -2317,7 +2317,7 @@ private fun ActionRow(
         }
         Spacer(modifier = Modifier.height(MiruSpace.S))
         Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-            PlateActionButton(
+            MiruCompactButton(
                 icon = Icons.Filled.Download,
                 label = when {
                     downloadBusy -> stringResource(R.string.loading_adding_to_queue)
@@ -2329,13 +2329,13 @@ private fun ActionRow(
                 },
                 muted = !book.inLibrary,
                 progress = if (downloadBusy) null else downloadProgress,
-                pending = downloadBusy,
-                pendingDescription = stringResource(R.string.loading_adding_to_queue),
+                busy = downloadBusy,
+                busyDescription = stringResource(R.string.loading_adding_to_queue),
                 enabled = !downloadBusy,
                 onClick = onDownloadAll,
                 modifier = Modifier.weight(1f),
             )
-            PlateActionButton(
+            MiruCompactButton(
                 icon = if (book.inLibrary) {
                     Icons.Filled.BookmarkAdded
                 } else {
@@ -2344,8 +2344,9 @@ private fun ActionRow(
                 label = stringResource(
                     if (book.inLibrary) R.string.book_cd_in_library else R.string.book_cd_add_library,
                 ),
-                active = book.inLibrary,
-                pending = membershipPending,
+                selected = book.inLibrary,
+                busy = membershipPending,
+                busyDescription = stringResource(R.string.book_library_pending),
                 onClick = onToggleLibrary,
                 modifier = Modifier.weight(1f),
             )
@@ -2460,92 +2461,13 @@ private fun ChapterDeleteErrorNotice(
         TextButton(onClick = onRetry) {
             Text(text = stringResource(R.string.dl_action_retry))
         }
-        SelectionIconAction(
+        MiruIconButton(
             icon = Icons.Filled.Close,
             contentDescription = stringResource(R.string.book_delete_error_dismiss),
-            color = MaterialTheme.colorScheme.onErrorContainer,
+            tint = MaterialTheme.colorScheme.onErrorContainer,
+            iconSize = MiruSize.IconCompact,
             onClick = onDismiss,
         )
-    }
-}
-
-// Compact secondary action: 36dp visual rectangle on a 44dp touch slot. Card
-// plate + hairline keeps the button language; muted ink = "not available
-// yet" (downloads outside the library); active = accent for the saved state;
-// a progress ring replaces the icon while a real queue runs.
-@Composable
-private fun PlateActionButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    active: Boolean = false,
-    muted: Boolean = false,
-    progress: Float? = null,
-    // Indeterminate "membership is being written" indicator; the label and
-    // the rest of the page stay interactive.
-    pending: Boolean = false,
-    pendingDescription: String = stringResource(R.string.book_library_pending),
-    enabled: Boolean = true,
-    iconTint: Color? = null,
-) {
-    val extra = LocalMiruExtraColors.current
-    val shape = RoundedCornerShape(MiruRadius.Chip)
-    val ink = when {
-        muted -> extra.muted
-        active -> extra.accent
-        else -> MaterialTheme.colorScheme.onSurface
-    }
-    Box(
-        modifier = modifier
-            .heightIn(min = 44.dp)
-            .clip(shape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(36.dp)
-                .clip(shape)
-                .background(miruCardSurface())
-                .border(1.dp, MaterialTheme.colorScheme.outline, shape)
-                .padding(horizontal = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            if (progress != null) {
-                CircularProgressIndicator(
-                    progress = { progress },
-                    strokeWidth = 2.dp,
-                    color = extra.accent,
-                    modifier = Modifier.size(16.dp),
-                )
-            } else if (pending) {
-                CircularProgressIndicator(
-                    strokeWidth = 2.dp,
-                    color = extra.accent,
-                    modifier = Modifier
-                        .size(16.dp)
-                        .semantics { contentDescription = pendingDescription },
-                )
-            } else {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = iconTint ?: ink,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-                color = ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
     }
 }
 
@@ -2964,20 +2886,20 @@ private fun ChapterBrowser(
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(MiruSpace.S))
-        // Three compact rectangles, one row. They are secondary tools, not
-        // page-level actions, so they stay 36dp tall (44dp touch slot).
+        // Three compact plates, one row. They are secondary tools, not
+        // page-level actions, so they stay 36dp tall (48dp touch slot).
         Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-            BrowserButton(
+            MiruCompactButton(
                 label = stringResource(R.string.book_btn_download),
                 onClick = onDownloadNext100,
                 modifier = Modifier.weight(1f),
             )
-            BrowserButton(
+            MiruCompactButton(
                 label = stringResource(R.string.book_btn_select),
                 onClick = onSelectChapters,
                 modifier = Modifier.weight(1f),
             )
-            BrowserButton(
+            MiruCompactButton(
                 label = stringResource(R.string.book_btn_last_read),
                 enabled = lastRead > 0,
                 onClick = {
@@ -3064,51 +2986,6 @@ private fun ChapterBrowser(
     }
 }
 
-// Compact secondary button: 36dp visual rectangle on a 44dp touch slot. The
-// smaller radius (8dp) and padding keep the chapter toolbar quiet; the plate
-// surface + hairline still matches the page's button language.
-@Composable
-private fun BrowserButton(
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
-    val extra = LocalMiruExtraColors.current
-    val shape = RoundedCornerShape(MiruRadius.Chip)
-    val ink = if (enabled) {
-        MaterialTheme.colorScheme.onSurface
-    } else {
-        extra.muted.copy(alpha = 0.6f)
-    }
-    Box(
-        modifier = modifier
-            .heightIn(min = 44.dp)
-            .clip(shape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(36.dp)
-                .clip(shape)
-                .background(miruCardSurface())
-                .border(1.dp, MaterialTheme.colorScheme.outline, shape)
-                .padding(horizontal = MiruSpace.S),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
 // Chapter jump position follows the visible reading order, not the source
 // chapter index: the list may be filtered and/or newest-first.
 internal fun chapterJumpPosition(visible: List<BookChapter>, chapterIndex: Int): Int =
@@ -3156,10 +3033,11 @@ private fun SelectionBar(
             .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            SelectionIconAction(
+            MiruIconButton(
                 icon = Icons.Filled.Close,
                 contentDescription = stringResource(R.string.lib_selection_close),
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                iconSize = MiruSize.IconCompact,
                 onClick = onClose,
             )
             Text(
@@ -3208,119 +3086,49 @@ private fun SelectionBar(
                 .padding(start = MiruSpace.S, end = MiruSpace.S, bottom = MiruSpace.S),
             horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
         ) {
-            SelectionAction(
+            MiruCompactButton(
                 icon = Icons.Filled.Translate,
                 label = stringResource(R.string.book_sel_action_translate),
-                color = if (translationConfigured) extra.accent else extra.muted,
+                ink = if (translationConfigured) extra.accent else extra.muted,
                 enabled = busy == null && selectionCount > 0,
                 onClick = onTranslate,
             )
-            SelectionAction(
+            MiruCompactButton(
                 icon = Icons.Filled.Delete,
                 label = stringResource(R.string.book_sel_action_delete_translations),
-                color = MaterialTheme.colorScheme.error,
+                ink = MaterialTheme.colorScheme.error,
                 enabled = busy == null && selectionCount > 0 && translatedCount > 0,
                 onClick = onDeleteTranslations,
             )
-            SelectionAction(
+            MiruCompactButton(
                 icon = Icons.Filled.Download,
                 label = stringResource(R.string.book_sel_action_download),
-                color = if (downloadAvailable) extra.accent else extra.muted,
+                ink = if (downloadAvailable) extra.accent else extra.muted,
                 enabled = busy == null && selectionCount > 0,
                 onClick = onDownloadSelected,
             )
-            SelectionAction(
+            MiruCompactButton(
                 icon = Icons.Filled.Delete,
                 label = stringResource(R.string.book_sel_action_delete_downloads),
-                color = MaterialTheme.colorScheme.error,
+                ink = MaterialTheme.colorScheme.error,
                 enabled = busy == null && selectionCount > 0 && downloadedCount > 0,
                 onClick = onDeleteDownloads,
             )
-            SelectionAction(
+            MiruCompactButton(
                 icon = Icons.Filled.Check,
                 label = stringResource(R.string.book_sel_action_mark_read),
-                color = MaterialTheme.colorScheme.primary,
+                ink = MaterialTheme.colorScheme.primary,
                 enabled = busy == null && selectionCount > 0,
                 onClick = { onMarkRead(true) },
             )
-            SelectionAction(
+            MiruCompactButton(
                 icon = Icons.Filled.RemoveDone,
                 label = stringResource(R.string.book_sel_action_mark_unread),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                ink = MaterialTheme.colorScheme.onSurfaceVariant,
                 enabled = busy == null && selectionCount > 0,
                 onClick = { onMarkRead(false) },
             )
         }
-    }
-}
-
-// Labeled action chip: 32dp visual rectangle on a 44dp touch slot, icon +
-// text so the action never relies on a glyph alone.
-@Composable
-private fun SelectionAction(
-    icon: ImageVector,
-    label: String,
-    color: Color,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-) {
-    val extra = LocalMiruExtraColors.current
-    val shape = RoundedCornerShape(MiruRadius.Chip)
-    val ink = if (enabled) color else extra.muted.copy(alpha = 0.55f)
-    Box(
-        modifier = Modifier
-            .heightIn(min = 44.dp)
-            .clip(shape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(
-            modifier = Modifier
-                .height(32.dp)
-                .clip(shape)
-                .background(miruCardSurface())
-                .border(1.dp, MaterialTheme.colorScheme.outline, shape)
-                .padding(horizontal = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = ink,
-                modifier = Modifier.size(14.dp),
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = ink,
-                maxLines = 1,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SelectionIconAction(
-    icon: ImageVector,
-    contentDescription: String,
-    color: Color,
-    onClick: () -> Unit,
-    contentAlignment: Alignment = Alignment.Center,
-) {
-    Box(
-        modifier = Modifier
-            .size(MiruSize.Touch)
-            .clip(RoundedCornerShape(MiruRadius.Cover))
-            .clickable(role = Role.Button, onClick = onClick),
-        contentAlignment = contentAlignment,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = color,
-            modifier = Modifier.size(18.dp),
-        )
     }
 }
 
@@ -3533,26 +3341,29 @@ private fun ChapterRow(
             if (isVideoBook && !selectionActive) {
                 videoDownloadActions(videoState).forEach { action ->
                     when (action) {
-                        VideoDownloadAction.Pause -> SelectionIconAction(
+                        VideoDownloadAction.Pause -> MiruIconButton(
                             icon = Icons.Filled.Pause,
                             contentDescription = stringResource(R.string.dl_action_pause),
-                            color = extra.muted,
-                            onClick = { onVideoDownloadAction(action) },
+                            tint = extra.muted,
+                            iconSize = MiruSize.IconCompact,
                             contentAlignment = Alignment.CenterEnd,
+                            onClick = { onVideoDownloadAction(action) },
                         )
-                        VideoDownloadAction.Resume -> SelectionIconAction(
+                        VideoDownloadAction.Resume -> MiruIconButton(
                             icon = Icons.Filled.PlayArrow,
                             contentDescription = stringResource(R.string.dl_action_resume),
-                            color = extra.accent,
-                            onClick = { onVideoDownloadAction(action) },
+                            tint = extra.accent,
+                            iconSize = MiruSize.IconCompact,
                             contentAlignment = Alignment.CenterEnd,
+                            onClick = { onVideoDownloadAction(action) },
                         )
-                        VideoDownloadAction.Cancel -> SelectionIconAction(
+                        VideoDownloadAction.Cancel -> MiruIconButton(
                             icon = Icons.Filled.Close,
                             contentDescription = stringResource(R.string.dl_action_cancel),
-                            color = MaterialTheme.colorScheme.error,
-                            onClick = { onVideoDownloadAction(action) },
+                            tint = MaterialTheme.colorScheme.error,
+                            iconSize = MiruSize.IconCompact,
                             contentAlignment = Alignment.CenterEnd,
+                            onClick = { onVideoDownloadAction(action) },
                         )
                     }
                 }
@@ -3705,32 +3516,17 @@ private fun ReviewItem(review: BookReview, onTranslate: () -> Unit) {
                     modifier = Modifier.padding(start = MiruSpace.S),
                 )
             } else {
-                TranslateIconButton(onClick = onTranslate)
+                MiruIconButton(
+                    icon = Icons.Filled.Translate,
+                    contentDescription = stringResource(R.string.book_review_translate_cd),
+                    tint = extra.accent,
+                    iconSize = MiruSize.IconCompact,
+                    onClick = onTranslate,
+                )
             }
         }
         Spacer(modifier = Modifier.height(MiruSpace.S))
         ExpandableBody(text = review.text, collapsedLines = 4)
-    }
-}
-
-// 48dp touch box, translate glyph in accent — the manual half of the
-// review translation (FULL mode would do it automatically instead).
-@Composable
-private fun TranslateIconButton(onClick: () -> Unit) {
-    val extra = LocalMiruExtraColors.current
-    Box(
-        modifier = Modifier
-            .size(MiruSize.Touch)
-            .clip(RoundedCornerShape(MiruRadius.Control))
-            .clickable(role = Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = Icons.Filled.Translate,
-            contentDescription = stringResource(R.string.book_review_translate_cd),
-            tint = extra.accent,
-            modifier = Modifier.size(18.dp),
-        )
     }
 }
 

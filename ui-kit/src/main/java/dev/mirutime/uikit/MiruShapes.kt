@@ -55,6 +55,7 @@ object MiruSize {
     val SplitProgress = 56.dp // split-progress pill (chapters read / total)
     val SplitProgressHeight = 16.dp
     val Button = 44.dp       // secondary buttons / plate pills
+    val ButtonCompact = 36.dp // compact plates (chapter toolbar, selection strip)
     val ButtonPrimary = 52.dp // the one loud action of a screen
     val Row = 56.dp          // single-line list rows (tools, settings)
     val ScreenPad = MiruSpace.L
@@ -67,6 +68,8 @@ object MiruSize {
     // Catalogue/global-search tile width (CatalogTile in a LazyRow).
     val Tile = 140.dp
     val IconSmall = 14.dp
+    val IconPlate = 16.dp
+    val IconCompact = 18.dp
     val Icon = 22.dp
     val Indicator = 16.dp
     val Stroke = 1.dp
