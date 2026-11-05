@@ -2,7 +2,6 @@ package dev.mirutime.app.features.dashboard.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,10 +19,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -267,34 +268,20 @@ private fun HistorySelectionToolbar(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = stringResource(R.string.lib_selection_close),
-            style = MaterialTheme.typography.labelLarge,
-            color = LocalMiruExtraColors.current.accent,
-            modifier = Modifier
-                .clip(MaterialTheme.shapes.small)
-                .clickable(onClick = onExit)
-                .padding(horizontal = MiruSpace.S, vertical = MiruSpace.Xs),
+        val toolbarColors = ButtonDefaults.textButtonColors(
+            contentColor = LocalMiruExtraColors.current.accent,
         )
+        val toolbarPadding = PaddingValues(horizontal = MiruSpace.S, vertical = MiruSpace.Xs)
+        TextButton(onClick = onExit, colors = toolbarColors, contentPadding = toolbarPadding) {
+            Text(stringResource(R.string.lib_selection_close))
+        }
         Spacer(modifier = Modifier.weight(1f))
-        Text(
-            text = stringResource(R.string.lib_select_all),
-            style = MaterialTheme.typography.labelLarge,
-            color = LocalMiruExtraColors.current.accent,
-            modifier = Modifier
-                .clip(MaterialTheme.shapes.small)
-                .clickable(onClick = onSelectAll)
-                .padding(horizontal = MiruSpace.S, vertical = MiruSpace.Xs),
-        )
-        Text(
-            text = stringResource(R.string.lib_clear_selection),
-            style = MaterialTheme.typography.labelLarge,
-            color = LocalMiruExtraColors.current.accent,
-            modifier = Modifier
-                .clip(MaterialTheme.shapes.small)
-                .clickable(onClick = onClear)
-                .padding(horizontal = MiruSpace.S, vertical = MiruSpace.Xs),
-        )
+        TextButton(onClick = onSelectAll, colors = toolbarColors, contentPadding = toolbarPadding) {
+            Text(stringResource(R.string.lib_select_all))
+        }
+        TextButton(onClick = onClear, colors = toolbarColors, contentPadding = toolbarPadding) {
+            Text(stringResource(R.string.lib_clear_selection))
+        }
     }
 }
 

@@ -48,6 +48,7 @@ import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruButton
 import dev.mirutime.uikit.MiruButtonStyle
+import dev.mirutime.uikit.MiruCard
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
 import dev.mirutime.uikit.MiruActionRow
@@ -369,13 +370,10 @@ fun UpdateRow(
     modifier: Modifier = Modifier,
     onOpen: () -> Unit = {},
 ) {
-    val shape = MaterialTheme.shapes.medium
-    Surface(
-        shape = shape,
-        color = miruCardSurface(),
-        shadowElevation = miruCardElevation(),
+    MiruCard(
+        contentPadding = PaddingValues(0.dp),
         modifier = modifier
-            .clip(shape)
+            .clip(MaterialTheme.shapes.medium)
             .clickable(onClick = onOpen),
     ) {
         Row(
