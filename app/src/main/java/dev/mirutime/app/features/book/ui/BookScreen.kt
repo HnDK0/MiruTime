@@ -16,9 +16,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.ContextualFlowRow
-import androidx.compose.foundation.layout.ContextualFlowRowOverflow
-import androidx.compose.foundation.layout.ContextualFlowRowOverflowScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -31,13 +28,15 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.BookmarkAdded
@@ -52,6 +51,7 @@ import androidx.compose.material.icons.filled.Login
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RemoveDone
@@ -63,7 +63,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -86,6 +85,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -115,14 +116,18 @@ import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.app.design.components.BookCover
-import dev.mirutime.uikit.MiruActionTag
 import dev.mirutime.uikit.MiruCard
 import dev.mirutime.uikit.MiruTag
 import dev.mirutime.uikit.MiruActionRow
 import dev.mirutime.uikit.MiruButton
 import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruCompactButton
+import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruIconButton
+import dev.mirutime.uikit.MiruSearchField
+import dev.mirutime.uikit.MiruSourceChip
+import dev.mirutime.uikit.MiruTabPill
+import dev.mirutime.uikit.MiruToolTile
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
 import dev.mirutime.uikit.StatCell
@@ -145,10 +150,12 @@ import dev.mirutime.app.features.book.domain.BookActionKind
 import dev.mirutime.app.features.book.domain.BookChapter
 import dev.mirutime.app.features.book.domain.BookDetails
 import dev.mirutime.app.features.book.domain.BookReview
+import dev.mirutime.app.features.book.domain.ChapterFilter
 import dev.mirutime.app.features.book.domain.bookActionState
 import dev.mirutime.app.features.book.domain.continueChapterTitle
 import dev.mirutime.app.features.book.domain.bookChaptersCountKnown
 import dev.mirutime.app.features.book.domain.inReadingOrder
+import dev.mirutime.app.features.book.domain.matches
 import dev.mirutime.app.features.dashboard.ui.formatDurationLocalized
 import dev.mirutime.app.features.downloads.data.DownloadEngine
 import dev.mirutime.app.features.downloads.data.DownloadState
@@ -198,26 +205,11 @@ private val BottomClearance = 16.dp
 
 // Chapter list window: its own scroll viewport inside the page, capped so
 // the page stays navigable (the chapter list scrolls in its own window).
-private val ChapterWindowHeight = 480.dp
+private val ChapterWindowHeight = 310.dp
 
 // The provider keeps metadata in memory but the rendered page also holds the
 // chapter list. A tiny bounded snapshot lets a reader return paint the page
 // immediately; the provider/DB answer then revalidates it in place.
-private object BookPageSnapshotCache {
-    private const val MaxEntries = 4
-    private val entries = LinkedHashMap<String, BookDetails>()
-
-    fun get(bookUrl: String): BookDetails? = entries[bookUrl]
-
-    fun put(bookUrl: String, book: BookDetails) {
-        entries.remove(bookUrl)
-        entries[bookUrl] = book
-        while (entries.size > MaxEntries) {
-            entries.remove(entries.keys.first())
-        }
-    }
-}
-
 // Characters stays dropped — no plugin character data confirmed yet. READER
 // NOTES lives at the bottom of this file on fixtures; real review parsing is
 // still pending.
@@ -302,7 +294,7 @@ fun BookScreen(
     // Opens a migrated target book from the sheet.
     onOpenBook: (bookUrl: String) -> Unit = {},
 ) {
-    val seededBook = remember(bookUrl) { BookPageSnapshotCache.get(bookUrl) }
+    val seededBook = remember(bookUrl) { BookPageSnapshotStore.get(bookUrl) }
     var book by remember(bookUrl) { mutableStateOf(seededBook) }
     // The saved reader position is the same source the tap uses; the CTA
     // label must not fall back to "Start · Chapter 1" while it is non-zero.
@@ -333,11 +325,14 @@ fun BookScreen(
     // provider cache answers immediately, so no skeleton/source refresh.
     var loadedOnce by rememberSaveable(bookUrl) { mutableStateOf(false) }
     SideEffect {
-        book?.let { BookPageSnapshotCache.put(bookUrl, it) }
+        book?.let { BookPageSnapshotStore.put(bookUrl, it) }
     }
     var shelves by remember { mutableStateOf<List<Shelf>>(emptyList()) }
     var shelvesLoading by remember { mutableStateOf(true) }
     var shelfSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var sourcePanelOpen by rememberSaveable { mutableStateOf(false) }
+    var downloadPanelOpen by rememberSaveable { mutableStateOf(false) }
+    var toolsExpanded by rememberSaveable { mutableStateOf(true) }
     var translatorSheetOpen by rememberSaveable { mutableStateOf(false) }
     var migrationSheetOpen by rememberSaveable { mutableStateOf(false) }
     var epubSheetOpen by rememberSaveable { mutableStateOf(false) }
@@ -1219,6 +1214,9 @@ fun BookScreen(
                     onShelfClick = { shelfSheetOpen = true },
                     onOpenSearch = { onOpenSearch(current.title) },
                     onCoverRetry = retryCover,
+                    onOpenSource = { sourcePanelOpen = true },
+                    onToggleLibrary = { requestMembership(!current.inLibrary) },
+                    membershipPending = membershipPending,
                 )
             }
             coverFailure?.let { report ->
@@ -1241,7 +1239,13 @@ fun BookScreen(
                     )
                 }
             }
-            item { StatStrip(book = current, chaptersLoading = chaptersLoading) }
+            item {
+                StatStrip(
+                    book = current,
+                    chaptersLoading = chaptersLoading,
+                    downloadedOverride = if (isVideoBook) videoCompletedCount else null,
+                )
+            }
             item {
                 // The CTA label must use the same saved position as the tap.
                 // `book.continueChapter` is null until chapters/progress
@@ -1265,9 +1269,23 @@ fun BookScreen(
                     // "No chapters" answer: the CTA names the failure instead.
                     chaptersFailed = chaptersFailure != null && current.chapters.isEmpty(),
                     continueTitle = continueTitle,
-                    downloadProgress = downloadProgress,
-                    downloadBusy = downloadAllBusy,
-                    membershipPending = membershipPending,
+                    downloadEnabled = if (isVideoBook) {
+                        videoDownloads != null && videoRepository != null && current.inLibrary
+                    } else {
+                        downloadEngine != null && current.inLibrary
+                    },
+                    showSource = !current.bookUrl.startsWith("local") &&
+                        current.sourceUrl.isNotBlank(),
+                    toolCount = 2 +
+                        (if (exporter != null && downloadedChapterCount(current, isVideoBook, videoCompletedCount) > 0) 1 else 0) +
+                        (if (migration != null && current.inLibrary &&
+                            !current.bookUrl.startsWith("local")
+                        ) {
+                            1
+                        } else {
+                            0
+                        }),
+                    toolsExpanded = toolsExpanded,
                     onContinue = {
                         ioScope.launch {
                             val readerBook = current.toReaderBook()
@@ -1280,66 +1298,9 @@ fun BookScreen(
                             }
                         }
                     },
-                    // Explicit target from the optimistic state; the intent
-                    // channel coalesces rapid taps to the newest one.
-                    onToggleLibrary = { requestMembership(!current.inLibrary) },
-                    onDownloadAll = downloadAll@{
-                        if (downloadAllBusy) return@downloadAll
-                        if (isVideoBook) {
-                            if (!current.inLibrary) {
-                                bookToast(
-                                    context,
-                                    resources.getString(R.string.book_download_needs_library),
-                                )
-                            } else if (videoDownloads == null || videoRepository == null) {
-                                bookToast(
-                                    context,
-                                    resources.getString(R.string.book_download_unavailable),
-                                )
-                            } else {
-                                downloadAllBusy = true
-                                enqueueVideoChapters(
-                                    current.chapters.map { it.index }.toSet(),
-                                ) { downloadAllBusy = false }
-                            }
-                            return@downloadAll
-                        }
-                        val engine = downloadEngine
-                        if (!current.inLibrary) {
-                            // Downloads live in the library: the
-                            // button refuses with a hint until the book is in.
-                            bookToast(
-                                context,
-                                resources.getString(R.string.book_download_needs_library),
-                            )
-                        } else if (engine == null) {
-                            bookToast(context, resources.getString(R.string.book_download_unavailable))
-                        } else {
-                            ioScope.launch {
-                                downloadAllBusy = true
-                                try {
-                                    val result = engine.enqueueNow(
-                                        current.bookUrl,
-                                        null,
-                                        translationConfigured,
-                                    )
-                                    MiruLog.event(
-                                        "downloads",
-                                        "enqueue",
-                                        "book" to MiruLog.idHash(current.bookUrl),
-                                        "queued" to result.queued,
-                                        "skipped" to result.skipped,
-                                        "unknown" to result.unknown,
-                                        "translate" to result.translationRequested,
-                                    )
-                                    bookToast(context, enqueueMessage(context, result))
-                                    reloadChapters()
-                                } finally {
-                                    downloadAllBusy = false
-                                }
-                            }
-                        }
-                    },
+                    onOpenDownloadPanel = { downloadPanelOpen = true },
+                    onOpenSourcePanel = { sourcePanelOpen = true },
+                    onToggleTools = { toolsExpanded = !toolsExpanded },
                 )
             }
             if (downloadQueueState != null && downloadBookId != null) {
@@ -1363,28 +1324,31 @@ fun BookScreen(
                     VideoDownloadPausedNotice(onResume = ::resumeVideoDownloads)
                 }
             }
+            if (toolsExpanded) {
+                item {
+                    val downloaded = downloadedChapterCount(
+                        current,
+                        isVideoBook,
+                        videoCompletedCount,
+                    )
+                    ToolsSection(
+                        translatorOn = AppSettings.novelTranslation[current.bookUrl]?.enabled == true,
+                        regexCount = AppSettings.novelRegexRules[current.bookUrl]
+                            .orEmpty()
+                            .count { it.enabled },
+                        epubChapters = downloaded,
+                        epubEnabled = exporter != null && !epubExporting && downloaded > 0,
+                        epubBusy = epubExporting,
+                        migrateEnabled = migration != null && current.inLibrary &&
+                            !current.bookUrl.startsWith("local"),
+                        onTranslator = { translatorSheetOpen = true },
+                        onEpub = { if (!epubExporting) epubSheetOpen = true },
+                        onRegex = { onOpenRegex(bookUrl) },
+                        onMigrate = { migrationSheetOpen = true },
+                    )
+                }
+            }
             item { AboutSection(description = metadataEntry?.description ?: current.description) }
-            item {
-                SourcePageSection(
-                    book = current,
-                    onOpenWebView = onOpenWebView,
-                )
-            }
-            item {
-                ToolsSection(
-                    onTranslator = { translatorSheetOpen = true },
-                    onEpub = { if (!epubExporting) epubSheetOpen = true },
-                    epubEnabled = !epubExporting,
-                    epubBusy = epubExporting,
-                    // Per-novel rules open the real editor scoped to this
-                    // book (Settings -> Regex); the global set lives in
-                    // Settings -> Regex without a novel.
-                    onRegex = { onOpenRegex(bookUrl) },
-                    onMigrate = { migrationSheetOpen = true },
-                    migrateEnabled = migration != null && current.inLibrary &&
-                        !current.bookUrl.startsWith("local"),
-                )
-            }
             chaptersFailure?.let { report ->
                 item(key = "chapters-error") {
                     PluginErrorState(
@@ -1409,13 +1373,13 @@ fun BookScreen(
                         book = current,
                         newestFirst = newestFirst,
                         refreshing = chaptersRefreshing,
-                        downloadedOverride = if (isVideoBook) videoCompletedCount else null,
+                        notesCount = current.reviews.size,
                         onRefresh = ::refreshChapters,
                         onToggleOrder = {
                             newestFirst = !newestFirst
                             AppSettings.newestFirst = newestFirst
                         },
-                    ) {
+                        content = {
                         chapterDeleteFailure?.let { failure ->
                             ChapterDeleteErrorNotice(
                                 message = failure.message,
@@ -1610,26 +1574,109 @@ fun BookScreen(
                                 }
                             },
                         )
-                    }
+                        },
+                        notesContent = {
+                            ReaderNotesSection(
+                                reviews = current.reviews,
+                                onTranslate = {
+                                    bookToast(
+                                        context,
+                                        resources.getString(R.string.book_review_translate_stub),
+                                    )
+                                },
+                            )
+                        },
+                    )
                 }
-            }
-            // Very bottom of the page, after the chapters: READER NOTES.
-            // Fixture reviews; empty state on books whose plugin offered none.
-            item {
-                ReaderNotesSection(
-                    reviews = current.reviews,
-                    onTranslate = {
-                        bookToast(
-                            context,
-                            resources.getString(R.string.book_review_translate_stub),
-                        )
-                    },
-                )
             }
         }
     }
 
     if (current != null) {
+        fun launchDownload(indexes: Set<Int>?, nextCount: Int? = null) {
+            if (downloadAllBusy) return
+            if (isVideoBook) {
+                val unread = current.chapters.filter { !it.isRead }
+                val target = indexes ?: (
+                    if (nextCount != null) unread.take(nextCount) else unread
+                    ).map { it.index }.toSet()
+                if (target.isEmpty()) {
+                    bookToast(context, resources.getString(R.string.book_dl_nothing_new))
+                    return
+                }
+                downloadAllBusy = true
+                enqueueVideoChapters(target) { downloadAllBusy = false }
+                return
+            }
+            val engine = downloadEngine
+            if (!current.inLibrary) {
+                bookToast(
+                    context,
+                    resources.getString(R.string.book_download_needs_library),
+                )
+            } else if (engine == null) {
+                bookToast(context, resources.getString(R.string.book_download_unavailable))
+            } else {
+                ioScope.launch {
+                    downloadAllBusy = true
+                    try {
+                        val result = if (nextCount != null) {
+                            engine.enqueueNextNow(
+                                current.bookUrl,
+                                nextCount,
+                                translationConfigured,
+                            )
+                        } else {
+                            engine.enqueueNow(
+                                current.bookUrl,
+                                indexes.orEmpty(),
+                                translationConfigured,
+                            )
+                        }
+                        MiruLog.event(
+                            "downloads",
+                            "enqueue",
+                            "book" to MiruLog.idHash(current.bookUrl),
+                            "queued" to result.queued,
+                            "skipped" to result.skipped,
+                            "unknown" to result.unknown,
+                            "translate" to result.translationRequested,
+                        )
+                        bookToast(context, enqueueMessage(context, result))
+                        reloadChapters()
+                    } finally {
+                        downloadAllBusy = false
+                    }
+                }
+            }
+        }
+
+        if (sourcePanelOpen) {
+            SourcePanel(
+                book = current,
+                onClose = { sourcePanelOpen = false },
+                onOpenWebView = onOpenWebView,
+            )
+        }
+        if (downloadPanelOpen) {
+            DownloadPanel(
+                busy = downloadAllBusy,
+                onClose = { downloadPanelOpen = false },
+                onNext = { count ->
+                    downloadPanelOpen = false
+                    launchDownload(indexes = null, nextCount = count)
+                },
+                onAllUnread = {
+                    downloadPanelOpen = false
+                    launchDownload(
+                        current.chapters
+                            .filter { !it.isRead }
+                            .map { it.index }
+                            .toSet(),
+                    )
+                },
+            )
+        }
         if (shelfSheetOpen) {
             ShelfMoveSheet(
                 shelves = shelves,
@@ -1914,15 +1961,31 @@ private fun AnnounceCard(
     onShelfClick: () -> Unit,
     onOpenSearch: () -> Unit,
     onCoverRetry: suspend () -> String?,
+    onOpenSource: () -> Unit,
+    onToggleLibrary: () -> Unit,
+    membershipPending: Boolean,
 ) {
     val extra = LocalMiruExtraColors.current
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val resources = LocalResources.current
+    val largeText = LocalDensity.current.fontScale > 1.3f
+    val shelf = if (shelvesLoading) {
+        stringResource(R.string.book_stat_unknown)
+    } else {
+        shelfLabel(book.shelfId, shelves)
+    }
+    val status = buildString {
+        append(stringResource(if (book.ongoing) R.string.book_stat_ongoing else R.string.book_stat_completed))
+        val updated = book.updatedLabel.trim()
+        if (updated.isNotEmpty()) {
+            append(" · ")
+            append(updated)
+        }
+    }
+    val pluginLabel = stringResource(R.string.book_plugin)
     MiruCard {
-        Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.L)) {
-            // Detail cover: 120x180 (2:3), the page's hero — larger than any
-            // library thumb, still leaves ~190dp of text width on a 360dp phone.
+        Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.M)) {
             BookCover(
                 title = title,
                 coverUrl = book.coverUrl,
@@ -1933,173 +1996,140 @@ private fun AnnounceCard(
                 corner = MiruRadius.Cover,
                 onRetry = onCoverRetry,
             )
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.Top,
-            ) {
-                Column {
-                    // SOURCE · plugin — caps eyebrow.
-                    Text(
-                        text = buildString {
-                            append(book.source.uppercase(Locale.ROOT))
-                            append(" · ")
-                            append(stringResource(R.string.book_plugin).uppercase(Locale.ROOT))
+            Column(modifier = Modifier.weight(1f)) {
+                MiruSourceChip(
+                    text = "${book.source} · $pluginLabel",
+                    onClick = onOpenSource,
+                )
+                Spacer(modifier = Modifier.height(MiruSpace.Xs))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.combinedClickable(
+                        role = Role.Button,
+                        onClick = { onOpenSearch() },
+                        onLongClick = {
+                            clipboard.setText(AnnotatedString(title))
+                            bookToast(
+                                context,
+                                resources.getString(R.string.book_title_copied),
+                            )
                         },
-                        style = MaterialTheme.typography.labelSmall,
+                    ),
+                )
+                Spacer(modifier = Modifier.height(MiruSpace.Xs))
+                val author = book.author.trim()
+                if (author.isNotEmpty() && !author.equals("Unknown", ignoreCase = true)) {
+                    Text(
+                        text = stringResource(R.string.book_by_author_fmt, author),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                book.originLanguage?.takeIf { it.isNotBlank() }?.let { language ->
+                    Text(
+                        text = stringResource(R.string.book_origin_fmt, language),
+                        style = MaterialTheme.typography.bodySmall,
                         color = extra.muted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Spacer(modifier = Modifier.height(MiruSpace.Xs))
+                }
+                Spacer(modifier = Modifier.height(MiruSpace.Xs))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(extra.accent),
+                    )
                     Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 4,
+                        text = status,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = extra.muted,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.combinedClickable(
-                            role = Role.Button,
-                            // The global search screen already exists; the
-                            // title opens it without a query.
-                            onClick = { onOpenSearch() },
-                            onLongClick = {
-                                clipboard.setText(AnnotatedString(title))
-                                bookToast(
-                                    context,
-                                    resources.getString(R.string.book_title_copied),
-                                )
+                    )
+                }
+                Spacer(modifier = Modifier.height(MiruSpace.S))
+                val shelfButton: @Composable (Modifier) -> Unit = { modifier ->
+                    MiruCompactButton(
+                        icon = Icons.Filled.DriveFileMove,
+                        label = shelf,
+                        enabled = book.inLibrary,
+                        onClick = onShelfClick,
+                        modifier = modifier,
+                    )
+                }
+                val libraryButton: @Composable (Modifier) -> Unit = { modifier ->
+                    MiruCompactButton(
+                        icon = if (book.inLibrary) {
+                            Icons.Filled.BookmarkAdded
+                        } else {
+                            Icons.Filled.BookmarkBorder
+                        },
+                        label = stringResource(
+                            if (book.inLibrary) {
+                                R.string.book_cd_in_library
+                            } else {
+                                R.string.book_cd_add_library
                             },
                         ),
+                        selected = book.inLibrary,
+                        busy = membershipPending,
+                        busyDescription = stringResource(R.string.book_library_pending),
+                        onClick = onToggleLibrary,
+                        modifier = modifier,
                     )
-                    Spacer(modifier = Modifier.height(MiruSpace.Xs))
-                    val author = book.author.trim()
-                    // Plugins without getBookAuthor hand us a blank or
-                    // "Unknown" name; skip the whole line rather than print
-                    // "by Unknown".
-                    if (author.isNotEmpty() && !author.equals("Unknown", ignoreCase = true)) {
-                        Text(
-                            text = stringResource(R.string.book_by_author_fmt, author),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                }
+                if (largeText) {
+                    Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                        shelfButton(Modifier.fillMaxWidth())
+                        libraryButton(Modifier.fillMaxWidth())
                     }
-                    book.originLanguage?.takeIf { it.isNotBlank() }?.let { language ->
-                        Text(
-                            text = stringResource(R.string.book_origin_fmt, language),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = extra.muted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                        shelfButton(Modifier.weight(1f))
+                        libraryButton(Modifier.weight(1f))
                     }
                 }
             }
         }
-        // One dense metadata band under the hairline: the current shelf is
-        // the first chip of the genre flow, so shelf and genres share rows
-        // instead of stacking three full-width stripes. The shelf chip keeps
-        // its chevron and opens the same move sheet; genres keep the two-line
-        // collapse with the "+N / Less" overflow.
-        Spacer(modifier = Modifier.height(MiruSpace.M))
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-        Spacer(modifier = Modifier.height(MiruSpace.S))
-        ShelfGenreFlow(
-            // The raw shelf id is a database value, not a label: keep the chip
-            // neutral until the real shelf list answers.
-            shelf = if (shelvesLoading) {
-                stringResource(R.string.book_stat_unknown)
-            } else {
-                shelfLabel(book.shelfId, shelves)
-            },
-            genres = book.genres,
-            onShelfClick = onShelfClick,
-        )
+        if (book.genres.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(MiruSpace.M))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+            Spacer(modifier = Modifier.height(MiruSpace.S))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                items(book.genres) { genre -> MiruTag(label = genre) }
+            }
+        }
     }
-}
-
-// Compact "move to shelf" chip: folder glyph, current shelf, chevron — a
-// 32dp visual pill centered in a 48dp touch slot, so it stays level with the
-// genre chips while keeping the minimum tap target. The shelf name ellipsizes
-// so a long label can never push the genres off the row.
-@Composable
-private fun ShelfChip(shelf: String, onClick: () -> Unit) {
-    MiruActionTag(
-        label = shelf,
-        onClick = onClick,
-        onClickLabel = stringResource(R.string.book_move_shelf),
-        leadingIcon = Icons.Filled.DriveFileMove,
-        trailingIcon = Icons.AutoMirrored.Filled.ArrowForward,
-    )
 }
 
 internal fun shelfLabel(shelfId: String, shelves: List<Shelf>): String =
     shelves.firstOrNull { it.id == shelfId }?.label ?: shelfId
 
-// Shelf + genre pool: the current shelf is item 0, so it flows inline with
-// the quiet tonal genre tags (labels, not filters — nothing to tap but the
-// shelf chip and the "+N / Less" tag). Two rows max when collapsed.
-// ContextualFlowRow (not FlowRow): the overflow indicator reads
-// shownItemCount during composition, and only the contextual variant
-// initializes it in that phase (the plain FlowRow one throws).
-private const val CollapsedGenreLines = 2
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ShelfGenreFlow(
-    shelf: String,
-    genres: List<String>,
-    onShelfClick: () -> Unit,
-) {
-    var maxLines by remember { mutableStateOf(CollapsedGenreLines) }
-    val overflowTag: @Composable ContextualFlowRowOverflowScope.() -> Unit = {
-        // shownItemCount includes the shelf chip, so the hidden genre count
-        // is total items minus the shown ones.
-        val hidden = genres.size + 1 - shownItemCount
-        if (hidden > 0) {
-            MiruTag(
-                label = stringResource(R.string.book_genres_more_fmt, hidden),
-                emphasized = true,
-                onClick = { maxLines = Int.MAX_VALUE },
-            )
-        } else {
-            MiruTag(
-                label = stringResource(R.string.book_genres_less),
-                emphasized = true,
-                onClick = { maxLines = CollapsedGenreLines },
-            )
-        }
-    }
-    ContextualFlowRow(
-        itemCount = genres.size + 1,
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-        verticalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
-        itemVerticalAlignment = Alignment.CenterVertically,
-        maxLines = maxLines,
-        overflow = ContextualFlowRowOverflow.expandOrCollapseIndicator(
-            expandIndicator = overflowTag,
-            collapseIndicator = overflowTag,
-            minRowsToShowCollapse = CollapsedGenreLines + 1,
-        ),
-    ) { index ->
-        if (index == 0) {
-            ShelfChip(shelf = shelf, onClick = onShelfClick)
-        } else {
-            MiruTag(label = genres[index - 1])
-        }
-    }
-}
-
 // Four-compartment stat strip: rating; read/total + percent; status +
 // update time; reading time with the TTS share. The rating cell drops out
 // entirely when the plugin gives us no score.
 @Composable
-private fun StatStrip(book: BookDetails, chaptersLoading: Boolean) {
-    val readLabel = formatDurationLocalized(book.readMinutes * 60_000L)
+private fun StatStrip(
+    book: BookDetails,
+    chaptersLoading: Boolean,
+    downloadedOverride: Int? = null,
+) {
     val ttsLabel = formatDurationLocalized(book.ttsMinutes * 60_000L)
     val chaptersKnown = bookChaptersCountKnown(chaptersLoading, book.totalChapters)
+    val downloaded = downloadedOverride
+        ?: remember(book.chapters) { book.chapters.count { it.downloaded } }
     StatPanel(
         cells = buildList {
             if (book.rating > 0f) {
@@ -2108,6 +2138,7 @@ private fun StatStrip(book: BookDetails, chaptersLoading: Boolean) {
                         value = formatRating(book.rating),
                         label = stringResource(R.string.book_stat_rating),
                         icon = Icons.Filled.Star,
+                        weight = 1f,
                     ),
                 )
             }
@@ -2130,23 +2161,24 @@ private fun StatStrip(book: BookDetails, chaptersLoading: Boolean) {
                     } else {
                         stringResource(R.string.book_stat_none)
                     },
-                ),
-            )
-            add(
-                StatCell(
-                    value = stringResource(
-                        if (book.ongoing) R.string.book_stat_ongoing else R.string.book_stat_completed,
-                    ),
-                    label = book.updatedLabel,
+                    weight = 2.2f,
+                    progress = if (chaptersKnown) book.progressFraction else null,
+                    secondary = if (chaptersKnown) {
+                        stringResource(R.string.book_stat_downloaded_fmt, downloaded)
+                    } else {
+                        null
+                    },
                 ),
             )
             add(
                 StatCell(
                     value = formatDurationLocalized((book.readMinutes + book.ttsMinutes) * 60_000L),
-                    label = if (book.ttsMinutes > 0) {
-                        stringResource(R.string.book_stat_time_labels_fmt, ttsLabel)
+                    label = stringResource(R.string.book_stat_in_book),
+                    weight = 1.7f,
+                    secondary = if (book.ttsMinutes > 0) {
+                        stringResource(R.string.book_stat_tts_fmt, ttsLabel)
                     } else {
-                        stringResource(R.string.book_stat_time)
+                        null
                     },
                 ),
             )
@@ -2169,12 +2201,14 @@ private fun ActionRow(
     hasSavedProgress: Boolean = false,
     // A failed refresh with no stored rows is not a genuine empty list.
     chaptersFailed: Boolean = false,
-    downloadProgress: Float?,
-    downloadBusy: Boolean,
-    membershipPending: Boolean,
+    downloadEnabled: Boolean,
+    showSource: Boolean,
+    toolCount: Int,
+    toolsExpanded: Boolean,
     onContinue: () -> Unit,
-    onToggleLibrary: () -> Unit,
-    onDownloadAll: () -> Unit,
+    onOpenDownloadPanel: () -> Unit,
+    onOpenSourcePanel: () -> Unit,
+    onToggleTools: () -> Unit,
 ) {
     val continueChapter = book.continueChapter
     val continueIndex = continueIndexOverride ?: continueChapter?.index
@@ -2232,39 +2266,55 @@ private fun ActionRow(
             )
         }
         Spacer(modifier = Modifier.height(MiruSpace.S))
-        Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+        val largeText = LocalDensity.current.fontScale > 1.3f
+        val downloadCaption = !book.inLibrary
+        val download: @Composable (Modifier) -> Unit = { modifier ->
             MiruCompactButton(
                 icon = Icons.Filled.Download,
-                label = when {
-                    downloadBusy -> stringResource(R.string.loading_adding_to_queue)
-                    downloadProgress != null -> stringResource(
-                        R.string.book_downloading_progress_fmt,
-                        (downloadProgress * 100).roundToInt(),
-                    )
-                    else -> stringResource(R.string.book_cd_download_all)
-                },
-                muted = !book.inLibrary,
-                progress = if (downloadBusy) null else downloadProgress,
-                busy = downloadBusy,
-                busyDescription = stringResource(R.string.loading_adding_to_queue),
-                enabled = !downloadBusy,
-                onClick = onDownloadAll,
-                modifier = Modifier.weight(1f),
+                label = stringResource(R.string.book_action_download),
+                enabled = downloadEnabled,
+                onClick = onOpenDownloadPanel,
+                modifier = modifier,
             )
+        }
+        val source: @Composable (Modifier) -> Unit = { modifier ->
             MiruCompactButton(
-                icon = if (book.inLibrary) {
-                    Icons.Filled.BookmarkAdded
-                } else {
-                    Icons.Filled.BookmarkBorder
-                },
-                label = stringResource(
-                    if (book.inLibrary) R.string.book_cd_in_library else R.string.book_cd_add_library,
-                ),
-                selected = book.inLibrary,
-                busy = membershipPending,
-                busyDescription = stringResource(R.string.book_library_pending),
-                onClick = onToggleLibrary,
-                modifier = Modifier.weight(1f),
+                icon = Icons.Filled.Public,
+                label = stringResource(R.string.book_action_source),
+                onClick = onOpenSourcePanel,
+                modifier = modifier,
+            )
+        }
+        val options: @Composable (Modifier) -> Unit = { modifier ->
+            MiruCompactButton(
+                icon = Icons.Filled.Tune,
+                label = stringResource(R.string.book_action_options_fmt, toolCount),
+                selected = toolsExpanded,
+                onClick = onToggleTools,
+                modifier = modifier,
+            )
+        }
+        if (largeText) {
+            Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                download(Modifier.fillMaxWidth())
+                if (showSource) source(Modifier.fillMaxWidth())
+                options(Modifier.fillMaxWidth())
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                download(Modifier.weight(1f))
+                if (showSource) source(Modifier.weight(1f))
+                options(Modifier.weight(1f))
+            }
+        }
+        if (downloadCaption) {
+            Spacer(modifier = Modifier.height(MiruSpace.Xs))
+            Text(
+                text = stringResource(R.string.book_download_needs_library),
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalMiruExtraColors.current.muted,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -2392,11 +2442,36 @@ private fun ChapterDeleteErrorNotice(
 // toggling in place). Same construction as the genre block of the header.
 @Composable
 private fun AboutSection(description: String) {
-    MiruSectionCard(
-        title = stringResource(R.string.book_section_about),
-        description = stringResource(R.string.book_section_about_desc),
-    ) {
-        ExpandableBody(text = description, collapsedLines = 3)
+    if (description.isBlank()) return
+    var expanded by remember(description) { mutableStateOf(false) }
+    MiruCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.book_synopsis),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = stringResource(
+                    if (expanded) R.string.book_read_less else R.string.book_read_more,
+                ),
+                style = MaterialTheme.typography.labelMedium,
+                color = LocalMiruExtraColors.current.accent,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(MiruRadius.Cover))
+                    .clickable(role = Role.Button) { expanded = !expanded }
+                    .padding(MiruSpace.Xs),
+            )
+        }
+        Spacer(modifier = Modifier.height(MiruSpace.Xs))
+        Text(
+            text = description,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = if (expanded) Int.MAX_VALUE else 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -2490,72 +2565,103 @@ private fun ExpandableBody(text: String, collapsedLines: Int) {
 // sheets live in BookSheets.kt, one visual language app-wide.
 @Composable
 private fun ToolsSection(
-    onTranslator: () -> Unit,
-    onEpub: () -> Unit,
+    translatorOn: Boolean,
+    regexCount: Int,
+    epubChapters: Int,
     epubEnabled: Boolean,
     epubBusy: Boolean,
+    migrateEnabled: Boolean,
+    onTranslator: () -> Unit,
+    onEpub: () -> Unit,
     onRegex: () -> Unit,
     onMigrate: () -> Unit,
-    migrateEnabled: Boolean,
 ) {
-    MiruSectionCard(
-        title = stringResource(R.string.book_section_tools),
-        description = stringResource(R.string.book_section_tools_desc),
-        contentPadding = PaddingValues(vertical = MiruSpace.Xs),
-    ) {
-        MiruActionRow(
-            icon = Icons.Filled.Translate,
+    val largeText = LocalDensity.current.fontScale > 1.3f
+    val translatorTile: @Composable (Modifier) -> Unit = { modifier ->
+        MiruToolTile(
+            glyph = "文A",
             title = stringResource(R.string.tool_translator),
             subtitle = stringResource(R.string.tool_translator_desc),
+            badge = stringResource(
+                if (translatorOn) R.string.book_tool_on else R.string.book_tool_off,
+            ),
+            badgeHighlighted = translatorOn,
             onClick = onTranslator,
+            modifier = modifier,
         )
-        MiruRowDivider()
-        MiruActionRow(
+    }
+    val epubTile: @Composable (Modifier) -> Unit = { modifier ->
+        MiruToolTile(
             icon = Icons.Filled.Download,
             title = stringResource(R.string.tool_epub),
-            subtitle = if (epubBusy) {
-                stringResource(R.string.loading_exporting)
-            } else {
-                stringResource(R.string.tool_epub_desc)
+            subtitle = when {
+                epubBusy -> stringResource(R.string.loading_exporting)
+                epubChapters == 0 -> stringResource(R.string.book_tool_epub_no_chapters)
+                else -> stringResource(R.string.tool_epub_desc)
             },
+            badge = stringResource(R.string.book_tool_chapters_fmt, epubChapters),
+            badgeHighlighted = epubChapters > 0,
+            enabled = epubEnabled && epubChapters > 0,
             onClick = onEpub,
-            enabled = epubEnabled,
-            trailing = if (epubBusy) {
-                {
-                    val exportingLabel = stringResource(R.string.loading_exporting)
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        color = LocalMiruExtraColors.current.accent,
-                        modifier = Modifier
-                            .size(16.dp)
-                            .semantics { contentDescription = exportingLabel },
-                    )
-                }
-            } else {
-                null
-            },
+            modifier = modifier,
         )
-        MiruRowDivider()
-        MiruActionRow(
-            icon = Icons.Filled.Rule,
+    }
+    val regexTile: @Composable (Modifier) -> Unit = { modifier ->
+        MiruToolTile(
+            glyph = "=×",
             title = stringResource(R.string.tool_regex),
             subtitle = stringResource(R.string.tool_regex_desc),
+            badge = stringResource(R.string.book_tool_rules_fmt, regexCount),
+            badgeHighlighted = regexCount > 0,
             onClick = onRegex,
+            modifier = modifier,
         )
-        MiruRowDivider()
-        MiruActionRow(
+    }
+    val migrateTile: @Composable (Modifier) -> Unit = { modifier ->
+        MiruToolTile(
             icon = Icons.Filled.DriveFileMove,
             title = stringResource(R.string.tool_migrate),
             subtitle = stringResource(
-                if (migrateEnabled) {
-                    R.string.tool_migrate_desc
-                } else {
-                    R.string.migration_needs_library
-                },
+                if (migrateEnabled) R.string.tool_migrate_desc else R.string.migration_needs_library,
             ),
-            onClick = onMigrate,
+            badge = stringResource(
+                if (migrateEnabled) R.string.book_tool_source else R.string.book_tool_migrate_needs_library,
+            ),
             enabled = migrateEnabled,
+            onClick = onMigrate,
+            modifier = modifier,
         )
+    }
+    MiruSectionCard(
+        title = stringResource(R.string.book_section_tools),
+        description = stringResource(R.string.book_section_tools_desc),
+        contentPadding = PaddingValues(MiruSpace.M),
+    ) {
+        if (largeText) {
+            Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                translatorTile(Modifier.fillMaxWidth())
+                epubTile(Modifier.fillMaxWidth())
+                regexTile(Modifier.fillMaxWidth())
+                migrateTile(Modifier.fillMaxWidth())
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                ) {
+                    translatorTile(Modifier.fillMaxWidth())
+                    regexTile(Modifier.fillMaxWidth())
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                ) {
+                    epubTile(Modifier.fillMaxWidth())
+                    migrateTile(Modifier.fillMaxWidth())
+                }
+            }
+        }
     }
 }
 
@@ -2564,23 +2670,26 @@ private fun ToolsSection(
 // WebView; when the plugin advertises auth, a login row follows. A failed
 // open is silently ignored (pure UI, no Toast Leak).
 @Composable
-private fun SourcePageSection(
+private fun SourcePanel(
     book: BookDetails,
+    onClose: () -> Unit,
     onOpenWebView: (url: String, title: String) -> Unit,
 ) {
     val host = remember(book.sourceUrl) {
         runCatching { Uri.parse(book.sourceUrl).host }.getOrNull().orEmpty().ifBlank { book.source }
     }
-    MiruSectionCard(
-        title = stringResource(R.string.book_section_page),
-        description = stringResource(R.string.book_section_page_desc),
-        contentPadding = PaddingValues(vertical = MiruSpace.Xs),
+    AppBottomSheet(
+        title = stringResource(R.string.book_source_title_fmt, book.source),
+        description = stringResource(R.string.book_source_panel_desc_fmt, host),
+        onClose = onClose,
+        compact = true,
     ) {
         MiruActionRow(
             icon = Icons.Filled.Public,
-            title = stringResource(R.string.book_open_page),
+            title = stringResource(R.string.book_source_open_page),
             subtitle = host,
             onClick = {
+                onClose()
                 if (book.sourceUrl.isNotBlank()) onOpenWebView(book.sourceUrl, book.source)
             },
         )
@@ -2588,15 +2697,71 @@ private fun SourcePageSection(
             MiruRowDivider()
             MiruActionRow(
                 icon = Icons.Filled.Login,
-                title = stringResource(R.string.book_open_login),
-                subtitle = host,
+                title = stringResource(R.string.book_source_login_webview),
+                subtitle = stringResource(R.string.book_source_login_desc),
                 onClick = {
+                    onClose()
                     book.authUrl?.let { onOpenWebView(it, book.source) }
                 },
             )
         }
     }
 }
+
+@Composable
+private fun DownloadPanel(
+    busy: Boolean,
+    onClose: () -> Unit,
+    onNext: (Int) -> Unit,
+    onAllUnread: () -> Unit,
+) {
+    AppBottomSheet(
+        title = stringResource(R.string.book_action_download),
+        description = stringResource(R.string.book_download_panel_desc),
+        onClose = onClose,
+        compact = true,
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+            MiruCompactButton(
+                label = stringResource(R.string.book_download_next_fmt, 10),
+                enabled = !busy,
+                busy = busy,
+                onClick = { onNext(10) },
+                modifier = Modifier.weight(1f),
+            )
+            MiruCompactButton(
+                label = stringResource(R.string.book_download_next_fmt, 50),
+                enabled = !busy,
+                busy = busy,
+                onClick = { onNext(50) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(modifier = Modifier.height(MiruSpace.S))
+        Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+            MiruCompactButton(
+                label = stringResource(R.string.book_download_next_fmt, 100),
+                enabled = !busy,
+                busy = busy,
+                onClick = { onNext(100) },
+                modifier = Modifier.weight(1f),
+            )
+            MiruCompactButton(
+                label = stringResource(R.string.book_download_all_unread),
+                selected = true,
+                enabled = !busy,
+                onClick = onAllUnread,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+private fun downloadedChapterCount(
+    book: BookDetails,
+    isVideoBook: Boolean,
+    videoCompletedCount: Int,
+): Int = if (isVideoBook) videoCompletedCount else book.chapters.count { it.downloaded }
 
 // Chapters: count + read/downloaded summary on the left, the reading-order
 // toggle on the right of the SAME header, and the whole browser (search,
@@ -2609,58 +2774,77 @@ private fun ChaptersSection(
     book: BookDetails,
     newestFirst: Boolean,
     refreshing: Boolean,
+    notesCount: Int,
     onRefresh: () -> Unit,
     onToggleOrder: () -> Unit,
-    downloadedOverride: Int? = null,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+    notesContent: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
-    val downloaded = downloadedOverride
-        ?: remember(book) { book.chapters.count { it.downloaded } }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     val refreshLabel = stringResource(R.string.book_chapters_refreshing)
-    MiruSectionCard(
-        title = stringResource(R.string.book_chapters_header_fmt, book.totalChapters),
-        description = stringResource(
-            R.string.book_chapters_summary_fmt,
-            book.readCount,
-            downloaded,
-        ),
-        trailing = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-            ) {
-                if (refreshing) {
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        modifier = Modifier
-                            .size(16.dp)
-                            .semantics {
-                                contentDescription = refreshLabel
-                            },
+    val tabs: @Composable () -> Unit = {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+            verticalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
+        ) {
+            MiruTabPill(
+                label = stringResource(R.string.book_chapters_header_fmt, book.totalChapters),
+                selected = tab == 0,
+                onClick = { tab = 0 },
+            )
+            MiruTabPill(
+                label = stringResource(R.string.book_notes_tab_fmt, notesCount),
+                selected = tab == 1,
+                onClick = { tab = 1 },
+            )
+        }
+    }
+    val actions: @Composable () -> Unit = {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+        ) {
+            if (refreshing) {
+                CircularProgressIndicator(
+                    strokeWidth = 2.dp,
+                    modifier = Modifier
+                        .size(16.dp)
+                        .semantics { contentDescription = refreshLabel },
+                )
+            } else {
+                val refreshCd = stringResource(R.string.book_chapters_refresh_cd)
+                Box(
+                    modifier = Modifier
+                        .size(MiruSize.Touch)
+                        .clip(RoundedCornerShape(MiruRadius.Cover))
+                        .clickable(role = Role.Button, onClick = onRefresh),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Refresh,
+                        contentDescription = refreshCd,
+                        tint = LocalMiruExtraColors.current.accent,
+                        modifier = Modifier.size(18.dp),
                     )
-                } else {
-                    val refreshCd = stringResource(R.string.book_chapters_refresh_cd)
-                    Box(
-                        modifier = Modifier
-                            .size(MiruSize.Touch)
-                            .clip(RoundedCornerShape(MiruRadius.Cover))
-                            .clickable(role = Role.Button, onClick = onRefresh),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Refresh,
-                            contentDescription = refreshCd,
-                            tint = LocalMiruExtraColors.current.accent,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
                 }
-                ChapterOrderToggle(newestFirst = newestFirst, onClick = onToggleOrder)
             }
-        },
-        contentPadding = PaddingValues(MiruSpace.M),
-        content = content,
-    )
+            ChapterOrderToggle(newestFirst = newestFirst, onClick = onToggleOrder)
+        }
+    }
+    MiruCard(contentPadding = PaddingValues(MiruSpace.M)) {
+        tabs()
+        if (tab == 0) {
+            Spacer(modifier = Modifier.height(MiruSpace.Xs))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                actions()
+            }
+        }
+        Spacer(modifier = Modifier.height(MiruSpace.M))
+        if (tab == 0) content() else notesContent()
+    }
 }
 
 @Composable
@@ -2727,7 +2911,9 @@ private fun ChapterBrowser(
     onRetryTranslation: (Int) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
+    var filter by remember { mutableStateOf(ChapterFilter.All) }
     var selection by remember { mutableStateOf(emptySet<Int>()) }
+    val focusManager = LocalFocusManager.current
     // Long-press starts manual selection; the Select toolbar button is a
     // separate range sheet for marking a from-to span read/unread.
     val selectionActive = selection.isNotEmpty()
@@ -2740,11 +2926,13 @@ private fun ChapterBrowser(
         derivedStateOf { listState.canScrollForward || listState.canScrollBackward }
     }
 
-    val visible = remember(book, query, newestFirst, translatedTitles) {
+    val visible = remember(book, query, newestFirst, translatedTitles, filter) {
         val matched = book.chapters.filter {
-            query.isBlank() ||
-                it.title.contains(query, ignoreCase = true) ||
-                translatedTitles[it.index]?.contains(query, ignoreCase = true) == true
+            filter.matches(it.isRead) && (
+                query.isBlank() ||
+                    it.title.contains(query, ignoreCase = true) ||
+                    translatedTitles[it.index]?.contains(query, ignoreCase = true) == true
+                )
         }
         matched.inReadingOrder(newestFirst)
     }
@@ -2780,49 +2968,90 @@ private fun ChapterBrowser(
     }
 
     Column {
-        // Search chapters by title. Classic field look; on a photo the
-        // card plate already carries the ink, no extra frost inside a card.
-        OutlinedTextField(
+        MiruSearchField(
             value = query,
             onValueChange = { query = it },
-            placeholder = {
-                Text(
-                    text = stringResource(R.string.book_ch_search_hint),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Filled.Search,
-                    contentDescription = stringResource(R.string.book_cd_ch_search),
-                )
-            },
-            singleLine = true,
-            shape = MaterialTheme.shapes.small,
+            placeholder = stringResource(R.string.book_ch_search_hint),
+            onClear = { query = "" },
+            clearContentDescription = stringResource(R.string.finder_cd_clear_search),
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(MiruSpace.S))
-        // Three compact plates, one row. They are secondary tools, not
-        // page-level actions, so they stay 36dp tall (48dp touch slot).
-        Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+        // Three compact plates. They are secondary tools, not page-level
+        // actions; at large text they stack so no label is clipped.
+        val largeText = LocalDensity.current.fontScale > 1.3f
+        val downloadButton: @Composable (Modifier) -> Unit = { modifier ->
             MiruCompactButton(
                 label = stringResource(R.string.book_btn_download),
                 onClick = onDownloadNext100,
-                modifier = Modifier.weight(1f),
+                modifier = modifier,
             )
+        }
+        val selectButton: @Composable (Modifier) -> Unit = { modifier ->
             MiruCompactButton(
                 label = stringResource(R.string.book_btn_select),
                 onClick = onSelectChapters,
-                modifier = Modifier.weight(1f),
+                modifier = modifier,
             )
+        }
+        val lastReadButton: @Composable (Modifier) -> Unit = { modifier ->
             MiruCompactButton(
-                label = stringResource(R.string.book_btn_last_read),
+                label = if (lastRead > 0) {
+                    stringResource(R.string.book_btn_last_read_fmt, lastRead)
+                } else {
+                    stringResource(R.string.book_btn_last_read)
+                },
                 enabled = lastRead > 0,
                 onClick = {
+                    focusManager.clearFocus()
                     query = ""
+                    filter = ChapterFilter.All
                     jumpTo = lastRead
                 },
-                modifier = Modifier.weight(1f),
+                modifier = modifier,
+            )
+        }
+        if (largeText) {
+            Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                downloadButton(Modifier.fillMaxWidth())
+                selectButton(Modifier.fillMaxWidth())
+                lastReadButton(Modifier.fillMaxWidth())
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                downloadButton(Modifier.weight(1f))
+                selectButton(Modifier.weight(1f))
+                lastReadButton(Modifier.weight(1f))
+            }
+        }
+        Spacer(modifier = Modifier.height(MiruSpace.S))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+            verticalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
+        ) {
+            MiruFilterChip(
+                selected = filter == ChapterFilter.All,
+                onClick = {
+                    focusManager.clearFocus()
+                    filter = ChapterFilter.All
+                },
+                label = stringResource(R.string.book_filter_all),
+            )
+            MiruFilterChip(
+                selected = filter == ChapterFilter.Read,
+                onClick = {
+                    focusManager.clearFocus()
+                    filter = ChapterFilter.Read
+                },
+                label = stringResource(R.string.book_filter_read),
+            )
+            MiruFilterChip(
+                selected = filter == ChapterFilter.Unread,
+                onClick = {
+                    focusManager.clearFocus()
+                    filter = ChapterFilter.Unread
+                },
+                label = stringResource(R.string.book_filter_unread),
             )
         }
         if (selectionActive) {
@@ -3140,7 +3369,7 @@ private fun ChapterRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = extra.muted,
                 maxLines = 1,
-                modifier = Modifier.width(40.dp),
+                modifier = Modifier.widthIn(min = 40.dp),
             )
         }
         Column(modifier = Modifier.weight(1f)) {
@@ -3351,10 +3580,7 @@ private fun ReaderNotesSection(
     onTranslate: () -> Unit,
 ) {
     val extra = LocalMiruExtraColors.current
-    MiruSectionCard(
-        title = stringResource(R.string.book_section_reviews),
-        description = stringResource(R.string.book_section_reviews_desc),
-    ) {
+    Column {
         if (reviews.isEmpty()) {
             Text(
                 text = stringResource(R.string.book_reviews_empty),

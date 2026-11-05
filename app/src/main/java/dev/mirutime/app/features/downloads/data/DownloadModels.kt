@@ -95,11 +95,18 @@ object DownloadPlanner {
         .sorted()
         .toList()
 
+    fun nextN(
+        allIndexes: List<Int>,
+        downloaded: Set<Int>,
+        active: Set<Int>,
+        count: Int,
+    ): List<Int> = pending(allIndexes, downloaded, active).take(count.coerceAtLeast(0))
+
     fun next100(
         allIndexes: List<Int>,
         downloaded: Set<Int>,
         active: Set<Int>,
-    ): List<Int> = pending(allIndexes, downloaded, active).take(100)
+    ): List<Int> = nextN(allIndexes, downloaded, active, 100)
 }
 
 data class EnqueueResult(

@@ -7,6 +7,7 @@ import dev.mirutime.app.di.PluginGraph
 import dev.mirutime.app.di.TextFetchResult
 import dev.mirutime.app.features.book.domain.BookChapter
 import dev.mirutime.app.features.book.domain.BookDetails
+import dev.mirutime.app.features.book.domain.displaySubtitle
 import dev.mirutime.app.features.finder.data.LocalSafBookSource
 import dev.mirutime.app.features.finder.data.isLocalFileBook
 import dev.mirutime.app.features.finder.data.localFileChapterUrl
@@ -237,6 +238,12 @@ class PluginBookDataProvider(
             chapters = emptyList(),
             reviews = emptyList(),
             coverUrl = coverUrl ?: existing.coverUrl,
+            subtitle = displaySubtitle(
+                subtitle = meta.extras["subtitle"] ?: existing.subtitle,
+                altTitles = parseAltTitles(extraAltTitles(meta.extras))
+                    .ifEmpty { parseAltTitles(existing.altTitlesJson) },
+                title = title,
+            ),
         )
         library?.saveBook(buildEntity(bookUrl, sourceId, built, meta, existing, timestamp))
         library?.let { repo -> saveTags(repo, existing.bookId, meta, timestamp) }
@@ -366,6 +373,11 @@ class PluginBookDataProvider(
             chapters = emptyList(),
             reviews = emptyList(), // stub: plugins do not expose reviews yet
             coverUrl = coverUrl,
+            subtitle = displaySubtitle(
+                subtitle = meta.extras["subtitle"],
+                altTitles = parseAltTitles(extraAltTitles(meta.extras)),
+                title = title,
+            ),
         )
         if (persist) {
             library?.saveBook(
@@ -417,6 +429,11 @@ class PluginBookDataProvider(
         chapters = emptyList(),
         reviews = emptyList(),
         coverUrl = coverStore?.localCoverUrl(row.bookId) ?: row.coverUrl,
+        subtitle = displaySubtitle(
+            subtitle = row.subtitle,
+            altTitles = parseAltTitles(row.altTitlesJson),
+            title = row.title,
+        ),
     )
 
     // Shared row builder: metadata save, fast cached add and history all write
@@ -538,6 +555,11 @@ class PluginBookDataProvider(
             chapters = emptyList(),
             reviews = emptyList(),
             coverUrl = coverUrl,
+            subtitle = displaySubtitle(
+                subtitle = row?.subtitle,
+                altTitles = parseAltTitles(row?.altTitlesJson),
+                title = title,
+            ),
         )
         PluginBookIndex.put(bookUrl, row?.installId ?: "local")
         PluginBookIndex.putTitle(bookUrl, title)
@@ -587,6 +609,11 @@ class PluginBookDataProvider(
             chapters = emptyList(),
             reviews = emptyList(),
             coverUrl = coverUrl,
+            subtitle = displaySubtitle(
+                subtitle = row?.subtitle,
+                altTitles = parseAltTitles(row?.altTitlesJson),
+                title = row?.title ?: meta.title,
+            ),
         )
         PluginBookIndex.put(bookUrl, meta.installId)
         PluginBookIndex.putTitle(bookUrl, built.title)

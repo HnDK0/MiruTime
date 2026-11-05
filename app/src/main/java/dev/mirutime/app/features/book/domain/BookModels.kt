@@ -87,6 +87,9 @@ data class BookDetails(
     // (the section shows its empty state).
     val reviews: List<BookReview>,
     val coverUrl: String? = null,
+    // Plugin-provided or first alt title; shown under the display title in the
+    // shell header. Null means "no second name".
+    val subtitle: String? = null,
 ) {
     val unreadCount: Int get() = (totalChapters - readCount).coerceAtLeast(0)
     // Match ReaderOpenResolver: reopen the saved/last-read chapter while it is

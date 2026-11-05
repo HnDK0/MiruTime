@@ -199,6 +199,12 @@ class DownloadEngine(
     suspend fun enqueueNext100Now(
         bookUrl: String,
         translateAfter: Boolean = false,
+    ): EnqueueResult = enqueueNextNow(bookUrl, 100, translateAfter)
+
+    suspend fun enqueueNextNow(
+        bookUrl: String,
+        count: Int,
+        translateAfter: Boolean = false,
     ): EnqueueResult {
         val book = store.bookByUrl(bookUrl)
             ?: return EnqueueResult(reason = EnqueueFailure.BOOK_NOT_SAVED)
@@ -211,10 +217,11 @@ class DownloadEngine(
             .filter { DownloadState.from(it.state) in ACTIVE_OR_PAUSED }
             .mapNotNull { task -> indexByChapterId[task.chapterId] }
             .toSet()
-        val next = DownloadPlanner.next100(
+        val next = DownloadPlanner.nextN(
             allIndexes = chapters.map { it.idx },
             downloaded = snapshot?.downloadedIndexes.orEmpty(),
             active = active,
+            count = count,
         )
         if (next.isEmpty()) {
             return EnqueueResult(skipped = chapters.size)

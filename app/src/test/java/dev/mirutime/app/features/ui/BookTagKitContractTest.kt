@@ -20,8 +20,9 @@ class BookTagKitContractTest {
     fun `book screen uses the shared tags`() {
         val book = source("src/main/java/dev/mirutime/app/features/book/ui/BookScreen.kt")
         assertFalse(book.contains("private fun GenreTag("))
+        assertFalse(book.contains("private fun ShelfGenreFlow("))
         assertTrue(book.contains("MiruTag("))
-        assertTrue(book.contains("MiruActionTag("))
+        assertTrue(book.contains("MiruSourceChip("))
     }
 
     @Test

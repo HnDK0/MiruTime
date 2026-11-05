@@ -90,6 +90,7 @@ import dev.mirutime.uikit.miruPlateBorder
 import dev.mirutime.uikit.miruTopVeilBrush
 import dev.mirutime.uikit.title
 import dev.mirutime.app.features.book.data.PluginBookIndex
+import dev.mirutime.app.features.book.ui.BookPageSnapshotStore
 import dev.mirutime.app.features.book.ui.BookScreen
 import dev.mirutime.app.features.dashboard.data.RoomDashboardDataProvider
 import dev.mirutime.app.features.dashboard.ui.DashboardScreen
@@ -424,7 +425,8 @@ fun MiruShell(
                     description = if (onWebView) {
                         webViewHost.ifBlank { webViewDisplayUrl }
                     } else if (bookTitle != null) {
-                        stringResource(R.string.header_book_desc)
+                        bookUrl?.let { BookPageSnapshotStore.subtitleFor(it) }
+                            ?: stringResource(R.string.header_book_desc)
                     } else if (settingsHeader != null) {
                         stringResource(settingsHeader.second)
                     } else if (sourceName != null) {
