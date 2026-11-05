@@ -8,6 +8,7 @@ import dev.mirutime.data.library.BookCoverEntity
 import dev.mirutime.data.library.BookEntity
 import dev.mirutime.data.library.BookTranslationEntity
 import dev.mirutime.data.library.LibraryDao
+import dev.mirutime.data.library.BookUrlRow
 import dev.mirutime.data.library.LibraryRepository
 import java.lang.reflect.Proxy
 import kotlinx.coroutines.test.runTest
@@ -53,6 +54,12 @@ class TitleOverlayTest {
                     booksByUrlCalls++
                     val urls = args!![0] as List<*>
                     books.filter { it.url in urls }
+                        .map { BookUrlRow(bookId = it.bookId, url = it.url) }
+                }
+                "booksByUrl" -> {
+                    val url = args!![0] as String
+                    books.filter { it.url == url }
+                        .map { BookUrlRow(bookId = it.bookId, url = it.url) }
                 }
                 "bookTranslations" -> {
                     translationCalls++

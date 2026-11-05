@@ -1,11 +1,8 @@
 package dev.mirutime.app.features.reader.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,6 +20,8 @@ import dev.mirutime.app.features.settings.ui.TranslationConfigContent
 import dev.mirutime.app.features.settings.ui.isTranslationSaveEnabled
 import dev.mirutime.app.features.translation.data.pluginIdOf
 import dev.mirutime.uikit.AppBottomSheet
+import dev.mirutime.uikit.ChipOption
+import dev.mirutime.uikit.ChipRow
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSpace
@@ -82,7 +81,6 @@ fun AppReaderTranslationPanel(
 
 // The reader keeps the global display mode here, next to the book's own
 // translation settings. It applies immediately; Save stores only the book.
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ParallelTranslationSection() {
     val s = AppSettings
@@ -92,34 +90,37 @@ private fun ParallelTranslationSection() {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = MiruSpace.S),
-        ) {
-            FilterChip(
-                selected = !s.parallelEnabled,
-                onClick = { s.parallelEnabled = false },
-                label = { Text(stringResource(R.string.st_off)) },
-            )
-            FilterChip(
-                selected = s.parallelEnabled && s.parallelOrder == "TRANSLATION_FIRST",
-                onClick = {
-                    s.parallelEnabled = true
-                    s.parallelOrder = "TRANSLATION_FIRST"
+        // One scrolling chip line: the standard for every chip group, never a
+        // wrapping FlowRow that steals vertical space.
+        ChipRow(
+            options = listOf(
+                ChipOption("off", stringResource(R.string.st_off)),
+                ChipOption("translation", stringResource(R.string.st_tr_order_translation)),
+                ChipOption("original", stringResource(R.string.st_tr_order_original)),
+            ),
+            selectedIds = setOf(
+                when {
+                    !s.parallelEnabled -> "off"
+                    s.parallelOrder == "TRANSLATION_FIRST" -> "translation"
+                    else -> "original"
                 },
-                label = { Text(stringResource(R.string.st_tr_order_translation)) },
-            )
-            FilterChip(
-                selected = s.parallelEnabled && s.parallelOrder == "ORIGINAL_FIRST",
-                onClick = {
-                    s.parallelEnabled = true
-                    s.parallelOrder = "ORIGINAL_FIRST"
-                },
-                label = { Text(stringResource(R.string.st_tr_order_original)) },
-            )
-        }
+            ),
+            onToggle = { id ->
+                when (id) {
+                    "off" -> s.parallelEnabled = false
+                    "translation" -> {
+                        s.parallelEnabled = true
+                        s.parallelOrder = "TRANSLATION_FIRST"
+                    }
+                    else -> {
+                        s.parallelEnabled = true
+                        s.parallelOrder = "ORIGINAL_FIRST"
+                    }
+                }
+            },
+            contentPadding = PaddingValues(0.dp),
+            modifier = Modifier.padding(top = MiruSpace.S),
+        )
         Text(
             text = stringResource(R.string.st_tr_parallel_hint),
             style = MaterialTheme.typography.labelSmall,

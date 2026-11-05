@@ -30,6 +30,8 @@ import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
+import dev.mirutime.uikit.ChipOption
+import dev.mirutime.uikit.ChipRow
 import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
@@ -39,6 +41,7 @@ import dev.mirutime.uikit.SettingsSliderRow
 import dev.mirutime.uikit.SettingsSwitchRow
 import dev.mirutime.uikit.SettingsTextField
 import dev.mirutime.uikit.SettingsValueRow
+import dev.mirutime.uikit.SheetHeaderAction
 import dev.mirutime.uikit.SheetSection
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.translator.ProviderId
@@ -463,34 +466,35 @@ fun TranslationSettingsScreen(
                 contentPadding = PaddingValues(0.dp),
             ) {
                 // NoveLA semantics: off / translation first / original first.
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(MiruSpace.L),
-                ) {
-                    MiruFilterChip(
-                        selected = !s.parallelEnabled,
-                        onClick = { s.parallelEnabled = false },
-                        label = stringResource(R.string.st_off),
-                    )
-                    MiruFilterChip(
-                        selected = s.parallelEnabled && s.parallelOrder == "TRANSLATION_FIRST",
-                        onClick = {
-                            s.parallelEnabled = true
-                            s.parallelOrder = "TRANSLATION_FIRST"
+                // One horizontally scrolling chip line, never a wrapping row.
+                ChipRow(
+                    options = listOf(
+                        ChipOption("off", stringResource(R.string.st_off)),
+                        ChipOption("translation", stringResource(R.string.st_tr_order_translation)),
+                        ChipOption("original", stringResource(R.string.st_tr_order_original)),
+                    ),
+                    selectedIds = setOf(
+                        when {
+                            !s.parallelEnabled -> "off"
+                            s.parallelOrder == "TRANSLATION_FIRST" -> "translation"
+                            else -> "original"
                         },
-                        label = stringResource(R.string.st_tr_order_translation),
-                    )
-                    MiruFilterChip(
-                        selected = s.parallelEnabled && s.parallelOrder == "ORIGINAL_FIRST",
-                        onClick = {
-                            s.parallelEnabled = true
-                            s.parallelOrder = "ORIGINAL_FIRST"
-                        },
-                        label = stringResource(R.string.st_tr_order_original),
-                    )
-                }
+                    ),
+                    onToggle = { id ->
+                        when (id) {
+                            "off" -> s.parallelEnabled = false
+                            "translation" -> {
+                                s.parallelEnabled = true
+                                s.parallelOrder = "TRANSLATION_FIRST"
+                            }
+                            else -> {
+                                s.parallelEnabled = true
+                                s.parallelOrder = "ORIGINAL_FIRST"
+                            }
+                        }
+                    },
+                    contentPadding = PaddingValues(MiruSpace.L),
+                )
             }
         }
         item(key = "novels") {
@@ -572,6 +576,14 @@ fun PromptManagerSheet(onClose: () -> Unit) {
             s.promptEnglishLocale = englishNames
             onClose()
         },
+        // Prompt reset is a header action, not a button at the bottom.
+        headerAction = {
+            SheetHeaderAction(
+                label = stringResource(R.string.st_tr_prompt_reset),
+                enabled = text.isNotEmpty(),
+                onClick = { text = "" },
+            )
+        },
     ) {
         OutlinedTextField(
             value = text,
@@ -589,7 +601,7 @@ fun PromptManagerSheet(onClose: () -> Unit) {
             color = extra.muted,
             modifier = Modifier.padding(top = MiruSpace.Xs),
         )
-        SheetSection(title = stringResource(R.string.st_tr_presets), initiallyExpanded = true) {
+        SheetSection(title = stringResource(R.string.st_tr_presets)) {
             if (s.promptPresets.isEmpty()) {
                 Text(
                     text = stringResource(R.string.st_tr_presets_empty),
@@ -647,11 +659,5 @@ fun PromptManagerSheet(onClose: () -> Unit) {
             checked = englishNames,
             onChange = { englishNames = it },
         )
-        TextButton(onClick = { text = "" }, enabled = text.isNotEmpty()) {
-            Text(
-                text = stringResource(R.string.st_tr_prompt_reset),
-                style = MaterialTheme.typography.labelLarge,
-            )
-        }
     }
 }

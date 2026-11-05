@@ -103,8 +103,10 @@ class RoomTranslationCache(
     }
 
     private suspend fun resolveChapterId(request: TranslationRequest): Long? {
-        val book = library.book(request.bookUrl) ?: return null
-        return library.chapterByUrl(book.bookId, request.chapterUrl)?.chapterId
+        // Unique-URL resolution only: with two installs sharing a URL a
+        // URL-only lookup could read another work's cached chapter.
+        val bookId = library.bookIdByUrlUnique(request.bookUrl) ?: return null
+        return library.chapterByUrl(bookId, request.chapterUrl)?.chapterId
     }
 
     private fun promptHash(request: TranslationRequest): String =

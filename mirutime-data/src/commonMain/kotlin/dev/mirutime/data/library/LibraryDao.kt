@@ -12,6 +12,9 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 
+/** Minimal projection for URL-based book lookups (never a full row). */
+data class BookUrlRow(val bookId: Long, val url: String)
+
 @Dao
 interface LibraryDao {
     // --- shelves -------------------------------------------------------------
@@ -74,6 +77,12 @@ interface LibraryDao {
     // to bookId. New code should use book(installId, url).
     @Query("SELECT * FROM books WHERE url = :url LIMIT 1")
     suspend fun bookByUrl(url: String): BookEntity?
+
+    // All rows sharing one URL. The table is unique per (installId, url), so
+    // more than one row means the URL alone cannot identify a book. Two rows
+    // are enough to detect that ambiguity.
+    @Query("SELECT bookId, url FROM books WHERE url = :url LIMIT 2")
+    suspend fun booksByUrl(url: String): List<BookUrlRow>
 
     @Query("SELECT * FROM books WHERE installId = :installId AND url = :url LIMIT 1")
     suspend fun bookByInstallAndUrl(installId: String, url: String): BookEntity?
@@ -160,8 +169,8 @@ interface LibraryDao {
     )
     suspend fun unfinishedLibraryBooks(limit: Int): List<BookEntity>
 
-    @Query("SELECT * FROM books WHERE url IN (:urls)")
-    suspend fun booksByUrls(urls: List<String>): List<BookEntity>
+    @Query("SELECT bookId, url FROM books WHERE url IN (:urls) LIMIT 1800")
+    suspend fun booksByUrls(urls: List<String>): List<BookUrlRow>
 
     // One query for catalogue membership: only URLs that are actually in the
     // library. Keeps the list rendering free of per-card DB lookups.

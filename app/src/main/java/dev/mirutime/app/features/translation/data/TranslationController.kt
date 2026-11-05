@@ -308,6 +308,10 @@ class TranslationController(
     }
 
     private fun configKey(request: TranslationRequest): String = buildString {
+        // The owning book is part of the identity: the same chapter URL under
+        // another book must never satisfy this request.
+        append(request.bookUrl)
+        append('|')
         append(request.chapterUrl)
         append('|')
         append(request.provider.name)

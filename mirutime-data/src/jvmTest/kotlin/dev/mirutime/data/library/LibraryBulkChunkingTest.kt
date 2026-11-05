@@ -345,7 +345,7 @@ class LibraryBulkChunkingTest {
                 "libraryUrls" -> record(method.name, args).filterIsInstance<String>()
                 "booksByUrls" -> record(method.name, args)
                     .filterIsInstance<String>()
-                    .map { url -> book(url).copy(bookId = url.substringAfterLast('/').toLong()) }
+                    .map { url -> BookUrlRow(bookId = url.substringAfterLast('/').toLong(), url = url) }
                 "deleteBooksWithFiles" -> {
                     val ids = record(method.name, args)
                     deleteCalls++

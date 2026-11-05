@@ -11,9 +11,11 @@ import dev.mirutime.data.library.BookTranslationEntity
 import dev.mirutime.translator.LanguageCode
 import dev.mirutime.translator.ProviderId
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -342,6 +344,33 @@ class MetadataTranslationControllerTest {
     }
 
     @Test
+    fun `stale metadata batch never paints a newer request`() = runTest {
+        val engine = GatedEngine()
+        val controller = MetadataTranslationController(engine, this)
+        val first = config(provider = ProviderId.GEMINI)
+        val second = config(provider = ProviderId.OPENAI)
+        val bookUrl = "fake://a/one"
+
+        controller.submitTitles(listOf(TitleTranslationJob(bookUrl, "One", first)))
+        advanceUntilIdle()
+        assertEquals(1, engine.requests.size)
+
+        // A newer request for the same book replaces the pending key while the
+        // first batch is still in flight.
+        controller.submitTitles(listOf(TitleTranslationJob(bookUrl, "One", second)))
+        advanceUntilIdle()
+
+        engine.release()
+        advanceUntilIdle()
+        assertNotEquals("GEMINI:One", controller.state.value[bookUrl]?.title)
+
+        engine.release()
+        advanceUntilIdle()
+        assertEquals("OPENAI:One", controller.state.value[bookUrl]?.title)
+        assertEquals(MetadataTranslationStatus.Ready, controller.state.value[bookUrl]?.status)
+    }
+
+    @Test
     fun `partial metadata patch keeps fields it does not touch`() {
         val key = MetadataTranslationKey(
             source = "en",
@@ -456,6 +485,39 @@ class MetadataTranslationControllerTest {
         ): Outcome<MetadataTranslationResult> {
             requests += request
             return respond(request)
+        }
+    }
+
+    /** Holds every batch until the test releases it; answers carry the provider. */
+    private class GatedEngine : TranslationEngine {
+        val requests = mutableListOf<MetadataRequest>()
+        private val releases = Channel<Unit>(Channel.UNLIMITED)
+
+        fun release() {
+            releases.trySend(Unit)
+        }
+
+        override suspend fun translateChapter(
+            request: TranslationRequest,
+        ): Outcome<ChapterTranslationResult> =
+            error("metadata test engine has no chapter path")
+
+        override suspend fun translateMetadata(
+            request: MetadataRequest,
+        ): Outcome<MetadataTranslationResult> {
+            requests += request
+            releases.receive()
+            return Outcome.Ok(
+                MetadataTranslationResult(
+                    translations = request.units.mapNotNull { unit ->
+                        unit.id.toIntOrNull()?.let { id ->
+                            id to "${request.provider.name}:${unit.text}"
+                        }
+                    }.toMap(),
+                    provider = request.provider,
+                    model = null,
+                ),
+            )
         }
     }
 }

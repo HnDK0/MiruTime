@@ -57,7 +57,9 @@ class RoomMetadataTranslationStore(
         bookUrl: String,
         key: MetadataTranslationKey,
     ): StoredMetadataTranslation? {
-        val bookId = library.bookIdByUrl(bookUrl) ?: return null
+        // A shared URL cannot identify a row: refuse the read instead of
+        // showing another instalment's stored title.
+        val bookId = library.bookIdByUrlUnique(bookUrl) ?: return null
         val row = library.bookTranslation(
             bookId = bookId,
             source = key.source,
@@ -74,7 +76,7 @@ class RoomMetadataTranslationStore(
         key: MetadataTranslationKey,
     ): Map<String, StoredMetadataTranslation> {
         if (bookUrls.isEmpty()) return emptyMap()
-        val idByUrl = library.bookIdsByUrls(bookUrls)
+        val idByUrl = library.uniqueBookIdsByUrls(bookUrls)
         if (idByUrl.isEmpty()) return emptyMap()
         val rows = library.bookTranslations(
             bookIds = idByUrl.values.toList(),
@@ -95,7 +97,7 @@ class RoomMetadataTranslationStore(
         key: MetadataTranslationKey,
         patch: MetadataTranslationPatch,
     ) {
-        val bookId = library.bookIdByUrl(bookUrl) ?: return
+        val bookId = library.bookIdByUrlUnique(bookUrl) ?: return
         val existing = library.bookTranslation(
             bookId = bookId,
             source = key.source,

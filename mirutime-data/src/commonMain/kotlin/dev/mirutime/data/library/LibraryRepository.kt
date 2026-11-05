@@ -1030,14 +1030,41 @@ class LibraryRepository(private val dao: LibraryDao) {
 
     suspend fun bookIdByUrl(bookUrl: String): Long? = dao.bookByUrl(bookUrl)?.bookId
 
+    /**
+     * Resolves a URL only when it identifies exactly one book. The books table
+     * is unique per (installId, url), so a URL-only lookup can land on another
+     * install's row; translation caches prefer a cache miss over a wrong hit.
+     */
+    suspend fun bookIdByUrlUnique(bookUrl: String): Long? =
+        dao.booksByUrl(bookUrl).singleOrNull()?.bookId
+
     suspend fun bookIdsByUrls(bookUrls: List<String>): Map<String, Long> {
         val urls = bookUrls.distinct()
         if (urls.isEmpty()) return emptyMap()
         val ids = LinkedHashMap<String, Long>()
         for (chunk in urls.chunked(SqliteIdChunk)) {
             currentCoroutineContext().ensureActive()
-            val byUrl = dao.booksByUrls(chunk).associateBy { it.url }
-            chunk.forEach { url -> byUrl[url]?.let { ids[url] = it.bookId } }
+            // Dashboard progress resolves duplicate URLs last-wins; only
+            // translation caches need the unambiguous variant below.
+            dao.booksByUrls(chunk).forEach { ids[it.url] = it.bookId }
+        }
+        return ids
+    }
+
+    /**
+     * Same as [bookIdsByUrls] but only for URLs that identify exactly one book.
+     * Translation caches use this: a wrong row is worse than a cache miss.
+     */
+    suspend fun uniqueBookIdsByUrls(bookUrls: List<String>): Map<String, Long> {
+        val urls = bookUrls.distinct()
+        if (urls.isEmpty()) return emptyMap()
+        val ids = LinkedHashMap<String, Long>()
+        for (chunk in urls.chunked(SqliteIdChunk)) {
+            currentCoroutineContext().ensureActive()
+            val byUrl = dao.booksByUrls(chunk).groupBy { it.url }
+            chunk.forEach { url ->
+                byUrl[url]?.singleOrNull()?.let { ids[url] = it.bookId }
+            }
         }
         return ids
     }

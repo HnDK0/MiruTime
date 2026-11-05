@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
@@ -432,7 +433,6 @@ internal fun TranslationPairControls(
     val effectiveTarget = if (isGlobal) target else target.ifBlank { s.globalTarget }
     val pairResolved = effectiveSource.isNotBlank() && effectiveTarget.isNotBlank()
     val samePair = pairResolved && effectiveSource == effectiveTarget
-    val pairValid = pairResolved && !samePair
     val effectiveSourceLabel = if (effectiveSource.isBlank()) {
         stringResource(R.string.st_tr_not_set)
     } else {
@@ -445,33 +445,17 @@ internal fun TranslationPairControls(
     }
 
     SheetSection(title = sectionTitle ?: stringResource(R.string.st_pt_pair)) {
-        // Labels sit in their own row so the arrow can centre on the buttons
-        // instead of on the label + button stack.
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                text = stringResource(R.string.st_tr_source),
-                style = MaterialTheme.typography.labelSmall,
-                color = extra.muted,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(20.dp))
-            Text(
-                text = stringResource(R.string.st_tr_target),
-                style = MaterialTheme.typography.labelSmall,
-                color = extra.muted,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Spacer(Modifier.height(4.dp))
+        // One card with two equal halves: the caption lives inside its own
+        // half, so the two language windows always line up.
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = MiruSpace.S),
         ) {
             PairButton(
+                caption = stringResource(R.string.st_tr_source),
                 // An inherited side names the effective global value
                 // outright instead of an abstract "from global"; the
                 // global level itself just says "Not set".
@@ -487,9 +471,10 @@ internal fun TranslationPairControls(
                 imageVector = Icons.AutoMirrored.Filled.ArrowRightAlt,
                 contentDescription = null,
                 tint = extra.muted,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(MiruSize.Indicator),
             )
             PairButton(
+                caption = stringResource(R.string.st_tr_target),
                 label = when {
                     target.isNotBlank() -> uiLanguageName(target)
                     isGlobal -> stringResource(R.string.st_tr_not_set)
@@ -518,24 +503,6 @@ internal fun TranslationPairControls(
                 color = extra.muted,
                 modifier = Modifier.padding(top = MiruSpace.S),
             )
-        }
-        // Swapping works on the effective pair, so the result is always two
-        // explicit languages ("Russian ← English (global)" -> Russian →
-        // English) instead of shuffling the inherited/blank split around.
-        TextButton(
-            onClick = {
-                onPairChange(effectiveTarget, effectiveSource)
-                s.recordTranslationPair(effectiveTarget, effectiveSource)
-            },
-            enabled = pairValid,
-        ) {
-            Icon(
-                imageVector = Icons.Filled.SwapHoriz,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-            )
-            Spacer(Modifier.width(4.dp))
-            Text(stringResource(R.string.st_pt_swap))
         }
     }
 
@@ -576,24 +543,32 @@ internal fun TranslationPairControls(
 // not by a different border, so the two windows always read as one control.
 @Composable
 private fun PairButton(
+    caption: String,
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier
-            .defaultMinSize(minHeight = 48.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .defaultMinSize(minHeight = MiruSize.Row)
+            .clip(RoundedCornerShape(MiruRadius.Control))
             .background(miruCardSurface())
             .border(
-                width = 1.dp,
+                width = MiruSize.Stroke,
                 color = MaterialTheme.colorScheme.outline,
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(MiruRadius.Control),
             )
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = MiruSpace.M, vertical = 6.dp),
+            .padding(horizontal = MiruSpace.M, vertical = MiruSpace.S),
         verticalArrangement = Arrangement.Center,
     ) {
+        Text(
+            text = caption,
+            style = MaterialTheme.typography.labelSmall,
+            color = LocalMiruExtraColors.current.muted,
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(MiruSpace.Xxs))
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,

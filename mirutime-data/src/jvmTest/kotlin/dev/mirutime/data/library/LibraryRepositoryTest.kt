@@ -864,6 +864,23 @@ class LibraryRepositoryTest {
     }
 
     @Test
+    fun `a shared url never resolves to one book for translation caches`() = runTest {
+        val url = "https://site/book/shared-url"
+        val first = book(url, inLibrary = true, lastReadAt = null)
+        repository.saveBook(first)
+        // The same URL under another install id is legal: uniqueness is
+        // (installId, url), so the URL alone is ambiguous.
+        repository.saveBook(first.copy(installId = "other"))
+
+        assertNull(repository.bookIdByUrlUnique(url))
+        assertTrue(repository.uniqueBookIdsByUrls(listOf(url)).isEmpty())
+
+        val unique = book("https://site/book/unique-url", inLibrary = true, lastReadAt = null)
+        repository.saveBook(unique)
+        assertNotNull(repository.bookIdByUrlUnique(unique.url))
+    }
+
+    @Test
     fun `fts finds title author tags description and translated title`() = runTest {
         val mage = book("https://site/book/fts-mage", inLibrary = true, lastReadAt = null).copy(
             title = "Silver Mage",

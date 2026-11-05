@@ -65,6 +65,12 @@ data class BookMetadataTranslation(
     val detailsLoaded: Boolean = false,
     /** Provider that actually served the batch (free fallback may differ). */
     val provider: ProviderId? = null,
+    /**
+     * Request this entry currently waits for. A result is only allowed to paint
+     * when its job key still matches, so a slow batch that started before a
+     * re-submit (or a navigation) cannot overwrite newer state.
+     */
+    val pendingKey: String? = null,
 )
 
 /**
@@ -106,11 +112,12 @@ class MetadataTranslationController(
                 provider = config.provider,
                 prompt = config.prompt,
             )
-            group.forEach { markLoading(it.bookUrl, config) }
+            val pendingKey = "titles:${config.cacheKey()}:" +
+                group.joinToString("|") { it.bookUrl }
+            group.forEach { markLoading(it.bookUrl, config, pendingKey) }
             enqueue(
                 Pending(
-                    key = "titles:${config.cacheKey()}:" +
-                        group.joinToString("|") { it.bookUrl },
+                    key = pendingKey,
                     books = group.map { it.bookUrl },
                     config = config,
                     request = request,
@@ -133,10 +140,11 @@ class MetadataTranslationController(
         }
         if (units.isEmpty()) return
 
-        markLoading(job.bookUrl, job.config)
+        val pendingKey = "book:${job.bookUrl}:${job.config.cacheKey()}"
+        markLoading(job.bookUrl, job.config, pendingKey)
         enqueue(
             Pending(
-                key = "book:${job.bookUrl}:${job.config.cacheKey()}",
+                key = pendingKey,
                 books = listOf(job.bookUrl),
                 config = job.config,
                 request = MetadataRequest(
@@ -165,10 +173,11 @@ class MetadataTranslationController(
         }
         if (units.isEmpty()) return
 
-        markLoading(job.bookUrl, job.config)
+        val pendingKey = "chapters:${job.bookUrl}:${job.config.cacheKey()}"
+        markLoading(job.bookUrl, job.config, pendingKey)
         enqueue(
             Pending(
-                key = "chapters:${job.bookUrl}:${job.config.cacheKey()}",
+                key = pendingKey,
                 books = listOf(job.bookUrl),
                 config = job.config,
                 request = MetadataRequest(
@@ -200,7 +209,7 @@ class MetadataTranslationController(
         return entry?.config == config && entry.detailsLoaded
     }
 
-    private fun markLoading(bookUrl: String, config: MetadataConfig) {
+    private fun markLoading(bookUrl: String, config: MetadataConfig, pendingKey: String) {
         _state.update { current ->
             val previous = current[bookUrl]?.takeIf { it.config == config }
             current + (bookUrl to BookMetadataTranslation(
@@ -211,6 +220,7 @@ class MetadataTranslationController(
                 chapterTitles = previous?.chapterTitles.orEmpty(),
                 detailsLoaded = previous?.detailsLoaded == true,
                 provider = previous?.provider,
+                pendingKey = pendingKey,
             ))
         }
         touch(bookUrl)
@@ -287,9 +297,11 @@ class MetadataTranslationController(
         // publish it once, so a batch of 50 titles cannot be interleaved with
         // another state write and lose entries.
         var next = _state.value
+        val applied = ArrayList<String>(job.books.size)
         job.books.forEachIndexed { index, bookUrl ->
             val entry = next[bookUrl] ?: return@forEachIndexed
-            if (entry.config != job.config) return@forEachIndexed
+            // Only the request this entry is still waiting for may paint it.
+            if (entry.config != job.config || entry.pendingKey != job.key) return@forEachIndexed
             next = when (job.kind) {
                 MetadataKind.Titles -> {
                     val title = translations[index]?.takeIf { it.isNotBlank() }
@@ -297,6 +309,7 @@ class MetadataTranslationController(
                         status = MetadataTranslationStatus.Ready,
                         title = title ?: entry.title,
                         provider = result.provider,
+                        pendingKey = null,
                     ))
                 }
                 MetadataKind.Details -> {
@@ -310,6 +323,7 @@ class MetadataTranslationController(
                         chapterTitles = chapterTitles.ifEmpty { entry.chapterTitles },
                         detailsLoaded = true,
                         provider = result.provider,
+                        pendingKey = null,
                     ))
                 }
                 MetadataKind.Chapters -> {
@@ -320,12 +334,16 @@ class MetadataTranslationController(
                         title = title ?: entry.title,
                         chapterTitles = chapterTitles.ifEmpty { entry.chapterTitles },
                         provider = result.provider,
+                        pendingKey = null,
                     ))
                 }
             }
+            applied += bookUrl
         }
         _state.value = next
-        job.books.forEach(::touch)
+        applied.forEach(::touch)
+        // Persistence is per config, so a batch that lost the paint race still
+        // stores a valid translation for its own language pair.
         persist(job, translations)
     }
 
@@ -427,6 +445,7 @@ class MetadataTranslationController(
                 // done; a stored description is the durable proof of it.
                 detailsLoaded = previous?.detailsLoaded == true || stored.description != null,
                 provider = previous?.provider,
+                pendingKey = previous?.pendingKey,
             )
             current + (bookUrl to merged)
         }
@@ -445,8 +464,11 @@ class MetadataTranslationController(
             var next = current
             job.books.forEach { bookUrl ->
                 val entry = next[bookUrl] ?: return@forEach
-                if (entry.config != job.config) return@forEach
-                next = next + (bookUrl to entry.copy(status = MetadataTranslationStatus.Failed))
+                if (entry.config != job.config || entry.pendingKey != job.key) return@forEach
+                next = next + (bookUrl to entry.copy(
+                    status = MetadataTranslationStatus.Failed,
+                    pendingKey = null,
+                ))
             }
             next
         }
