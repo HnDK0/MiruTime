@@ -34,12 +34,16 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
 
-enum class MiruButtonStyle { Primary, Secondary, Destructive, Text }
+enum class MiruButtonStyle { Primary, InversePrimary, Secondary, Destructive, Text }
 
 enum class MiruIconButtonStyle { Bare, Plate }
 
 internal fun MiruButtonStyle.minVisualHeight(): Dp =
-    if (this == MiruButtonStyle.Primary) MiruSize.ButtonPrimary else MiruSize.Button
+    if (this == MiruButtonStyle.Primary || this == MiruButtonStyle.InversePrimary) {
+        MiruSize.ButtonPrimary
+    } else {
+        MiruSize.Button
+    }
 
 /** Visual/interaction only. Busy describes the caller's operation; it never changes enabled. */
 @Composable
@@ -59,12 +63,14 @@ fun MiruButton(
     val shape = MaterialTheme.shapes.small
     val backing = when (style) {
         MiruButtonStyle.Primary -> scheme.primary
+        MiruButtonStyle.InversePrimary -> scheme.onBackground
         MiruButtonStyle.Secondary -> scheme.surfaceContainerLow
         MiruButtonStyle.Destructive -> scheme.error
         MiruButtonStyle.Text -> Color.Transparent
     }
     val ink = when (style) {
         MiruButtonStyle.Primary -> scheme.onPrimary
+        MiruButtonStyle.InversePrimary -> scheme.background
         MiruButtonStyle.Secondary -> scheme.onSurface
         MiruButtonStyle.Destructive -> scheme.onError
         MiruButtonStyle.Text -> extra.accent
@@ -110,7 +116,9 @@ fun MiruButton(
                 if (busy) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(MiruSize.Indicator),
-                        color = contentInk,
+                        // A busy CTA is often disabled; keep the only activity
+                        // cue above the 3:1 non-text contrast floor.
+                        color = if (enabled) contentInk else scheme.onSurface.copy(alpha = 0.60f),
                         strokeWidth = MiruSpace.Xxs,
                     )
                 } else if (leadingIcon != null) {

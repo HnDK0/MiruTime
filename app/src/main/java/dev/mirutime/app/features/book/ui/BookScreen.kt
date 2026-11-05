@@ -62,7 +62,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -121,6 +120,8 @@ import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.app.design.components.BookCover
 import dev.mirutime.uikit.MiruCard
 import dev.mirutime.uikit.MiruActionRow
+import dev.mirutime.uikit.MiruButton
+import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
 import dev.mirutime.uikit.StatCell
@@ -2299,35 +2300,17 @@ private fun ActionRow(
         } ?: stringResource(R.string.book_no_chapters)
     }
     Column {
-        Button(
+        MiruButton(
             onClick = onContinue,
             enabled = action.enabled,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(MiruSize.ButtonPrimary),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.onBackground,
-                contentColor = MaterialTheme.colorScheme.background,
-            ),
+            style = MiruButtonStyle.InversePrimary,
+            busy = action.kind == BookActionKind.LoadingChapters,
+            busyDescription = label,
+            leadingIcon = Icons.Filled.PlayArrow,
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            if (action.kind == BookActionKind.LoadingChapters) {
-                CircularProgressIndicator(
-                    strokeWidth = 2.dp,
-                    modifier = Modifier
-                        .size(16.dp)
-                        .semantics { contentDescription = label },
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Filled.PlayArrow,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-            Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

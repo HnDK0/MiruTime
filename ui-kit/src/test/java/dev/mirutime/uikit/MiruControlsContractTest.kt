@@ -16,6 +16,7 @@ class MiruControlsContractTest {
     @Test
     fun `button and icon roles keep visual and minimum target sizes separate`() {
         assertEquals(52.dp, MiruButtonStyle.Primary.minVisualHeight())
+        assertEquals(52.dp, MiruButtonStyle.InversePrimary.minVisualHeight())
         listOf(MiruButtonStyle.Secondary, MiruButtonStyle.Destructive, MiruButtonStyle.Text).forEach {
             assertEquals(44.dp, it.minVisualHeight())
         }
