@@ -70,6 +70,7 @@ import dev.mirutime.app.features.reader.document.SentenceSplitter
 import dev.mirutime.feature.reader.ReaderStyle
 import dev.mirutime.feature.reader.paged.parallelPairs
 import dev.mirutime.feature.tts.api.TtsHighlight
+import dev.mirutime.uikit.MiruRadius
 import coil3.compose.AsyncImage
 import java.io.File
 import kotlin.math.min
@@ -192,7 +193,7 @@ private fun OriginalText(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 120.dp, max = 520.dp)
-                        .clip(RoundedCornerShape(8.dp)),
+                        .clip(RoundedCornerShape(MiruRadius.Chip)),
                 )
             }
         }
@@ -861,7 +862,7 @@ private fun parallelPairHighlightModifier(
     return if (active) {
         Modifier.background(
             Color(highlight.colorArgb).copy(alpha = 0.10f),
-            RoundedCornerShape(6.dp),
+            RoundedCornerShape(MiruRadius.Badge),
         )
     } else {
         Modifier

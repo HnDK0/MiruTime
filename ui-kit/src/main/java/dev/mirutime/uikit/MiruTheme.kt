@@ -318,7 +318,7 @@ fun OnImageFrost(
     modifier: Modifier = Modifier,
     alpha: Float = PlateAlpha,
     blur: Dp = 8.dp,
-    shape: Shape = RoundedCornerShape(12.dp),
+    shape: Shape = RoundedCornerShape(MiruRadius.Control),
     // Explicit adaptive backing (photo zones): overrides the dynamic-surface
     // default so ghost pills can turn light on bright strips. Ignored on classic.
     backingColor: Color? = null,

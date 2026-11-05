@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.MiruFilterChip
@@ -467,7 +468,7 @@ private fun BigActionButton(
 private fun GlobalSearchEntry(onClick: () -> Unit) {
     val extra = LocalMiruExtraColors.current
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(MiruRadius.Inner),
         color = miruCardSurface(),
         shadowElevation = miruCardElevation(),
         modifier = Modifier

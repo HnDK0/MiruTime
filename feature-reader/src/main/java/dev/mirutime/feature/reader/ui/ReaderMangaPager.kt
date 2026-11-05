@@ -84,6 +84,7 @@ import dev.mirutime.feature.reader.tapTurn
 import dev.mirutime.feature.reader.ui.manga.MangaTiledImage
 import dev.mirutime.feature.reader.ui.manga.MangaZoomState
 import dev.mirutime.feature.reader.ui.manga.mangaColorFilter
+import dev.mirutime.uikit.MiruRadius
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -921,7 +922,7 @@ private fun MangaPageFileImage(
         if (failed) {
             Column(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(MiruRadius.Control))
                     .background(Color.Black.copy(alpha = 0.7f))
                     .padding(horizontal = 20.dp, vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -959,7 +960,7 @@ private fun MangaWebtoonPadding.toDp(): Dp = when (this) {
 private fun MangaBadge(text: String) {
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(MiruRadius.Large))
             .background(Color.Black.copy(alpha = 0.6f))
             .padding(horizontal = 12.dp, vertical = 4.dp),
     ) {

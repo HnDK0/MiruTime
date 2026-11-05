@@ -17,6 +17,7 @@ object MiruRadius {
     val Control = 12.dp   // buttons, outlined fields and compact controls
     val Inner = 14.dp     // tiles nested inside a card
     val Card = 12.dp      // cards, plates, panels
+    val Large = 16.dp     // medium containers and overlay surfaces
     val Plate = 24.dp     // floating chrome (header, tab bar)
     val Sheet = 28.dp     // bottom sheets (top corners)
 }

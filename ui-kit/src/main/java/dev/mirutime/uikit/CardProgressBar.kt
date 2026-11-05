@@ -28,14 +28,14 @@ fun CardProgressBar(
         modifier = modifier
             .fillMaxWidth()
             .height(height)
-            .clip(RoundedCornerShape(3.dp))
+            .clip(RoundedCornerShape(MiruRadius.Split))
             .background(trackColor),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth(fraction.coerceIn(0f, 1f))
                 .height(height)
-                .clip(RoundedCornerShape(3.dp))
+                .clip(RoundedCornerShape(MiruRadius.Split))
                 .background(LocalMiruExtraColors.current.accent),
         )
     }

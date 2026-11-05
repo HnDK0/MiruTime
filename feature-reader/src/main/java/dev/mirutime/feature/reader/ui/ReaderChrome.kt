@@ -50,6 +50,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSlider
 import dev.mirutime.uikit.MiruSpace
@@ -121,7 +122,7 @@ internal fun ReaderChrome(
                 .statusBarsPadding()
                 .padding(horizontal = 12.dp)
                 .fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(MiruRadius.Plate),
             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
             tonalElevation = 3.dp,
             shadowElevation = 8.dp,
@@ -189,7 +190,7 @@ internal fun ReaderChrome(
                 .navigationBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 18.dp)
                 .fillMaxWidth(),
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(MiruRadius.Sheet),
             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
             tonalElevation = 3.dp,
             shadowElevation = 10.dp,
@@ -347,7 +348,7 @@ private fun DockAction(
             .width(72.dp)
             // Keep the interactive box at the 48dp touch minimum (D2-03).
             .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(MiruRadius.Large))
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -379,7 +380,7 @@ internal fun ReaderIconButton(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .size(48.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(MiruRadius.Inner))
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
     ) {
         Icon(

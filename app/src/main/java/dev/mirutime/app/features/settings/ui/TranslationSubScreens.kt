@@ -707,7 +707,7 @@ private fun RecentPairRow(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(MiruRadius.Chip))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .clickable(role = Role.Button, onClick = onApply)
             .padding(start = MiruSpace.M),

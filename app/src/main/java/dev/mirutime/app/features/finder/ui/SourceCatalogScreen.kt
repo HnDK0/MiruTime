@@ -723,7 +723,7 @@ internal fun CatalogSearchBar(
     val extra = LocalMiruExtraColors.current
     val focus = LocalFocusManager.current
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(MiruRadius.Inner),
         color = miruCardSurface(),
         shadowElevation = miruCardElevation(),
         modifier = modifier

@@ -597,7 +597,7 @@ fun WebViewScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(MiruSize.Touch)
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(MiruRadius.Large))
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
                     .border(
                         width = 1.dp,
@@ -606,7 +606,7 @@ fun WebViewScreen(
                         } else {
                             MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
                         },
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(MiruRadius.Large),
                     )
                     .padding(start = MiruSpace.M),
             ) {
@@ -667,7 +667,7 @@ fun WebViewScreen(
                     Box(
                         modifier = Modifier
                             .size(MiruSize.Touch)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(MiruRadius.Control))
                             .clickable(role = Role.Button, onClick = {
                                 address = TextFieldValue("", TextRange.Zero)
                             }),
@@ -990,7 +990,7 @@ private fun BrowserIconButton(
     Box(
         modifier = modifier
             .size(MiruSize.Touch)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(MiruRadius.Control))
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

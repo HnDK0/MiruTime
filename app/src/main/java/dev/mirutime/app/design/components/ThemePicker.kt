@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import dev.mirutime.uikit.R as UiKitR
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.AppBottomSheet
+import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.app.design.PresetBackground
@@ -362,7 +363,7 @@ private fun ThemeTile(
     Column(
         modifier = Modifier
             .width(132.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(MiruRadius.Control))
             .border(
                 width = if (selected) 2.dp else 1.dp,
                 color = if (selected) {
@@ -370,7 +371,7 @@ private fun ThemeTile(
                 } else {
                     MaterialTheme.colorScheme.outlineVariant
                 },
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(MiruRadius.Control),
             )
             .clickable(onClick = onClick)
             .padding(8.dp),
@@ -396,7 +397,7 @@ private fun ThemeTile(
 private fun MiniLibrary() {
     val extra = LocalMiruExtraColors.current
     Surface(
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(MiruRadius.Chip),
         color = MaterialTheme.colorScheme.surface,
     ) {
         Row(
@@ -412,7 +413,7 @@ private fun MiniLibrary() {
                         modifier = Modifier
                             .width(52.dp)
                             .height(58.dp)
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(RoundedCornerShape(MiruRadius.Badge))
                             .background(MaterialTheme.colorScheme.surfaceVariant),
                     ) {
                         Box(
@@ -420,7 +421,7 @@ private fun MiniLibrary() {
                                 .align(Alignment.TopStart)
                                 .padding(4.dp)
                                 .size(width = 18.dp, height = 8.dp)
-                                .clip(RoundedCornerShape(4.dp))
+                                .clip(RoundedCornerShape(MiruRadius.Split))
                                 .background(extra.accent),
                         )
                     }
@@ -429,7 +430,7 @@ private fun MiniLibrary() {
                         modifier = Modifier
                             .width(44.dp)
                             .height(5.dp)
-                            .clip(RoundedCornerShape(3.dp))
+                            .clip(RoundedCornerShape(MiruRadius.Split))
                             .background(
                                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
                             ),
@@ -439,7 +440,7 @@ private fun MiniLibrary() {
                         modifier = Modifier
                             .width(52.dp)
                             .height(3.dp)
-                            .clip(RoundedCornerShape(2.dp))
+                            .clip(RoundedCornerShape(MiruRadius.Split))
                             .background(
                                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f),
                             ),
@@ -448,7 +449,7 @@ private fun MiniLibrary() {
                             modifier = Modifier
                                 .width(30.dp)
                                 .height(3.dp)
-                                .clip(RoundedCornerShape(2.dp))
+                                .clip(RoundedCornerShape(MiruRadius.Split))
                                 .background(extra.accent),
                         )
                     }
@@ -464,11 +465,11 @@ private fun AddBackgroundTile(onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .width(132.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(MiruRadius.Control))
             .border(
                 width = 1.dp,
                 color = MaterialTheme.colorScheme.outlineVariant,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(MiruRadius.Control),
             )
             .clickable(role = Role.Button, onClick = onClick)
             .padding(8.dp),
@@ -478,11 +479,11 @@ private fun AddBackgroundTile(onClick: () -> Unit) {
             modifier = Modifier
                 .width(116.dp)
                 .height(104.dp)
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(MiruRadius.Chip))
                 .border(
                     width = 1.dp,
                     color = MaterialTheme.colorScheme.outline,
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(MiruRadius.Chip),
                 ),
             contentAlignment = Alignment.Center,
         ) {
@@ -519,11 +520,11 @@ private fun BackgroundTile(
     Column(
         modifier = Modifier
             .width(132.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(MiruRadius.Control))
             .border(
                 width = if (selected) 2.dp else 1.dp,
                 color = if (selected) ring else MaterialTheme.colorScheme.outlineVariant,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(MiruRadius.Control),
             )
             .clickable(role = Role.Button, onClick = onClick)
             .padding(8.dp),
@@ -533,7 +534,7 @@ private fun BackgroundTile(
             modifier = Modifier
                 .width(116.dp)
                 .height(104.dp)
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(MiruRadius.Chip))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {
             if (bitmap != null) {
@@ -598,11 +599,11 @@ private fun PresetTile(
     Column(
         modifier = Modifier
             .width(132.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(MiruRadius.Control))
             .border(
                 width = if (selected) 2.dp else 1.dp,
                 color = if (selected) ring else MaterialTheme.colorScheme.outlineVariant,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(MiruRadius.Control),
             )
             .clickable(role = Role.Button, onClick = onClick)
             .padding(MiruSpace.S),
@@ -612,7 +613,7 @@ private fun PresetTile(
             modifier = Modifier
                 .width(116.dp)
                 .height(104.dp)
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(MiruRadius.Chip))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
@@ -661,8 +662,8 @@ private fun PresetPlaceholderTile() {
     Column(
         modifier = Modifier
             .width(132.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(MiruRadius.Control))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(MiruRadius.Control))
             .padding(MiruSpace.S),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -670,7 +671,7 @@ private fun PresetPlaceholderTile() {
             modifier = Modifier
                 .width(116.dp)
                 .height(104.dp)
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(MiruRadius.Chip))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         )
         Spacer(modifier = Modifier.height(MiruSpace.Xs))

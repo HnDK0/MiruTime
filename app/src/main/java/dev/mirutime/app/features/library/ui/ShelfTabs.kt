@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
@@ -92,7 +93,7 @@ fun ShelfTabsRow(
                         Box(
                             modifier = Modifier
                                 .height(32.dp)
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(MiruRadius.Chip))
                                 .background(
                                     if (selected) {
                                         if (onImage) {

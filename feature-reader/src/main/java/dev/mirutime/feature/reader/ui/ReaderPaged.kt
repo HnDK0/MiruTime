@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.mirutime.feature.reader.R
 import dev.mirutime.core.log.MiruLog
+import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.app.features.reader.document.BlockId
 import dev.mirutime.app.features.reader.document.BlockKind
 import coil3.compose.AsyncImage
@@ -507,7 +508,7 @@ private fun ReaderPageContent(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(with(density) { line.heightPx.toDp() })
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(RoundedCornerShape(MiruRadius.Chip))
                                         .background(textColor.copy(alpha = 0.08f)),
                                 )
                             } else {
@@ -518,7 +519,7 @@ private fun ReaderPageContent(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(with(density) { line.heightPx.toDp() })
-                                        .clip(RoundedCornerShape(8.dp)),
+                                        .clip(RoundedCornerShape(MiruRadius.Chip)),
                                 )
                             }
                         }
@@ -785,7 +786,7 @@ private fun pagedLineHighlightModifier(
     }
     return Modifier.background(
         Color(highlight.colorArgb).copy(alpha = 0.10f),
-        RoundedCornerShape(6.dp),
+        RoundedCornerShape(MiruRadius.Badge),
     )
 }
 

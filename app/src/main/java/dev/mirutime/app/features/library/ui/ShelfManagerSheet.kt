@@ -42,6 +42,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
@@ -182,11 +183,11 @@ private fun ModeSwitcher(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(MiruRadius.Large))
             .border(
                 1.dp,
                 MaterialTheme.colorScheme.outline,
-                RoundedCornerShape(20.dp),
+                RoundedCornerShape(MiruRadius.Large),
             ),
     ) {
         ShelfManagerMode.entries.forEach { entry ->
@@ -237,7 +238,7 @@ private fun ShelfListView(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { shelf ->
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(MiruRadius.Chip),
                         color = MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier.weight(1f),
                         onClick = { onPick(shelf.id) },

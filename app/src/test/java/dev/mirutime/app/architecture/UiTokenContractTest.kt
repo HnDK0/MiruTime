@@ -8,9 +8,8 @@ import org.junit.Test
 /**
  * Guards the UI token scale: feature code must not hardcode numeric corner
  * radii. Shape literals are only allowed through `MiruRadius.*` (or a variable
- * derived from it). The baseline below is the current debt; every entry must
- * shrink as screens migrate, and shrinking it is part of the change that fixed
- * the violation.
+ * derived from it). The baseline is empty: any numeric radius in scope is a
+ * violation.
  *
  * Deliberately not enforced here:
  * - `CircleShape` / `RoundedCornerShape(50)`: dots, counters, nav plates.
@@ -50,25 +49,7 @@ class UiTokenContractTest {
         .replace(Regex("//[^\\n]*")) { blankOut(it) }
 
     // path relative to repo root -> number of numeric RoundedCornerShape literals.
-    private val baseline = mapOf(
-        "app/src/main/java/dev/mirutime/app/features/dashboard/ui/TimeStatsPanel.kt" to 5,
-        "app/src/main/java/dev/mirutime/app/features/downloads/ui/DownloadsScreen.kt" to 1,
-        "app/src/main/java/dev/mirutime/app/features/finder/ui/FinderCommon.kt" to 1,
-        "app/src/main/java/dev/mirutime/app/features/finder/ui/FinderScreen.kt" to 1,
-        "app/src/main/java/dev/mirutime/app/features/finder/ui/SourceCatalogScreen.kt" to 1,
-        "app/src/main/java/dev/mirutime/app/features/library/ui/ImportSheet.kt" to 2,
-        "app/src/main/java/dev/mirutime/app/features/library/ui/ShelfManagerSheet.kt" to 3,
-        "app/src/main/java/dev/mirutime/app/features/library/ui/ShelfTabs.kt" to 1,
-        "app/src/main/java/dev/mirutime/app/features/settings/ui/TranslationSubScreens.kt" to 1,
-        "app/src/main/java/dev/mirutime/app/features/webview/ui/WebViewScreen.kt" to 4,
-        "app/src/main/java/dev/mirutime/app/design/components/BookCover.kt" to 2,
-        "app/src/main/java/dev/mirutime/app/design/components/ThemePicker.kt" to 21,
-        "feature-reader/src/main/java/dev/mirutime/feature/reader/ui/ReaderChrome.kt" to 4,
-        "feature-reader/src/main/java/dev/mirutime/feature/reader/ui/ReaderMangaPager.kt" to 2,
-        "feature-reader/src/main/java/dev/mirutime/feature/reader/ui/ReaderPaged.kt" to 3,
-        "feature-reader/src/main/java/dev/mirutime/feature/reader/ui/ReaderText.kt" to 2,
-        "feature-tts/src/main/java/dev/mirutime/feature/tts/ui/TtsSettingsPanel.kt" to 1,
-    )
+    private val baseline = emptyMap<String, Int>()
 
     private fun scan(): Map<String, List<Int>> {
         val found = linkedMapOf<String, MutableList<Int>>()

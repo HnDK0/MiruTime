@@ -200,7 +200,7 @@ private fun ListRating(rating: Float): String =
 @Composable
 private fun BadgePlate(label: String) {
     Surface(
-        shape = RoundedCornerShape(4.dp),
+        shape = RoundedCornerShape(MiruRadius.Split),
         color = LocalMiruExtraColors.current.accent,
     ) {
         Text(
@@ -222,14 +222,14 @@ private fun ListBar(fraction: Float) {
         modifier = Modifier
             .fillMaxWidth()
             .height(4.dp)
-            .clip(RoundedCornerShape(3.dp))
+            .clip(RoundedCornerShape(MiruRadius.Split))
             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f)),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth(fraction.coerceIn(0f, 1f))
                 .height(4.dp)
-                .clip(RoundedCornerShape(3.dp))
+                .clip(RoundedCornerShape(MiruRadius.Split))
                 .background(LocalMiruExtraColors.current.accent),
         )
     }

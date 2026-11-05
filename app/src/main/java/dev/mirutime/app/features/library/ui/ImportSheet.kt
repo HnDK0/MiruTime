@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.uikit.SheetSection
@@ -125,11 +126,11 @@ fun ImportSheet(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(MiruRadius.Control))
                         .border(
                             1.dp,
                             MaterialTheme.colorScheme.outline,
-                            RoundedCornerShape(12.dp),
+                            RoundedCornerShape(MiruRadius.Control),
                         )
                         .clickable {
                             picker.launch(

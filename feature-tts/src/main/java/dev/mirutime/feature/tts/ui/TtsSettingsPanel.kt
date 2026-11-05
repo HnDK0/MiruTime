@@ -164,7 +164,7 @@ fun TtsMiniPlayer(
 ) {
     val playing = status == TtsStatus.Playing || status == TtsStatus.Loading
     val session = playing || status == TtsStatus.Paused
-    val shape = RoundedCornerShape(18.dp)
+    val shape = RoundedCornerShape(MiruRadius.Large)
     val accent = MaterialTheme.colorScheme.primary
 
     // Thin bar: playback + Start here/Focus/Next chapter. Chapter number and

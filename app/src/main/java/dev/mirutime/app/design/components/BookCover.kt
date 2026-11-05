@@ -189,11 +189,11 @@ fun BookCover(
                         .align(Alignment.TopEnd)
                         .padding(6.dp)
                         .size(10.dp)
-                        .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(MiruRadius.Split))
                         .border(
                             1.5.dp,
                             MaterialTheme.colorScheme.background,
-                            RoundedCornerShape(4.dp),
+                            RoundedCornerShape(MiruRadius.Split),
                         ),
                 )
             }

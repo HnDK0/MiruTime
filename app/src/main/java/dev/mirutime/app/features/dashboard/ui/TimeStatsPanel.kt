@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.miruCardElevation
 import dev.mirutime.uikit.miruCardSurface
@@ -153,7 +154,7 @@ private fun SplitBar(readMs: Long, listenMs: Long) {
         modifier = Modifier
             .fillMaxWidth()
             .height(8.dp)
-            .clip(RoundedCornerShape(4.dp))
+            .clip(RoundedCornerShape(MiruRadius.Split))
             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f)),
     ) {
         if (total > 0) {
@@ -260,7 +261,14 @@ private fun WeekChart(weekMs: List<Long>) {
                         modifier = Modifier
                             .width(WeekBarMax)
                             .height(barHeight)
-                            .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 2.dp, bottomEnd = 2.dp))
+                            .clip(
+                                RoundedCornerShape(
+                                    topStart = MiruRadius.Badge,
+                                    topEnd = MiruRadius.Badge,
+                                    bottomStart = MiruRadius.Split,
+                                    bottomEnd = MiruRadius.Split,
+                                ),
+                            )
                             .background(
                                 when {
                                     ms <= 0L -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f)

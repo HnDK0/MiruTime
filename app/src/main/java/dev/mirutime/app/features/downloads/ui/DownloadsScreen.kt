@@ -283,7 +283,7 @@ fun DownloadsScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(14.dp)
-                                .clip(RoundedCornerShape(7.dp))
+                                .clip(RoundedCornerShape(MiruRadius.Chip))
                                 .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                         ) {
                             slices.filter { it.bytes > 0L }.forEach { slice ->

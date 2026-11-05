@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
 import dev.mirutime.app.design.components.PluginAvatar
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.app.features.finder.domain.CatalogSource
 import dev.mirutime.app.features.finder.domain.LocalSources
@@ -59,7 +60,7 @@ internal fun SourceIconTile(source: CatalogSource) {
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .size(MiruSize.Control)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(MiruRadius.Control))
             .background(extra.accent.copy(alpha = 0.14f)),
     ) {
         Icon(
