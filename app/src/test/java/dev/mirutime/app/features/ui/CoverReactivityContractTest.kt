@@ -29,17 +29,30 @@ class CoverReactivityContractTest {
     }
 
     @Test
+    fun `cover retries the url before asking the source to re-resolve it`() {
+        val cover = source("src/main/java/dev/mirutime/app/design/components/BookCover.kt")
+        assertTrue(cover.contains("AUTO_RETRY_ATTEMPTS = 2"))
+        assertTrue(cover.contains("remote && autoRetries < AUTO_RETRY_ATTEMPTS"))
+        assertTrue(cover.contains("onSuccess = { failed = false }"))
+    }
+
+    @Test
     fun `catalogue cards pass a retry that persists the repaired url`() {
         val catalog = source("src/main/java/dev/mirutime/app/features/finder/ui/SourceCatalogScreen.kt")
-        assertTrue(catalog.contains("coverFixes = coverFixes + (book.bookUrl to fresh)"))
+        assertTrue(catalog.contains("mutableStateMapOf<String, String>()"))
+        assertTrue(catalog.contains("coverFixes[book.bookUrl] = fresh"))
         assertTrue(catalog.contains("provider.refreshCatalogCover(sourceId, book.bookUrl)"))
         assertTrue(catalog.contains("reloadKey = reloadTick"))
+        assertTrue(catalog.contains("val coverDone = remember(sourceId, filters, reloadTick)"))
+        assertTrue(catalog.contains("snapshotFlow { books }"))
+        assertTrue(catalog.contains("coverDone.add(url)"))
     }
 
     @Test
     fun `library cards persist a repaired cover across disposal`() {
         val library = source("src/main/java/dev/mirutime/app/features/library/ui/LibraryScreen.kt")
-        assertTrue(library.contains("coverFixes = coverFixes + (book.bookUrl to fresh)"))
+        assertTrue(library.contains("mutableStateMapOf<String, String>()"))
+        assertTrue(library.contains("coverFixes[book.bookUrl] = fresh"))
         assertTrue(library.contains("val fixCover: (LibraryBook) -> LibraryBook"))
         assertTrue(library.contains("book = fixCover(book)"))
     }

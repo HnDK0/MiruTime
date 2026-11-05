@@ -44,6 +44,8 @@ import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruRoundIconButton
 import dev.mirutime.uikit.CardProgressBar
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // Builds a cover ImageRequest. Auth and per-host headers no longer live here:
@@ -52,6 +54,11 @@ import kotlinx.coroutines.launch
 // INEXACT lets a cached bitmap larger than the slot satisfy the request
 // (covers are always cropped by AsyncImage), which raises the memory-cache
 // hit rate on a scrolling grid.
+// Mirrors NoveLA's ImageView: transient failures retry the same URL a couple
+// of times before the caller is asked to re-resolve it.
+private const val AUTO_RETRY_ATTEMPTS = 2
+private const val AUTO_RETRY_DELAY_MS = 1_000L
+
 internal fun coverImageRequest(context: Context, url: String): ImageRequest =
     ImageRequest.Builder(context)
         .data(url)
@@ -93,6 +100,8 @@ fun BookCover(
     var attempt by remember(coverUrl, reloadKey) { mutableIntStateOf(0) }
     var failed by remember(coverUrl, reloadKey) { mutableStateOf(false) }
     var repaired by remember(coverUrl, reloadKey) { mutableStateOf(false) }
+    var autoRetries by remember(coverUrl, reloadKey) { mutableIntStateOf(0) }
+    var retryJob by remember(coverUrl, reloadKey) { mutableStateOf<Job?>(null) }
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(corner),
@@ -131,6 +140,8 @@ fun BookCover(
                             if (!fresh.isNullOrBlank()) {
                                 displayedUrl = fresh
                                 failed = false
+                                // A repaired URL gets its own retry budget.
+                                autoRetries = 0
                             } else {
                                 failed = true
                             }
@@ -150,15 +161,30 @@ fun BookCover(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                         onError = {
-                            failed = true
-                            // A dead remote URL is worth one source re-resolve
-                            // per composition; the provider cooldown keeps a
-                            // scrolling grid from turning it into a storm.
-                            if (!repaired && onRetry != null && displayedUrl?.startsWith("http") == true) {
-                                repaired = true
-                                retry()
+                            val remote = displayedUrl?.startsWith("http") == true
+                            if (remote && autoRetries < AUTO_RETRY_ATTEMPTS) {
+                                // Transient failures (timeout, CDN hiccup) are
+                                // cheaper to retry than to re-resolve: hide the
+                                // button and restart after a short pause.
+                                failed = false
+                                retryJob?.cancel()
+                                retryJob = scope.launch {
+                                    delay(AUTO_RETRY_DELAY_MS)
+                                    autoRetries++
+                                    attempt++
+                                }
+                            } else {
+                                failed = true
+                                // Only after the retry budget is spent does a
+                                // dead URL justify one source re-resolve; the
+                                // provider cooldown keeps a grid from storming.
+                                if (!repaired && onRetry != null && displayedUrl?.startsWith("http") == true) {
+                                    repaired = true
+                                    retry()
+                                }
                             }
                         },
+                        onSuccess = { failed = false },
                     )
                 }
                 if (failed && onRetry != null) {

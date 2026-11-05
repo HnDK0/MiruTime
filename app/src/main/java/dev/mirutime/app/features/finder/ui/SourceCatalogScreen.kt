@@ -43,9 +43,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -106,7 +108,11 @@ import dev.mirutime.core.api.MiruError
 import dev.mirutime.core.api.Outcome
 import dev.mirutime.core.api.PluginError
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlin.random.Random
 
 // Catalogue of ONE source: a 2-column grid with
 // auto-pagination, a search bar on top that opens the single search+filters
@@ -207,7 +213,7 @@ fun SourceCatalogScreen(
     var membershipPending by remember(sourceId) { mutableStateOf<Set<String>>(emptySet()) }
     // Catalogue rows are not persisted: a repaired cover URL lives here so a
     // disposed tile reopens with the fixed art instead of the failed one.
-    var coverFixes by remember(sourceId) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    val coverFixes = remember(sourceId) { mutableStateMapOf<String, String>() }
     // Persist the snapshot (incl. scroll) when the screen leaves composition.
     DisposableEffect(cacheKey) {
         onDispose {
@@ -297,6 +303,49 @@ fun SourceCatalogScreen(
             error = e.message ?: e.toString()
         }
         loading = false
+    }
+
+    // Lazy backfill for entries the listing returned without any cover, the
+    // NoveLA pattern: one source call per item, two at a time and staggered,
+    // with the result landing in the reactive map read inside the tile. The
+    // workers belong to the query generation, not to the list object: paging
+    // and membership flips must not cancel them.
+    val coverDone = remember(sourceId, filters, reloadTick) { mutableSetOf<String>() }
+    val coverInflight = remember(sourceId, filters, reloadTick) { mutableSetOf<String>() }
+    LaunchedEffect(sourceId, filters, reloadTick) {
+        if (isLocal) return@LaunchedEffect
+        val gate = Semaphore(2)
+        snapshotFlow { books }.collect { list ->
+            val urls = list.mapTo(HashSet()) { it.bookUrl }
+            // A query change must forget both the repairs and the "already
+            // asked" marks of URLs that left the result set.
+            coverDone.retainAll(urls)
+            coverFixes.keys.retainAll(urls)
+            list.forEach { book ->
+                val url = book.bookUrl
+                if (!book.coverUrl.isNullOrBlank()) return@forEach
+                if (url in coverDone || !coverInflight.add(url)) return@forEach
+                launch {
+                    try {
+                        gate.withPermit {
+                            delay(Random.nextLong(300L, 501L))
+                            provider.refreshCatalogCover(sourceId, url)?.let { fresh ->
+                                coverFixes[url] = fresh
+                            }
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // A source hiccup is not a reason to kill the batch.
+                    } finally {
+                        coverInflight.remove(url)
+                        // Success and failure both count as done: a URL that
+                        // yields no cover must not be re-fetched on every page.
+                        coverDone.add(url)
+                    }
+                }
+            }
+        }
     }
 
     // Explicit target, optimistic flag, no page reload: the card flips now and
@@ -539,7 +588,7 @@ fun SourceCatalogScreen(
                     membership = book.badge?.toMiruBadge(),
                     onRetry = {
                         provider.refreshCatalogCover(sourceId, book.bookUrl)?.also { fresh ->
-                            coverFixes = coverFixes + (book.bookUrl to fresh)
+                            coverFixes[book.bookUrl] = fresh
                         }
                     },
                     reloadKey = reloadTick,

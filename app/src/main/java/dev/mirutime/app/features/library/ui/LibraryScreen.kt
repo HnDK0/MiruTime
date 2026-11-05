@@ -47,6 +47,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -148,7 +149,7 @@ fun LibraryScreen(
     var lastRead by remember { mutableStateOf<LibraryBook?>(null) }
     // A repaired cover URL outlives a disposed card; keep it keyed by book so
     // scrolling away never brings the broken art back.
-    var coverFixes by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    val coverFixes = remember { mutableStateMapOf<String, String>() }
     // Facets and shelf counters come from SQL, not from every loaded page.
     var facets by remember { mutableStateOf(LibraryFacets(emptyList(), emptyList())) }
     var shelfSummaries by remember { mutableStateOf<List<LibraryShelfSummary>>(emptyList()) }
@@ -876,7 +877,7 @@ fun LibraryScreen(
                                         onLongPress = { longPressSelection(book.bookUrl) },
                                         onRetry = {
                                             provider.refreshCover(book.bookUrl).getOrNull()?.also { fresh ->
-                                                coverFixes = coverFixes + (book.bookUrl to fresh)
+                                                coverFixes[book.bookUrl] = fresh
                                             }
                                         },
                                         modifier = Modifier.weight(1f),
@@ -901,7 +902,7 @@ fun LibraryScreen(
                             onLongPress = { longPressSelection(book.bookUrl) },
                             onRetry = {
                                 provider.refreshCover(book.bookUrl).getOrNull()?.also { fresh ->
-                                    coverFixes = coverFixes + (book.bookUrl to fresh)
+                                    coverFixes[book.bookUrl] = fresh
                                 }
                             },
                             modifier = Modifier
