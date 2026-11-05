@@ -69,6 +69,10 @@ import kotlinx.coroutines.withContext
 
 private const val TAG = "MiruTime.Finder"
 
+// A broken catalogue cover can fail on every visible tile at once. Keep the
+// automatic repair to one source round-trip per URL per window.
+private const val CATALOG_COVER_REPAIR_COOLDOWN_MS = 30_000L
+
 // Optimistic pin write: AppSettings flips first so the screen updates
 // immediately; the store write is awaited only to detect a failed commit and
 // put the previous set back before the screen reports it.
@@ -116,6 +120,7 @@ class PluginFinderDataProvider(
     // One filters() call per source per app session: Lua evaluators are
     // expensive, and the schema cannot change until the plugin is reloaded.
     private val filterSchemas = PluginFilterSchemaCache()
+    private val catalogCoverRefreshAt = ConcurrentHashMap<String, Long>()
 
     override suspend fun sources(): List<CatalogSource> {
         // Local built-ins keep working (Finder routes source.local to the local
@@ -499,6 +504,28 @@ class PluginFinderDataProvider(
     // Resolve a pasted address against installed plugins by their real base
     // host, then load the book metadata through that plugin. Unknown hosts stay
     // typed as UnknownHost; a failed parse is Invalid — no synthesized book.
+    override suspend fun refreshCatalogCover(sourceId: String, bookUrl: String): String? {
+        val at = System.currentTimeMillis()
+        val last = catalogCoverRefreshAt[bookUrl]
+        if (last != null && at - last < CATALOG_COVER_REPAIR_COOLDOWN_MS) return null
+        catalogCoverRefreshAt[bookUrl] = at
+        val source = graph.source(sourceId) ?: return null
+        val meta = try {
+            when (val result = source.book(bookUrl)) {
+                is Outcome.Err -> return null
+                is Outcome.Ok -> result.value
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            return null
+        }
+        val baseUrl = source.metadata.baseUrl
+        val cover = resolveCoverUrl(meta.coverUrl, baseUrl) ?: return null
+        graph.registerCoverReferers(sourceId, listOf(cover), baseUrl)
+        return cover
+    }
+
     override suspend fun resolveLink(url: String): LinkResolution {
         val clean = url.trim()
         val uri = runCatching { Uri.parse(clean) }.getOrNull()

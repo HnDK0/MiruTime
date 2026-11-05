@@ -82,13 +82,17 @@ fun BookCover(
     // typed error). A failed remote load repairs automatically once; the tile
     // stays for an explicit retry.
     onRetry: (suspend () -> String?)? = null,
+    // Any change restarts the load even when the URL string is identical: a
+    // list reload must retry a cover that failed before, not keep the failed
+    // painter cached under the same model.
+    reloadKey: Any? = null,
 ) {
     // The displayed URI can outlive `coverUrl`: a repair returns a new local
     // file with a new version fragment without the caller refetching the page.
-    var displayedUrl by remember(coverUrl) { mutableStateOf(coverUrl) }
-    var attempt by remember(coverUrl) { mutableIntStateOf(0) }
-    var failed by remember(coverUrl) { mutableStateOf(false) }
-    var repaired by remember(coverUrl) { mutableStateOf(false) }
+    var displayedUrl by remember(coverUrl, reloadKey) { mutableStateOf(coverUrl) }
+    var attempt by remember(coverUrl, reloadKey) { mutableIntStateOf(0) }
+    var failed by remember(coverUrl, reloadKey) { mutableStateOf(false) }
+    var repaired by remember(coverUrl, reloadKey) { mutableStateOf(false) }
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(corner),

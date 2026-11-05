@@ -30,6 +30,7 @@ fun LibraryCard(
     selected: Boolean = false,
     selectionMode: Boolean = false,
     onRetry: (suspend () -> String?)? = null,
+    reloadKey: Any? = null,
     onLongPress: () -> Unit = {},
     badge: String? = null,
     showTypeChip: Boolean = true,
@@ -91,6 +92,7 @@ fun LibraryCard(
                 // only for a genuinely empty cover, never over loaded art.
                 showInitial = book.coverUrl.isNullOrBlank(),
                 onRetry = onRetry,
+                reloadKey = reloadKey,
             )
         },
     )

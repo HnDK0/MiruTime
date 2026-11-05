@@ -64,6 +64,13 @@ interface FinderDataProvider {
     // Global search: one source's answer (first matches), may throw.
     suspend fun searchSource(sourceId: String, query: String): List<CatalogBook>
 
+    /**
+     * Re-resolves one catalogue item's cover from its source. Catalogue rows
+     * are not persisted, so this returns a fresh URL for the screen to keep;
+     * null means the source could not produce one.
+     */
+    suspend fun refreshCatalogCover(sourceId: String, bookUrl: String): String? = null
+
     /** Batch membership lookup for catalogue cards; empty set = none. */
     suspend fun libraryUrls(urls: Collection<String>): Set<String>
 

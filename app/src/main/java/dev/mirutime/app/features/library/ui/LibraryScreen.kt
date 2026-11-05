@@ -146,6 +146,9 @@ fun LibraryScreen(
     // safe: its books are reparented to Reading, never dropped.
     var shelves by remember { mutableStateOf<List<Shelf>>(emptyList()) }
     var lastRead by remember { mutableStateOf<LibraryBook?>(null) }
+    // A repaired cover URL outlives a disposed card; keep it keyed by book so
+    // scrolling away never brings the broken art back.
+    var coverFixes by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     // Facets and shelf counters come from SQL, not from every loaded page.
     var facets by remember { mutableStateOf(LibraryFacets(emptyList(), emptyList())) }
     var shelfSummaries by remember { mutableStateOf<List<LibraryShelfSummary>>(emptyList()) }
@@ -445,6 +448,9 @@ fun LibraryScreen(
     }
     val configs = remember(metadataJobs) { metadataJobs.associate { it.bookUrl to it.config } }
     // Pages are already deduped by the pager; the overlay is page-local.
+    val fixCover: (LibraryBook) -> LibraryBook = { book ->
+        coverFixes[book.bookUrl]?.let { book.copy(coverUrl = it) } ?: book
+    }
     val shown = remember(pager.books, metadata, configs) {
         pager.books.map { book ->
             val translated = metadata[book.bookUrl]
@@ -710,7 +716,7 @@ fun LibraryScreen(
                 if (lastRead != null && shelfId == "reading") {
                     item {
                         ResumeCard(
-                            book = lastRead!!,
+                            book = fixCover(lastRead!!),
                             onOpen = { onBookOpen(lastRead!!.bookUrl) },
                         )
                     }
@@ -861,14 +867,18 @@ fun LibraryScreen(
                             ) {
                                 row.forEach { book ->
                                     LibraryCard(
-                                        book = book,
+                                        book = fixCover(book),
                                         style = cardStyle,
                                         selected = selection.isSelected(book.bookUrl),
                                         selectionMode = selection.active,
                                         // Tap opens normally; in selection mode it toggles.
                                         onOpen = { openOrToggle(book.bookUrl) },
                                         onLongPress = { longPressSelection(book.bookUrl) },
-                                        onRetry = { provider.refreshCover(book.bookUrl).getOrNull() },
+                                        onRetry = {
+                                            provider.refreshCover(book.bookUrl).getOrNull()?.also { fresh ->
+                                                coverFixes = coverFixes + (book.bookUrl to fresh)
+                                            }
+                                        },
                                         modifier = Modifier.weight(1f),
                                     )
                                 }
@@ -883,13 +893,17 @@ fun LibraryScreen(
                     // layout always (C is the file's horizontal variant).
                     items(shown, key = { libraryListKey(it.bookUrl) }) { book ->
                         LibraryCard(
-                            book = book,
+                            book = fixCover(book),
                             style = CardStyle.Horizontal,
                             selected = selection.isSelected(book.bookUrl),
                             selectionMode = selection.active,
                             onOpen = { openOrToggle(book.bookUrl) },
                             onLongPress = { longPressSelection(book.bookUrl) },
-                            onRetry = { provider.refreshCover(book.bookUrl).getOrNull() },
+                            onRetry = {
+                                provider.refreshCover(book.bookUrl).getOrNull()?.also { fresh ->
+                                    coverFixes = coverFixes + (book.bookUrl to fresh)
+                                }
+                            },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = MiruSpace.CardGap),

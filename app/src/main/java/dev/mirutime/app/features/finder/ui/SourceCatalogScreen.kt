@@ -205,6 +205,9 @@ fun SourceCatalogScreen(
     // Per-URL in-flight guard: a second long-press while the write runs would
     // race the same row, so it is ignored until the first one settles.
     var membershipPending by remember(sourceId) { mutableStateOf<Set<String>>(emptySet()) }
+    // Catalogue rows are not persisted: a repaired cover URL lives here so a
+    // disposed tile reopens with the fixed art instead of the failed one.
+    var coverFixes by remember(sourceId) { mutableStateOf<Map<String, String>>(emptyMap()) }
     // Persist the snapshot (incl. scroll) when the screen leaves composition.
     DisposableEffect(cacheKey) {
         onDispose {
@@ -507,9 +510,10 @@ fun SourceCatalogScreen(
             }
         }
         items(books, key = { catalogBookKey(it.bookUrl) }) { book ->
+            val shown = coverFixes[book.bookUrl]?.let { book.copy(coverUrl = it) } ?: book
             if (isLocal) {
                 LocalCatalogCard(
-                    book = book,
+                    book = shown,
                     importing = false,
                     error = null,
                     onClick = { onBookOpen(book.bookUrl) },
@@ -523,7 +527,7 @@ fun SourceCatalogScreen(
                 )
             } else {
                 LibraryCard(
-                    book = book.toLibraryBook(
+                    book = shown.toLibraryBook(
                         source = sourceId,
                         translatedTitle = translatedTitles[book.bookUrl],
                     ),
@@ -533,6 +537,12 @@ fun SourceCatalogScreen(
                     onOpen = { onBookOpen(book.bookUrl) },
                     onLongPress = { toggleMembership(book) },
                     membership = book.badge?.toMiruBadge(),
+                    onRetry = {
+                        provider.refreshCatalogCover(sourceId, book.bookUrl)?.also { fresh ->
+                            coverFixes = coverFixes + (book.bookUrl to fresh)
+                        }
+                    },
+                    reloadKey = reloadTick,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
