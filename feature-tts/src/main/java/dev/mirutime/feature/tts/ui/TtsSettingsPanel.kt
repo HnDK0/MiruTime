@@ -94,6 +94,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.feature.tts.R
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.MiruPickerHeader
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.uikit.ChipRail
@@ -1096,7 +1097,10 @@ private fun TtsVoicePickerSheet(
                 .fillMaxWidth(),
         ) {
             item(key = "current-header") {
-                TtsPickerHeader(stringResource(R.string.rd_tts_voice_current))
+                MiruPickerHeader(
+                    stringResource(R.string.rd_tts_voice_current),
+                    modifier = Modifier.padding(top = MiruSpace.M, bottom = MiruSpace.Xxs),
+                )
             }
             item(key = "system-default") {
                 TtsVoiceRow(
@@ -1136,7 +1140,10 @@ private fun TtsVoicePickerSheet(
             if (savedGroups.isNotEmpty()) {
                 item(key = "saved-divider") { TtsPickerDivider() }
                 item(key = "saved-header") {
-                    TtsPickerHeader(stringResource(R.string.rd_tts_saved_voices))
+                    MiruPickerHeader(
+                        stringResource(R.string.rd_tts_saved_voices),
+                        modifier = Modifier.padding(top = MiruSpace.M, bottom = MiruSpace.Xxs),
+                    )
                 }
                 savedGroups.forEach { group ->
                     item(key = "saved-engine-${group.engineId ?: "unknown"}") {
@@ -1180,7 +1187,10 @@ private fun TtsVoicePickerSheet(
             if (voiceGroups.isNotEmpty()) {
                 item(key = "all-divider") { TtsPickerDivider() }
                 item(key = "all-header") {
-                    TtsPickerHeader(stringResource(R.string.rd_tts_voice_all))
+                    MiruPickerHeader(
+                        stringResource(R.string.rd_tts_voice_all),
+                        modifier = Modifier.padding(top = MiruSpace.M, bottom = MiruSpace.Xxs),
+                    )
                 }
                 voiceGroups.forEach { group ->
                     item(key = "all-engine-${group.engineId ?: "unknown"}") {
@@ -1247,16 +1257,6 @@ private fun TtsVoicePickerSheet(
             }
         }
     }
-}
-
-@Composable
-private fun TtsPickerHeader(text: String) {
-    Text(
-        text = text.uppercase(),
-        style = MaterialTheme.typography.labelSmall,
-        color = LocalMiruExtraColors.current.muted,
-        modifier = Modifier.padding(top = MiruSpace.M, bottom = MiruSpace.Xxs),
-    )
 }
 
 @Composable

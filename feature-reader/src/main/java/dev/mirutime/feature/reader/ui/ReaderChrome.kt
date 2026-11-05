@@ -50,6 +50,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import dev.mirutime.uikit.MiruIconButton
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSlider
@@ -376,20 +377,13 @@ internal fun ReaderIconButton(
     onClick: () -> Unit,
     enabled: Boolean = true,
 ) {
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(48.dp)
-            .clip(RoundedCornerShape(MiruRadius.Inner))
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = if (enabled) tint else tint.copy(alpha = 0.35f),
-            modifier = Modifier.size(22.dp),
-        )
-    }
+    MiruIconButton(
+        icon = icon,
+        contentDescription = contentDescription,
+        onClick = onClick,
+        enabled = enabled,
+        tint = tint,
+    )
 }
 
 /**
