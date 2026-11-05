@@ -25,7 +25,10 @@ import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,12 +40,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -65,7 +70,6 @@ import dev.mirutime.app.features.reader.document.SentenceSplitter
 import dev.mirutime.feature.reader.ReaderStyle
 import dev.mirutime.feature.reader.paged.parallelPairs
 import dev.mirutime.feature.tts.api.TtsHighlight
-import dev.mirutime.feature.tts.ui.highlightedRange
 import coil3.compose.AsyncImage
 import java.io.File
 import kotlin.math.min
@@ -167,9 +171,13 @@ private fun OriginalText(
     bleed: Dp,
 ) {
     when (block.kind) {
-        BlockKind.Heading -> Text(
-            text = highlightedText(block.original, block, style, highlight, applyFirstLetterBold = false),
-            style = style.headingTextStyle(),
+        BlockKind.Heading -> TtsHighlightedText(
+            raw = block.original,
+            block = block,
+            style = style,
+            highlight = highlight,
+            applyFirstLetterBold = false,
+            textStyle = style.headingTextStyle(),
         )
         BlockKind.Divider -> Text("· · ·", style = style.toTextStyle())
         BlockKind.Image -> {
@@ -213,22 +221,25 @@ private fun OriginalText(
                                     ),
                                 ),
                         ) {
-                            Text(
-                                text = highlightedSentence(
-                                    sentence = sentence,
-                                    sentenceStart = rawStart,
-                                    block = block,
-                                    highlight = highlight,
-                                ),
-                                style = style.toTextStyle(),
+                            TtsHighlightedText(
+                                raw = sentence,
+                                block = block,
+                                style = style,
+                                highlight = highlight,
+                                applyFirstLetterBold = false,
+                                baseOffset = rawStart,
+                                textStyle = style.toTextStyle(),
                             )
                         }
                     }
                 }
             } else if (highlight != null) {
-                Text(
-                    text = highlightedText(block.original, block, style, highlight),
-                    style = style.toTextStyle(),
+                TtsHighlightedText(
+                    raw = block.original,
+                    block = block,
+                    style = style,
+                    highlight = highlight,
+                    textStyle = style.toTextStyle(),
                 )
             } else {
                 Text(
@@ -271,35 +282,32 @@ private fun TranslatedText(
                             ),
                         ),
                 ) {
-                    Text(
-                        text = highlightedText(
-                            raw = sentence,
-                            block = block,
-                            style = style,
-                            highlight = highlight,
-                            applyFirstLetterBold = false,
-                            isTranslated = true,
-                            baseOffset = span.start,
-                        ),
-                        style = textStyle,
+                    TtsHighlightedText(
+                        raw = sentence,
+                        block = block,
+                        style = style,
+                        highlight = highlight,
+                        applyFirstLetterBold = false,
+                        isTranslated = true,
+                        baseOffset = span.start,
+                        textStyle = textStyle,
                     )
                 }
             }
         }
+    } else if (block != null) {
+        TtsHighlightedText(
+            raw = text,
+            block = block,
+            style = style,
+            highlight = highlight,
+            applyFirstLetterBold = false,
+            isTranslated = true,
+            textStyle = textStyle,
+        )
     } else {
         Text(
-            text = if (block != null) {
-                highlightedText(
-                    text,
-                    block,
-                    style,
-                    highlight,
-                    applyFirstLetterBold = false,
-                    isTranslated = true,
-                )
-            } else {
-                style.paragraphText(text, applyFirstLetterBold = false)
-            },
+            text = style.paragraphText(text, applyFirstLetterBold = false),
             style = textStyle,
         )
     }
@@ -437,33 +445,29 @@ private fun ParallelPairCopy(
 ) {
     val translatedCopy: @Composable () -> Unit = {
         if (copy.translated.isNotBlank()) {
-            Text(
-                text = highlightedText(
-                    raw = copy.translated,
-                    block = block,
-                    style = style,
-                    highlight = highlight,
-                    applyFirstLetterBold = false,
-                    isTranslated = true,
-                    baseOffset = copy.translatedStart,
-                ),
-                style = translatedStyle,
+            TtsHighlightedText(
+                raw = copy.translated,
+                block = block,
+                style = style,
+                highlight = highlight,
+                applyFirstLetterBold = false,
+                isTranslated = true,
+                baseOffset = copy.translatedStart,
+                textStyle = translatedStyle,
             )
         }
     }
     val originalCopy: @Composable () -> Unit = {
         if (copy.original.isNotBlank()) {
-            Text(
-                text = highlightedText(
-                    raw = copy.original,
-                    block = block,
-                    style = style,
-                    highlight = highlight,
-                    applyFirstLetterBold = false,
-                    isTranslated = false,
-                    baseOffset = copy.originalStart,
-                ),
-                style = originalStyle,
+            TtsHighlightedText(
+                raw = copy.original,
+                block = block,
+                style = style,
+                highlight = highlight,
+                applyFirstLetterBold = false,
+                isTranslated = false,
+                baseOffset = copy.originalStart,
+                textStyle = originalStyle,
             )
         }
     }
@@ -664,16 +668,14 @@ private fun SplitTtsText(
     isTranslated: Boolean,
 ) {
     if (!ReaderSplit.shouldSplit(block, style.splitSentences)) {
-        Text(
-            text = highlightedText(
-                raw = text,
-                block = block,
-                style = style,
-                highlight = highlight,
-                applyFirstLetterBold = false,
-                isTranslated = isTranslated,
-            ),
-            style = textStyle,
+        TtsHighlightedText(
+            raw = text,
+            block = block,
+            style = style,
+            highlight = highlight,
+            applyFirstLetterBold = false,
+            isTranslated = isTranslated,
+            textStyle = textStyle,
         )
         return
     }
@@ -685,71 +687,123 @@ private fun SplitTtsText(
             val start = span.start.coerceIn(0, text.length)
             val end = span.end.coerceIn(start, text.length)
             if (end <= start) return@forEach
-            Text(
-                text = highlightedText(
-                    raw = text.substring(start, end),
-                    block = block,
-                    style = style,
-                    highlight = highlight,
-                    applyFirstLetterBold = false,
-                    isTranslated = isTranslated,
-                    baseOffset = start,
-                ),
-                style = textStyle,
+            TtsHighlightedText(
+                raw = text.substring(start, end),
+                block = block,
+                style = style,
+                highlight = highlight,
+                applyFirstLetterBold = false,
+                isTranslated = isTranslated,
+                baseOffset = start,
+                textStyle = textStyle,
             )
         }
     }
 }
 
-private fun highlightedText(
+/**
+ * Range of the spoken words inside one raw text slice, or null when the
+ * highlight does not belong to this copy/sentence.
+ */
+internal fun ttsHighlightRange(
+    textLength: Int,
+    blockId: BlockId,
+    highlight: TtsHighlight?,
+    isTranslated: Boolean,
+    baseOffset: Int = 0,
+): IntRange? {
+    if (highlight == null ||
+        highlight.blockId != blockId ||
+        !highlight.rangeEnabled ||
+        highlight.translated != isTranslated ||
+        highlight.start >= highlight.end
+    ) return null
+    val start = (highlight.start - baseOffset).coerceIn(0, textLength)
+    val end = (highlight.end - baseOffset).coerceIn(start, textLength)
+    return if (start < end) start until end else null
+}
+
+/**
+ * Renders one text slice and draws the spoken range as rounded per-line pills.
+ * A wrapped sentence gets one pill per visual line instead of one hard
+ * rectangle around the whole block.
+ */
+@Composable
+private fun TtsHighlightedText(
     raw: String,
     block: ReaderBlock,
     style: ReaderStyle,
     highlight: TtsHighlight?,
+    textStyle: TextStyle,
     applyFirstLetterBold: Boolean = style.firstLetterBold,
     isTranslated: Boolean = false,
     baseOffset: Int = 0,
-): AnnotatedString {
-    val base = style.paragraphText(raw, applyFirstLetterBold)
-    if (
-        highlight == null ||
-        highlight.blockId != block.id ||
-        !highlight.rangeEnabled ||
-        highlight.translated != isTranslated ||
-        highlight.start >= highlight.end ||
-        highlight.end <= baseOffset
-    ) return base
-    val start = (highlight.start - baseOffset).coerceIn(0, raw.length)
-    val end = (highlight.end - baseOffset).coerceIn(start, raw.length)
-    if (start == end) return base
-    return buildAnnotatedString {
-        append(base)
-        addStyle(SpanStyle(background = Color(highlight.colorArgb).copy(alpha = 0.35f)), start, end)
+    modifier: Modifier = Modifier,
+) {
+    val text = style.paragraphText(raw, applyFirstLetterBold)
+    val range = ttsHighlightRange(raw.length, block.id, highlight, isTranslated, baseOffset)
+    val color = highlight?.let { Color(it.colorArgb).copy(alpha = 0.30f) }
+    var layout by remember(text, range) { mutableStateOf<TextLayoutResult?>(null) }
+    val highlightModifier = if (range != null && color != null) {
+        Modifier.drawBehind {
+            val result = layout ?: return@drawBehind
+            drawRoundedRangeHighlight(result, range, color)
+        }
+    } else {
+        Modifier
     }
+    Text(
+        text = text,
+        style = textStyle,
+        modifier = modifier.then(highlightModifier),
+        onTextLayout = { result -> if (layout != result) layout = result },
+    )
 }
 
-/**
- * Maps the spoken range, which is relative to the whole block, onto one
- * sentence Text. Offsets that fall outside the sentence are dropped, so only
- * the sentence being spoken gets the range background.
- */
-internal fun highlightedSentence(
-    sentence: String,
-    sentenceStart: Int,
-    block: ReaderBlock,
-    highlight: TtsHighlight?,
-): AnnotatedString {
-    if (
-        highlight == null ||
-        highlight.blockId != block.id ||
-        !highlight.rangeEnabled ||
-        highlight.translated ||
-        highlight.start >= highlight.end
-    ) return AnnotatedString(sentence)
-    val start = (highlight.start - sentenceStart).coerceIn(0, sentence.length)
-    val end = (highlight.end - sentenceStart).coerceIn(0, sentence.length)
-    if (start >= end) return AnnotatedString(sentence)
-    return highlightedRange(sentence, start, end, highlight.colorArgb)
+private fun DrawScope.drawRoundedRangeHighlight(
+    layout: TextLayoutResult,
+    range: IntRange,
+    color: Color,
+) {
+    val length = layout.layoutInput.text.length
+    val start = range.first.coerceIn(0, length)
+    // `ttsHighlightRange` is a half-open range: include the last character.
+    val endExclusive = (range.last + 1).coerceIn(start, length)
+    if (start >= endExclusive) return
+    val firstLine = layout.getLineForOffset(start)
+    val lastLine = layout.getLineForOffset(endExclusive - 1)
+    val padH = 1.dp.toPx()
+    val corner = 4.dp.toPx()
+    for (line in firstLine..lastLine) {
+        val lineStart = layout.getLineStart(line)
+        val lineEnd = layout.getLineEnd(line, visibleEnd = true)
+        val from = maxOf(start, lineStart)
+        val to = minOf(endExclusive, lineEnd)
+        if (to <= from) continue
+        // Union the glyph boxes of every character on this line. Line boxes
+        // include leading and would paint the gaps between lines.
+        var left = Float.POSITIVE_INFINITY
+        var right = Float.NEGATIVE_INFINITY
+        var top = Float.POSITIVE_INFINITY
+        var bottom = Float.NEGATIVE_INFINITY
+        for (offset in from until to) {
+            val box = layout.getBoundingBox(offset)
+            left = minOf(left, box.left)
+            right = maxOf(right, box.right)
+            top = minOf(top, box.top)
+            bottom = maxOf(bottom, box.bottom)
+        }
+        if (!left.isFinite() || !top.isFinite()) continue
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(left - padH, top),
+            size = Size(
+                (right - left + padH * 2f).coerceAtLeast(1f),
+                (bottom - top).coerceAtLeast(1f),
+            ),
+            cornerRadius = CornerRadius(corner),
+        )
+    }
 }
 
 /**

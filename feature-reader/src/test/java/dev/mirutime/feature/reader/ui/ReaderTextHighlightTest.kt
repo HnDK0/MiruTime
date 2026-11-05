@@ -6,6 +6,7 @@ import dev.mirutime.app.features.reader.document.ReaderBlock
 import dev.mirutime.feature.tts.api.TtsHighlight
 import dev.mirutime.feature.tts.ui.highlightedRange
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -34,49 +35,42 @@ class ReaderTextHighlightTest {
 
     @Test
     fun mapsBlockRangeOntoOneSentence() {
-        val text = highlightedSentence("fghij", sentenceStart = 5, block, highlight(6, 9))
+        val range = ttsHighlightRange("fghij".length, block.id, highlight(6, 9), isTranslated = false, baseOffset = 5)
 
-        val style = text.spanStyles.single()
-        assertEquals(1, style.start)
-        assertEquals(4, style.end)
+        assertEquals(1 until 4, range)
     }
 
     @Test
     fun clipsRangeAtSentenceEdges() {
-        val text = highlightedSentence("fghij", sentenceStart = 5, block, highlight(3, 20))
+        val range = ttsHighlightRange("fghij".length, block.id, highlight(3, 20), isTranslated = false, baseOffset = 5)
 
-        val style = text.spanStyles.single()
-        assertEquals(0, style.start)
-        assertEquals(5, style.end)
+        assertEquals(0 until 5, range)
     }
 
     @Test
     fun ignoresRangeThatBelongsToAnotherSentence() {
-        val text = highlightedSentence("fghij", sentenceStart = 0, block, highlight(10, 15))
+        val range = ttsHighlightRange("fghij".length, block.id, highlight(10, 15), isTranslated = false, baseOffset = 0)
 
-        assertTrue(text.spanStyles.isEmpty())
+        assertNull(range)
     }
 
     @Test
     fun ignoresTranslatedOrDisabledRange() {
-        assertTrue(
-            highlightedSentence("fghij", 5, block, highlight(6, 9, translated = true)).spanStyles.isEmpty(),
-        )
-        assertTrue(
-            highlightedSentence("fghij", 5, block, highlight(6, 9, rangeEnabled = false)).spanStyles.isEmpty(),
-        )
+        assertNull(ttsHighlightRange("fghij".length, block.id, highlight(6, 9, translated = true), isTranslated = false, baseOffset = 5))
+        assertNull(ttsHighlightRange("fghij".length, block.id, highlight(6, 9, rangeEnabled = false), isTranslated = false, baseOffset = 5))
     }
 
     @Test
     fun ignoresRangeForAnotherBlock() {
-        val text = highlightedSentence(
-            "fghij",
-            5,
-            block,
+        val range = ttsHighlightRange(
+            "fghij".length,
+            block.id,
             highlight(6, 9, blockId = BlockId("another", 0)),
+            isTranslated = false,
+            baseOffset = 5,
         )
 
-        assertTrue(text.spanStyles.isEmpty())
+        assertNull(range)
     }
 
     @Test
