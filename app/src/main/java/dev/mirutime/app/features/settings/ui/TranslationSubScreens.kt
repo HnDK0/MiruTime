@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.MiruPickerHeader
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
@@ -629,7 +630,10 @@ private fun LanguagePickerSheet(
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(MiruSpace.S))
-        PickerHeader(stringResource(R.string.st_pt_recents))
+        MiruPickerHeader(
+            stringResource(R.string.st_pt_recents),
+            modifier = Modifier.padding(top = MiruSpace.S, bottom = MiruSpace.Xxs),
+        )
         if (recentPairs.isEmpty()) {
             Text(
                 text = stringResource(R.string.st_pt_recents_empty),
@@ -649,7 +653,10 @@ private fun LanguagePickerSheet(
         }
         HorizontalDivider(Modifier.padding(vertical = MiruSpace.S))
         if (favoriteLanguages.isNotEmpty()) {
-            PickerHeader(stringResource(R.string.st_pt_favorites))
+            MiruPickerHeader(
+                stringResource(R.string.st_pt_favorites),
+                modifier = Modifier.padding(top = MiruSpace.S, bottom = MiruSpace.Xxs),
+            )
             favoriteLanguages.forEach { code ->
                 LanguageRow(
                     code = code,
@@ -661,7 +668,10 @@ private fun LanguagePickerSheet(
             }
             HorizontalDivider(Modifier.padding(vertical = MiruSpace.S))
         }
-        PickerHeader(stringResource(R.string.st_pt_all_languages))
+        MiruPickerHeader(
+            stringResource(R.string.st_pt_all_languages),
+            modifier = Modifier.padding(top = MiruSpace.S, bottom = MiruSpace.Xxs),
+        )
         languages.filter { it !in favorites }.forEach { code ->
             LanguageRow(
                 code = code,
@@ -680,16 +690,6 @@ private fun LanguagePickerSheet(
             )
         }
     }
-}
-
-@Composable
-private fun PickerHeader(text: String) {
-    Text(
-        text = text.uppercase(),
-        style = MaterialTheme.typography.labelSmall,
-        color = LocalMiruExtraColors.current.muted,
-        modifier = Modifier.padding(top = MiruSpace.S, bottom = 2.dp),
-    )
 }
 
 // A recent pair is a tonal card with an explicit swap icon and "Apply" label:
