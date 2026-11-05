@@ -26,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.style.TextOverflow
 
 /** String convenience adapter; IME policy and all query state belong to its caller. */
 @Composable
@@ -63,7 +64,15 @@ fun MiruSearchField(
             MiruSearchDecoration(
                 innerTextField = innerTextField,
                 showPlaceholder = value.isEmpty(),
-                placeholder = { Text(placeholder, style = MaterialTheme.typography.bodyMedium, color = extra.muted) },
+                placeholder = {
+                    Text(
+                        placeholder,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = extra.muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 focused = focused,
                 enabled = enabled,
                 leadingIcon = leadingIcon,

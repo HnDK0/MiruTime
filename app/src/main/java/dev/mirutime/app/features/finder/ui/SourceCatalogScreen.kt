@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,25 +23,18 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -59,7 +51,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -79,7 +70,8 @@ import dev.mirutime.app.core.buildPluginErrorReport
 import dev.mirutime.app.core.PluginRequestException
 import dev.mirutime.uikit.CoverInset
 import dev.mirutime.uikit.LocalMiruExtraColors
-import dev.mirutime.uikit.MiruRadius
+import dev.mirutime.uikit.MiruIconButton
+import dev.mirutime.uikit.MiruSearchField
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.app.design.components.BookCover
@@ -88,8 +80,6 @@ import dev.mirutime.app.design.components.toMiruBadge
 import dev.mirutime.uikit.MiruCard
 import dev.mirutime.uikit.MiruContentKind
 import dev.mirutime.uikit.MiruRoundIconButton
-import dev.mirutime.uikit.miruCardElevation
-import dev.mirutime.uikit.miruCardSurface
 import dev.mirutime.app.features.book.data.MembershipResult
 import dev.mirutime.app.features.finder.data.CatalogCacheKey
 import dev.mirutime.app.features.finder.data.FinderDataProvider
@@ -722,80 +712,31 @@ internal fun CatalogSearchBar(
 ) {
     val extra = LocalMiruExtraColors.current
     val focus = LocalFocusManager.current
-    Surface(
-        shape = RoundedCornerShape(MiruRadius.Inner),
-        color = miruCardSurface(),
-        shadowElevation = miruCardElevation(),
-        modifier = modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = MiruSize.Touch),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = MiruSpace.L),
-            horizontalArrangement = Arrangement.spacedBy(MiruSpace.M),
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Search,
-                contentDescription = null,
-                tint = extra.muted,
-                modifier = Modifier.size(20.dp),
-            )
-            Box(
-                modifier = Modifier.weight(1f),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                if (query.isBlank()) {
-                    Text(
-                        text = hint,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = extra.muted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                BasicTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(
-                        color = MaterialTheme.colorScheme.onSurface,
-                    ),
-                    cursorBrush = SolidColor(extra.accent),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(
-                        onSearch = {
-                            onSearch()
-                            focus.clearFocus()
-                        },
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = MiruSpace.M),
-                )
-            }
-            if (query.isNotBlank()) {
-                IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(MiruSize.Touch)) {
-                    Icon(
-                        imageVector = Icons.Filled.Close,
-                        contentDescription = stringResource(R.string.finder_cd_clear_search),
-                        tint = extra.muted,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
+    MiruSearchField(
+        value = query,
+        onValueChange = onQueryChange,
+        placeholder = hint,
+        onClear = { onQueryChange("") },
+        clearContentDescription = stringResource(R.string.finder_cd_clear_search),
+        modifier = modifier,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(
+            onSearch = {
+                onSearch()
+                focus.clearFocus()
+            },
+        ),
+        trailing = {
             Box(
                 modifier = Modifier.size(MiruSize.Touch),
                 contentAlignment = Alignment.Center,
             ) {
-                IconButton(onClick = onFiltersClick, modifier = Modifier.size(MiruSize.Touch)) {
-                    Icon(
-                        imageVector = Icons.Filled.Tune,
-                        contentDescription = stringResource(R.string.finder_cd_filters),
-                        tint = if (activeFilters > 0) extra.accent else extra.muted,
-                        modifier = Modifier.size(22.dp),
-                    )
-                }
+                MiruIconButton(
+                    icon = Icons.Filled.Tune,
+                    contentDescription = stringResource(R.string.finder_cd_filters),
+                    onClick = onFiltersClick,
+                    tint = if (activeFilters > 0) extra.accent else extra.muted,
+                )
                 if (activeFilters > 0) {
                     Box(
                         contentAlignment = Alignment.Center,
@@ -813,8 +754,8 @@ internal fun CatalogSearchBar(
                     }
                 }
             }
-        }
-    }
+        },
+    )
 }
 
 // Catalogue tile: 2:3 cover with an "In library" badge, 2-line title, one
