@@ -25,6 +25,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.MiruPickerHeader
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.uikit.ChoiceOption
@@ -156,11 +157,6 @@ private fun PluginGroupHeader(text: String) {
             .padding(top = MiruSpace.L),
     ) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-        Text(
-            text = text.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = LocalMiruExtraColors.current.muted,
-            modifier = Modifier.padding(top = MiruSpace.M),
-        )
+        MiruPickerHeader(text, modifier = Modifier.padding(top = MiruSpace.M))
     }
 }
