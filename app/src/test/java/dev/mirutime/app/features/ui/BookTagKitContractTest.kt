@@ -1,0 +1,33 @@
+package dev.mirutime.app.features.ui
+
+import java.io.File
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+// Guards the tag extraction: BookScreen must use the shared tag primitives and
+// the interactive tag must keep a 48dp touch slot.
+class BookTagKitContractTest {
+
+    private fun source(relative: String): String = sequenceOf(
+        File(relative),
+        File("app/$relative"),
+        File("../$relative"),
+    ).firstOrNull { it.isFile }?.readText()
+        ?: error("source not found: $relative")
+
+    @Test
+    fun `book screen uses the shared tags`() {
+        val book = source("src/main/java/dev/mirutime/app/features/book/ui/BookScreen.kt")
+        assertFalse(book.contains("private fun GenreTag("))
+        assertTrue(book.contains("MiruTag("))
+        assertTrue(book.contains("MiruActionTag("))
+    }
+
+    @Test
+    fun `interactive tag keeps a 48dp touch slot`() {
+        val tag = source("ui-kit/src/main/java/dev/mirutime/uikit/MiruTag.kt")
+        assertTrue(tag.contains("heightIn(min = if (onClick != null)"))
+        assertTrue(tag.contains("MiruSize.Touch else 32.dp"))
+    }
+}

@@ -6,7 +6,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -32,7 +31,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -117,7 +115,9 @@ import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.app.design.components.BookCover
+import dev.mirutime.uikit.MiruActionTag
 import dev.mirutime.uikit.MiruCard
+import dev.mirutime.uikit.MiruTag
 import dev.mirutime.uikit.MiruActionRow
 import dev.mirutime.uikit.MiruButton
 import dev.mirutime.uikit.MiruButtonStyle
@@ -2025,50 +2025,13 @@ private fun AnnounceCard(
 // so a long label can never push the genres off the row.
 @Composable
 private fun ShelfChip(shelf: String, onClick: () -> Unit) {
-    val extra = LocalMiruExtraColors.current
-    val shape = RoundedCornerShape(MiruRadius.Chip)
-    Box(
-        modifier = Modifier
-            .heightIn(min = MiruSize.Touch)
-            .clickable(
-                role = Role.Button,
-                onClickLabel = stringResource(R.string.book_move_shelf),
-                onClick = onClick,
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
-            modifier = Modifier
-                .height(32.dp)
-                .clip(shape)
-                .background(extra.accent.copy(alpha = 0.10f))
-                .border(1.dp, extra.accent.copy(alpha = 0.45f), shape)
-                .padding(horizontal = MiruSpace.S),
-        ) {
-            Icon(
-                imageVector = Icons.Filled.DriveFileMove,
-                contentDescription = null,
-                tint = extra.accent,
-                modifier = Modifier.size(16.dp),
-            )
-            Text(
-                text = shelf,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 120.dp),
-            )
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                contentDescription = null,
-                tint = extra.muted,
-                modifier = Modifier.size(14.dp),
-            )
-        }
-    }
+    MiruActionTag(
+        label = shelf,
+        onClick = onClick,
+        onClickLabel = stringResource(R.string.book_move_shelf),
+        leadingIcon = Icons.Filled.DriveFileMove,
+        trailingIcon = Icons.AutoMirrored.Filled.ArrowForward,
+    )
 }
 
 internal fun shelfLabel(shelfId: String, shelves: List<Shelf>): String =
@@ -2095,13 +2058,13 @@ private fun ShelfGenreFlow(
         // is total items minus the shown ones.
         val hidden = genres.size + 1 - shownItemCount
         if (hidden > 0) {
-            GenreTag(
+            MiruTag(
                 label = stringResource(R.string.book_genres_more_fmt, hidden),
                 emphasized = true,
                 onClick = { maxLines = Int.MAX_VALUE },
             )
         } else {
-            GenreTag(
+            MiruTag(
                 label = stringResource(R.string.book_genres_less),
                 emphasized = true,
                 onClick = { maxLines = CollapsedGenreLines },
@@ -2124,54 +2087,7 @@ private fun ShelfGenreFlow(
         if (index == 0) {
             ShelfChip(shelf = shelf, onClick = onShelfClick)
         } else {
-            GenreTag(label = genres[index - 1])
-        }
-    }
-}
-
-// 24dp tonal tag in a 32dp row slot (the clickable overflow tag gets the
-// whole slot as its hit box). Plain tags: onSurface ink on a 7% onSurface
-// wash — readable on the plate in every theme. The overflow tag: accent ink
-// on a hairline accent outline, so it reads as the one interactive tag.
-@Composable
-private fun GenreTag(
-    label: String,
-    modifier: Modifier = Modifier,
-    emphasized: Boolean = false,
-    onClick: (() -> Unit)? = null,
-) {
-    val extra = LocalMiruExtraColors.current
-    val shape = RoundedCornerShape(MiruRadius.Chip)
-    val ink = if (emphasized) extra.accent else MaterialTheme.colorScheme.onSurface
-    Box(
-        modifier = modifier
-            .height(32.dp)
-            .clip(shape)
-            .let { base ->
-                if (onClick != null) base.clickable(role = Role.Button, onClick = onClick) else base
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .height(24.dp)
-                .clip(shape)
-                .then(
-                    if (emphasized) {
-                        Modifier.border(1.dp, extra.accent.copy(alpha = 0.55f), shape)
-                    } else {
-                        Modifier.background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f))
-                    },
-                )
-                .padding(horizontal = MiruSpace.M),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = ink,
-                maxLines = 1,
-            )
+            MiruTag(label = genres[index - 1])
         }
     }
 }
