@@ -15,7 +15,9 @@ import dev.mirutime.app.features.reader.domain.ReadingSessionTracker
 import dev.mirutime.core.network.cf.CfGate
 import dev.mirutime.feature.reader.ReaderConfigStore
 import dev.mirutime.feature.reader.api.ReaderAssetPort
+import dev.mirutime.app.features.reader.data.AppReaderTextRules
 import dev.mirutime.feature.reader.api.ReaderSettingsPort
+import dev.mirutime.feature.reader.api.ReaderTextRules
 import dev.mirutime.feature.reader.api.ReaderTranslationPort
 import dev.mirutime.feature.reader.api.ReaderUiGraph
 import dev.mirutime.feature.reader.session.ReadTracker
@@ -104,6 +106,7 @@ class ReaderGraph(
         },
     )
     override val settings: ReaderSettingsPort = AppReaderSettingsPort()
+    override val rules: ReaderTextRules = AppReaderTextRules()
     override val assets: ReaderAssetPort = AppReaderAssetPort(appContext)
     override val ttsSessions: TtsSessionStore = PrefsTtsSessionStore(appContext)
     private val ttsSettings = PrefsTtsSettingsStore(appContext)

@@ -43,6 +43,8 @@ import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
+import dev.mirutime.uikit.ChipOption
+import dev.mirutime.uikit.ChipRow
 import dev.mirutime.uikit.MiruActionRow
 import dev.mirutime.uikit.MiruCard
 import dev.mirutime.uikit.MiruRowDivider
@@ -53,7 +55,10 @@ import dev.mirutime.uikit.SettingsSwitchRow
 import dev.mirutime.app.features.book.data.BookCatalog
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.core.text.RegexRule
+import dev.mirutime.core.text.RegexRuleScope
+import dev.mirutime.core.text.RegexRuleTarget
 import dev.mirutime.core.text.applyRules
+import dev.mirutime.core.text.applyRulesFor
 import dev.mirutime.core.text.regexError
 
 private const val SampleText = "Chapter 1 [ad] continues  here"
@@ -87,12 +92,9 @@ fun RegexRulesScreen(
         if (novelUrl == null) s.globalRegexRules.toList() else s.novelRegexRules[novelUrl].orEmpty()
     fun store(list: List<RegexRule>) {
         if (novelUrl == null) {
-            s.globalRegexRules.clear()
-            s.globalRegexRules.addAll(list)
-        } else if (list.isEmpty()) {
-            s.novelRegexRules.remove(novelUrl)
+            s.replaceGlobalRules(list)
         } else {
-            s.novelRegexRules[novelUrl] = list
+            s.replaceNovelRules(novelUrl, list)
         }
     }
     val shown = rules.filter {
@@ -121,7 +123,9 @@ fun RegexRulesScreen(
                                 Toast.makeText(context, resources.getString(R.string.st_rx_nothing_to_move), Toast.LENGTH_SHORT).show()
                             } else {
                                 val known = s.globalRegexRules.map { it.pattern }.toSet()
-                                s.globalRegexRules.addAll(rules.filter { it.pattern !in known })
+                                s.replaceGlobalRules(
+                                    s.globalRegexRules + rules.filter { it.pattern !in known },
+                                )
                                 store(emptyList())
                                 Toast.makeText(context, resources.getString(R.string.st_rx_moved), Toast.LENGTH_SHORT).show()
                             }
@@ -217,10 +221,26 @@ fun RegexRulesScreen(
                     modifier = Modifier.padding(top = MiruSpace.M),
                 )
                 Text(
-                    text = applyRules(effective, sample).ifEmpty { "∅" },
+                    text = stringResource(R.string.st_rx_scope_original),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LocalMiruExtraColors.current.muted,
+                    modifier = Modifier.padding(top = MiruSpace.Xs),
+                )
+                Text(
+                    text = applyRulesFor(effective, sample, RegexRuleTarget.Original).ifEmpty { "∅" },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = stringResource(R.string.st_rx_scope_translation),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LocalMiruExtraColors.current.muted,
                     modifier = Modifier.padding(top = MiruSpace.Xs),
+                )
+                Text(
+                    text = applyRulesFor(effective, sample, RegexRuleTarget.Translation).ifEmpty { "∅" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 SettingsHint(stringResource(R.string.st_rx_order_hint))
             }
@@ -329,6 +349,11 @@ private fun RuleRow(rule: RegexRule, onClick: () -> Unit, onToggle: (Boolean) ->
             val note = buildList {
                 if (rule.description.isNotBlank()) add(rule.description)
                 if (rule.wholeWords) add(stringResource(R.string.st_rx_whole_short))
+                when (rule.scope) {
+                    RegexRuleScope.Original -> add(stringResource(R.string.st_rx_scope_original))
+                    RegexRuleScope.Translation -> add(stringResource(R.string.st_rx_scope_translation))
+                    RegexRuleScope.Both -> Unit
+                }
             }.joinToString(" · ")
             if (note.isNotEmpty()) {
                 Text(
@@ -359,6 +384,7 @@ private fun RuleEditSheet(
     var description by remember { mutableStateOf(rule?.description.orEmpty()) }
     var wholeWords by remember { mutableStateOf(rule?.wholeWords ?: false) }
     var enabled by remember { mutableStateOf(rule?.enabled ?: true) }
+    var scope by remember { mutableStateOf(rule?.scope ?: RegexRuleScope.Both) }
     val extra = LocalMiruExtraColors.current
 
     val compileError = regexError(pattern)
@@ -368,7 +394,7 @@ private fun RuleEditSheet(
         duplicate -> stringResource(R.string.st_rx_duplicate)
         else -> null
     }
-    val draft = RegexRule(rule?.id ?: 0L, pattern, replacement, description, true, wholeWords)
+    val draft = RegexRule(rule?.id ?: 0L, pattern, replacement, description, true, wholeWords, scope)
 
     AppBottomSheet(
         title = stringResource(if (rule == null) R.string.st_rx_new else R.string.st_rx_edit),
@@ -377,7 +403,7 @@ private fun RuleEditSheet(
         doneLabel = stringResource(R.string.st_save),
         doneEnabled = pattern.isNotBlank() && error == null,
         onDone = {
-            onSave(RegexRule(rule?.id ?: 0L, pattern, replacement, description.trim(), enabled, wholeWords))
+            onSave(RegexRule(rule?.id ?: 0L, pattern, replacement, description.trim(), enabled, wholeWords, scope))
         },
     ) {
         OutlinedTextField(
@@ -413,6 +439,24 @@ private fun RuleEditSheet(
                 .fillMaxWidth()
                 .padding(top = MiruSpace.S),
         )
+        Text(
+            text = stringResource(R.string.st_rx_scope),
+            style = MaterialTheme.typography.labelSmall,
+            color = extra.muted,
+            modifier = Modifier.padding(top = MiruSpace.S),
+        )
+        ChipRow(
+            options = listOf(
+                ChipOption(RegexRuleScope.Original.name, stringResource(R.string.st_rx_scope_original)),
+                ChipOption(RegexRuleScope.Translation.name, stringResource(R.string.st_rx_scope_translation)),
+                ChipOption(RegexRuleScope.Both.name, stringResource(R.string.st_rx_scope_both)),
+            ),
+            selectedIds = setOf(scope.name),
+            onToggle = { id -> scope = RegexRuleScope.valueOf(id) },
+            contentPadding = PaddingValues(0.dp),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        SettingsHint(stringResource(R.string.st_rx_scope_hint))
         SettingsSwitchRow(
             title = stringResource(R.string.st_rx_whole_words),
             checked = wholeWords,

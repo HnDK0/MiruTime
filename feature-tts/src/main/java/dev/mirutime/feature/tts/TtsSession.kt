@@ -32,7 +32,14 @@ fun resolveTtsCursor(chunks: List<TtsChunk>, session: TtsSession): Int? {
     if (chunks.isEmpty()) return null
     if (chunks.first().blockId.chapterUrl != session.chapterUrl) return null
     val block = chunks.withIndex().filter { it.value.blockId.index == session.blockIndex }
-    if (block.isEmpty()) return null
+    if (block.isEmpty()) {
+        // The saved block may no longer be spoken (status panel, divider,
+        // chat log). Only a later block proves the text still exists; an index
+        // past the end is a changed chapter and stays rejected.
+        return chunks.withIndex()
+            .firstOrNull { it.value.blockId.index > session.blockIndex }
+            ?.index
+    }
     block.firstOrNull {
         it.value.sentenceIndex == session.sentenceIndex &&
             it.value.startOffset == session.charOffset &&

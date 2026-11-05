@@ -32,6 +32,8 @@ data class ChapterTranslation(
     val status: ChapterTranslationStatus,
     val translations: Map<Int, String>,
     val configKey: String,
+    // Owning book: per-novel cleanup rules are resolved from it at read time.
+    val bookUrl: String = "",
     val failure: ChapterTranslationFailure? = null,
 )
 
@@ -81,6 +83,7 @@ class TranslationController(
                     status = ChapterTranslationStatus.Ready,
                     translations = translations,
                     configKey = key,
+                    bookUrl = request.bookUrl,
                 ))
             }
             return true
@@ -91,6 +94,7 @@ class TranslationController(
                 status = ChapterTranslationStatus.Loading,
                 translations = emptyMap(),
                 configKey = key,
+                bookUrl = request.bookUrl,
             ))
         }
         queued += queueKey
@@ -133,6 +137,7 @@ class TranslationController(
                 status = ChapterTranslationStatus.Ready,
                 translations = cached,
                 configKey = key,
+                bookUrl = request.bookUrl,
             ))
         }
         MiruLog.event(
@@ -181,6 +186,7 @@ class TranslationController(
                                 status = ChapterTranslationStatus.Ready,
                                 translations = disk,
                                 configKey = key,
+                                bookUrl = request.bookUrl,
                             ))
                         }
                         continue
@@ -206,7 +212,7 @@ class TranslationController(
                                 "timeoutMs=${chapterTimeout.inWholeMilliseconds}",
                         )
                         runCatching { cache?.markFailed(request) }
-                        fail(request.chapterUrl, key)
+                        fail(request.chapterUrl, key, request.bookUrl)
                         continue
                     } catch (cancellation: CancellationException) {
                         // Real outer cancellation (screen closed, scope gone).
@@ -224,7 +230,7 @@ class TranslationController(
                                 "chapter" to chapterHash(request.chapterUrl),
                             )
                             runCatching { cache?.markFailed(request) }
-                            fail(request.chapterUrl, key)
+                            fail(request.chapterUrl, key, request.bookUrl)
                         }
                         is Outcome.Ok -> {
                             val saved = runCatching { cache?.save(request, outcome.value) }
@@ -243,6 +249,7 @@ class TranslationController(
                                         status = ChapterTranslationStatus.Ready,
                                         translations = outcome.value.translations,
                                         configKey = key,
+                                        bookUrl = request.bookUrl,
                                     ))
                                 }
                             }
@@ -255,7 +262,7 @@ class TranslationController(
                                 "chapter" to chapterHash(request.chapterUrl),
                             )
                             runCatching { cache?.markFailed(request) }
-                            fail(request.chapterUrl, key, outcome.error)
+                            fail(request.chapterUrl, key, request.bookUrl, outcome.error)
                         }
                     }
                 } finally {
@@ -265,7 +272,12 @@ class TranslationController(
         }
     }
 
-    private fun fail(chapterUrl: String, key: String, error: MiruError? = null) {
+    private fun fail(
+        chapterUrl: String,
+        key: String,
+        bookUrl: String,
+        error: MiruError? = null,
+    ) {
         if (!isCurrent(chapterUrl, key)) return
         val failure = when (error) {
             is TranslationError.LocalNetworkRequired -> ChapterTranslationFailure.LocalNetworkRequired
@@ -277,6 +289,7 @@ class TranslationController(
                 status = ChapterTranslationStatus.Failed,
                 translations = emptyMap(),
                 configKey = key,
+                bookUrl = bookUrl,
                 failure = failure,
             ))
         }

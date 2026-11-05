@@ -202,6 +202,18 @@ fun ReaderScreen(
         )
     }
 
+    // Original-stage cleanup rules changed: re-parse the open chapter so the
+    // screen and TTS do not keep showing/speaking the old text. Translation
+    // rules need no reload — the translation port recomputes on its revision.
+    val rulesOriginalRevision by graph.rules.originalRevision.collectAsState()
+    var seenRulesRevision by remember(bookUrl) { mutableStateOf(rulesOriginalRevision) }
+    LaunchedEffect(rulesOriginalRevision) {
+        if (rulesOriginalRevision == seenRulesRevision) return@LaunchedEffect
+        seenRulesRevision = rulesOriginalRevision
+        if (ttsActive) graph.tts.stop()
+        store.reloadActiveChapter()
+    }
+
     LaunchedEffect(
         chromeVisible,
         panel,

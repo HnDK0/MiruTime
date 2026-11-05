@@ -109,47 +109,8 @@ object SentenceSplitter {
         "д", "ч", "с", "п", "тыс", "млн", "им", "км", "z"
     )
 
-    /** litRPG status line "key: value". */
-    private val STATUS_KEY_VALUE_LINE = Regex("^\\s*[«\"“\"\\[(【]*[\\p{L}\\p{N}_ \\-]{1,30}[:：]\\s*\\S.*")
-
-    /** litRPG section divider line: ***, ===, ---, ──, ━━, ══, ╔, ╚, ║, ┌, └. */
-    private val STATUS_DIVIDER_LINE = Regex("^\\s*(?:\\*{3,}|={3,}|-{3,}|─{2,}|━{2,}|═{2,}|╔|╚|║|┌|└)\\s*$")
-
     /** Punctuation that continues a sentence rather than ending it ("и т. п., потому..."). */
     private val SENTENCE_CONTINUATION = setOf(',', ';', ':')
-
-    /** Line of one non-letter/digit char repeated >= 4 times — a decorative divider. */
-    private val REPEATED_CHAR_DIVIDER = Regex("^(.)\\1{3,}$")
-
-    /**
-     * Chat/system log line prefix: a timestamp, a bracketed tag, an angle
-     * handle or a bold handle. A bare "Name:" multi-line block is caught by
-     * [isStatusBlock] instead.
-     */
-    private val LOG_PREFIX = Regex(
-        """^\s*(?:\[\d{1,2}:\d{2}(?::\d{2})?]|\[[^\]]{1,24}]|<[^<>]{1,32}>|\*\*[^*]{1,32}\*\*)\s*\S"""
-    )
-
-    /** Box Drawing + Block Elements: chars that form a frame around a block. */
-    private val FRAME_RANGES = listOf(
-        0x2500..0x257F,
-        0x2580..0x259F,
-    )
-
-    /**
-     * Unicode blocks that signal ornamentation: frames plus geometric shapes,
-     * misc symbols, dingbats and emoji.
-     *
-     * A paragraph stays whole only when a line is made of decoration alone or
-     * starts/ends with a frame char. A single emoji inside prose no longer
-     * blocks sentence splitting.
-     */
-    private val DECORATIVE_RANGES = FRAME_RANGES + listOf(
-        0x25A0..0x25FF, // Geometric Shapes
-        0x2600..0x26FF, // Miscellaneous Symbols
-        0x2700..0x27BF, // Dingbats
-        0x1F300..0x1FAFF // Emoji & Pictographs
-    )
 
     /**
      * Splits [text] into sentence spans. Blank text yields no spans; see
@@ -200,8 +161,8 @@ object SentenceSplitter {
      */
     private fun isLogBlock(text: String): Boolean {
         val lines = text.split('\n')
-        if (lines.size == 1) return LOG_PREFIX.containsMatchIn(text)
-        return lines.count { LOG_PREFIX.containsMatchIn(it) } >= 2
+        if (lines.size == 1) return TextStructure.isLogPrefixLine(text)
+        return lines.count { TextStructure.isLogPrefixLine(it) } >= 2
     }
 
     /**
@@ -211,16 +172,10 @@ object SentenceSplitter {
     private fun isFrameBlock(text: String): Boolean = text.lineSequence().any { line ->
         val trimmed = line.trim()
         if (trimmed.isEmpty()) return@any false
-        val allDecoration = trimmed.codePoints().allMatch { isDecorationCodePoint(it) }
-        allDecoration || isFrameCodePoint(trimmed.codePointAt(0)) ||
-            isFrameCodePoint(trimmed.codePointBefore(trimmed.length))
+        val allDecoration = trimmed.codePoints().allMatch { TextStructure.isDecorationCodePoint(it) }
+        allDecoration || TextStructure.isFrameCodePoint(trimmed.codePointAt(0)) ||
+            TextStructure.isFrameCodePoint(trimmed.codePointBefore(trimmed.length))
     }
-
-    private fun isDecorationCodePoint(codePoint: Int): Boolean =
-        DECORATIVE_RANGES.any { codePoint in it }
-
-    private fun isFrameCodePoint(codePoint: Int): Boolean =
-        FRAME_RANGES.any { codePoint in it }
 
     /**
      * Scans [text] left to right with a quote/bracket stack. A terminator is a
@@ -361,9 +316,9 @@ object SentenceSplitter {
         var keyValueLines = 0
         var shortNoTerminatorLines = 0
         for (line in paragraph.split('\n')) {
-            if (STATUS_KEY_VALUE_LINE.matches(line)) keyValueLines++
-            if (STATUS_DIVIDER_LINE.matches(line)) return true
-            if (REPEATED_CHAR_DIVIDER.matches(line.trim())) return true
+            if (TextStructure.isStatusKeyValueLine(line)) keyValueLines++
+            if (TextStructure.isStatusDividerLine(line)) return true
+            if (TextStructure.isRepeatedCharDivider(line)) return true
             if (line.length < SHORT_STATUS_LINE_LENGTH && line.none { it in ALL_TERMINATORS }) {
                 shortNoTerminatorLines++
             }

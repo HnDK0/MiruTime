@@ -7,6 +7,7 @@ import dev.mirutime.app.features.finder.domain.FilterPreset
 import dev.mirutime.app.features.finder.domain.LocalSources
 import dev.mirutime.app.features.library.domain.CardStyle
 import dev.mirutime.core.text.RegexRule
+import dev.mirutime.core.text.RegexRuleScope
 import kotlinx.serialization.Serializable
 import kotlin.math.roundToInt
 
@@ -740,6 +741,7 @@ class SettingsStore(private val values: KeyValueStore) {
             rule.description,
             rule.enabled.toString(),
             rule.wholeWords.toString(),
+            rule.scope.name,
         )
 
         private fun ruleFromFields(fields: List<String>): RegexRule? {
@@ -751,6 +753,11 @@ class SettingsStore(private val values: KeyValueStore) {
                 description = fields[3],
                 enabled = fields[4].toBooleanStrictOrNull() ?: true,
                 wholeWords = fields[5].toBooleanStrictOrNull() ?: false,
+                // Records written before rule scopes existed mean NoveLA's
+                // "apply to both" behaviour.
+                scope = fields.getOrNull(6)
+                    ?.let { runCatching { RegexRuleScope.valueOf(it) }.getOrNull() }
+                    ?: RegexRuleScope.Both,
             )
         }
 

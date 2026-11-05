@@ -1155,6 +1155,11 @@
     <string name="st_rx_description_hint">Enter description…</string>
     <string name="st_rx_whole_words">Whole words only</string>
     <string name="st_rx_enabled">Enabled</string>
+    <string name="st_rx_scope">Apply to</string>
+    <string name="st_rx_scope_original">Original</string>
+    <string name="st_rx_scope_translation">Translation</string>
+    <string name="st_rx_scope_both">Both</string>
+    <string name="st_rx_scope_hint">Original rules also clean the text sent to the translator. Translation rules clean only the translated text.</string>
     <string name="st_rx_invalid_fmt">Invalid regex pattern: %1$s</string>
     <string name="st_rx_duplicate">This pattern already exists</string>
     <string name="st_rx_delete_rule">Delete rule</string>

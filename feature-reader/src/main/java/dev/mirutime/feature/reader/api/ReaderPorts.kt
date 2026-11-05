@@ -25,6 +25,13 @@ interface ReaderContentSource {
     suspend fun documentForPrefetch(bookUrl: String, chapterIndex: Int): ReaderDocument? =
         document(bookUrl, chapterIndex)
 
+    /**
+     * Parses a chapter without touching reading history. Used when cleanup rules
+     * change and the open chapter has to be re-read.
+     */
+    suspend fun documentForRulesReload(bookUrl: String, chapterIndex: Int): ReaderDocument? =
+        document(bookUrl, chapterIndex)
+
     suspend fun markRead(bookUrl: String, chapterIndex: Int, read: Boolean)
 }
 
@@ -46,6 +53,12 @@ interface ReaderSessionTracker {
 /** Effective text cleanup rules (global + per-book), owned by app settings. */
 interface ReaderTextRules {
     fun effectiveRules(bookUrl: String?): List<dev.mirutime.core.text.RegexRule>
+
+    /** Bumped on every rule edit; the translation port recomputes from it. */
+    val revision: StateFlow<Long>
+
+    /** Bumped only when original-applicable rules change; the reader re-parses. */
+    val originalRevision: StateFlow<Long>
 }
 
 /** Reader-facing settings that are not part of ReaderStyle. */
@@ -129,6 +142,7 @@ interface ReaderUiGraph {
     val translation: ReaderTranslationPort
     val settings: ReaderSettingsPort
     val assets: ReaderAssetPort
+    val rules: ReaderTextRules
     val tts: dev.mirutime.feature.tts.TtsController
     val ttsSessions: dev.mirutime.feature.tts.TtsSessionStore
     val ttsSessionTracker: ReaderSessionTracker?

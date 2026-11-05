@@ -6,7 +6,8 @@ import dev.mirutime.app.features.reader.document.ReaderDocument
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.translation.domain.TranslationRequest
 import dev.mirutime.core.reader.html.ReaderHtmlParser
-import dev.mirutime.core.text.applyRules
+import dev.mirutime.core.text.RegexRuleTarget
+import dev.mirutime.core.text.applyRulesFor
 import dev.mirutime.translator.LanguageCode
 import dev.mirutime.translator.PromptSpec
 import dev.mirutime.translator.ProviderId
@@ -104,7 +105,11 @@ object ChapterTranslationPlanner {
         // text the reader shows.
         val rules = AppSettings.effectiveRules(bookUrl)
         val blocks = ReaderHtmlParser.parseDocument(html, chapterUrl)
-            .map { block -> block.copy(original = applyRules(rules, block.original)) }
+            .map { block ->
+                block.copy(
+                    original = applyRulesFor(rules, block.original, RegexRuleTarget.Original),
+                )
+            }
         return request(
             bookUrl = bookUrl,
             chapterUrl = chapterUrl,

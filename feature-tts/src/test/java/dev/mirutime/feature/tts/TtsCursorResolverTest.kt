@@ -72,6 +72,13 @@ class TtsCursorResolverTest {
     }
 
     @Test
+    fun `cursor on a skipped block moves to the next spoken block`() {
+        val chunks = listOf(chunk(0, 0, 0, 10), chunk(3, 0, 40, 50))
+
+        assertEquals(1, resolveTtsCursor(chunks, session(block = 2)))
+    }
+
+    @Test
     fun `empty chunks are rejected`() {
         assertNull(resolveTtsCursor(emptyList(), session()))
     }

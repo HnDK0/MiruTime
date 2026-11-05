@@ -248,6 +248,65 @@ class ReaderSessionStore(
         )
     }
 
+    /**
+     * Re-parses the active chapter after the original-applicable cleanup rules
+     * changed. Keeps the reading anchor, never touches reading history, and
+     * leaves the old document in place when the reload fails.
+     */
+    suspend fun reloadActiveChapter(): Boolean {
+        val before = _state.value
+        val index = before.activeChapterIndex
+        if (before.documents[index] == null) {
+            logReload(index, ok = false, reason = "not-loaded")
+            return false
+        }
+        val currentBook = bookUrl
+        val document = try {
+            // touchHistory = false: editing rules must not move "last read".
+            content.documentForRulesReload(currentBook, index)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            MiruLog.w(
+                "reader",
+                "rules reload failed index=$index error=${error::class.simpleName}",
+            )
+            logReload(index, ok = false, reason = "error")
+            return false
+        }
+        if (document == null) {
+            logReload(index, ok = false, reason = "empty")
+            return false
+        }
+        val now = _state.value
+        if (bookUrl != currentBook || now.activeChapterIndex != index) {
+            logReload(index, ok = false, reason = "stale")
+            return false
+        }
+        val anchor = now.anchor?.takeIf {
+            it.chapterUrl == document.chapterUrl && document.blockAt(it.blockId) != null
+        } ?: document.firstAnchor()
+        _state.update {
+            it.copy(
+                documents = it.documents + (index to document),
+                statuses = it.statuses + (index to ChapterLoadStatus.Ready),
+                anchor = anchor,
+                // The layout changed; a pixel offset from the old parse would
+                // land in the middle of a paragraph.
+                offsetPx = 0,
+            )
+        }
+        rebuildFeed()
+        logReload(index, ok = true, reason = null)
+        return true
+    }
+
+    private fun logReload(index: Int, ok: Boolean, reason: String?) {
+        val event = mutableListOf<Pair<String, Any>>("chapter" to index, "ok" to ok)
+        if (reason != null) event += "reason" to reason
+        MiruLog.event("reader", "rules-reload", *event.toTypedArray())
+    }
+
     fun onAnchorChanged(anchor: ReadingAnchor, offsetPx: Int) {
         applyAnchor(anchor, offsetPx)
     }

@@ -18,6 +18,7 @@ import dev.mirutime.feature.reader.api.ReaderContentSource
 import dev.mirutime.feature.reader.api.ReaderPositionStore
 import dev.mirutime.feature.tts.TtsChapterDirection
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -61,6 +62,7 @@ class ReaderSessionStoreTest {
         // a regression that moves history on prefetch is visible.
         val documentCalls = mutableListOf<Int>()
         val prefetchCalls = mutableListOf<Int>()
+        val reloadCalls = mutableListOf<Int>()
 
         fun calls(index: Int): Int =
             documentCalls.count { it == index } + prefetchCalls.count { it == index }
@@ -81,6 +83,14 @@ class ReaderSessionStoreTest {
             return load(chapterIndex)
         }
 
+        override suspend fun documentForRulesReload(
+            bookUrl: String,
+            chapterIndex: Int,
+        ): ReaderDocument? {
+            reloadCalls += chapterIndex
+            return load(chapterIndex)
+        }
+
         private suspend fun load(chapterIndex: Int): ReaderDocument? {
             if (failOn?.first == chapterIndex) throw failOn.second
             if (gate?.first == chapterIndex) gate.second.await()
@@ -90,6 +100,92 @@ class ReaderSessionStoreTest {
         override suspend fun markRead(bookUrl: String, chapterIndex: Int, read: Boolean) {
             marked += chapterIndex
         }
+    }
+
+    @Test
+    fun `reload re-parses the active chapter without history or anchor loss`() = runTest {
+        val repository = TestRepository(chapters, docs)
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+        )
+        store.open("book", 2, restoreSaved = false)
+        advanceUntilIdle()
+        val anchor = store.state.value.anchor
+        val historyCalls = repository.documentCalls.count { it == 2 }
+
+        val reloaded = store.reloadActiveChapter()
+
+        assertTrue(reloaded)
+        assertEquals(listOf(2), repository.reloadCalls)
+        assertEquals(historyCalls, repository.documentCalls.count { it == 2 })
+        assertEquals(anchor, store.state.value.anchor)
+        assertEquals(0, store.state.value.offsetPx)
+        assertEquals(2, store.state.value.activeChapterIndex)
+    }
+
+    @Test
+    fun `reload keeps the old document when the content source fails`() = runTest {
+        val delegate = TestRepository(chapters, docs)
+        val repository = object : ReaderContentSource by delegate {
+            override suspend fun documentForRulesReload(
+                bookUrl: String,
+                chapterIndex: Int,
+            ): ReaderDocument? = throw IllegalStateException("boom")
+        }
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(delegate),
+            scope = this,
+        )
+        store.open("book", 2, restoreSaved = false)
+        advanceUntilIdle()
+        val document = store.state.value.documents.getValue(2)
+
+        val reloaded = store.reloadActiveChapter()
+
+        assertFalse(reloaded)
+        assertEquals(document, store.state.value.documents.getValue(2))
+        assertEquals(ChapterLoadStatus.Ready, store.state.value.statuses[2])
+    }
+
+    @Test
+    fun `reload is discarded when the active chapter changed meanwhile`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val delegate = TestRepository(chapters, docs)
+        val repository = object : ReaderContentSource by delegate {
+            override suspend fun documentForRulesReload(
+                bookUrl: String,
+                chapterIndex: Int,
+            ): ReaderDocument? {
+                gate.await()
+                return delegate.documentForRulesReload(bookUrl, chapterIndex)
+            }
+        }
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(delegate),
+            scope = this,
+        )
+        store.open("book", 2, restoreSaved = false)
+        advanceUntilIdle()
+
+        val reload = async { store.reloadActiveChapter() }
+        runCurrent()
+        store.goToChapter(1)
+        advanceUntilIdle()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertFalse(reload.await())
+        assertEquals(1, store.state.value.activeChapterIndex)
     }
 
     private class InMemoryPositionStore : ReaderPositionStore {

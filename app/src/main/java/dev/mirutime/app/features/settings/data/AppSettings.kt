@@ -11,6 +11,12 @@ import androidx.compose.runtime.setValue
 import dev.mirutime.app.features.finder.domain.FilterPreset
 import dev.mirutime.app.features.library.domain.CardStyle
 import dev.mirutime.core.text.RegexRule
+import dev.mirutime.core.text.RegexRuleTarget
+import dev.mirutime.core.text.appliesTo
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.serialization.Serializable
 
 // TRANSLATION_NOVEL_PROMPTS entry. `append` = add to the global prompt,
@@ -262,6 +268,56 @@ object AppSettings {
     fun effectiveRules(novelUrl: String?): List<RegexRule> =
         globalRegexRules + (novelUrl?.let { novelRegexRules[it] }.orEmpty())
 
+    // Bumped on every real rule edit: the reader's translation port recomputes
+    // its cleaned map from it.
+    private val _regexRulesRevision = MutableStateFlow(0L)
+    val regexRulesRevision: StateFlow<Long> = _regexRulesRevision.asStateFlow()
+
+    // Bumped only when the original-applicable projection changes: only then
+    // does the open chapter have to be re-parsed.
+    private val _regexRulesOriginalRevision = MutableStateFlow(0L)
+    val regexRulesOriginalRevision: StateFlow<Long> = _regexRulesOriginalRevision.asStateFlow()
+
+    // Single writers for the public rule lists: direct clear()/addAll() skips
+    // the revisions above and leaves the reader showing a stale chapter.
+    fun replaceGlobalRules(rules: List<RegexRule>) {
+        applyRuleLists(rules, novelRegexRules.toMap())
+    }
+
+    fun replaceNovelRules(url: String, rules: List<RegexRule>?) {
+        val nextNovel = novelRegexRules.toMap().let { current ->
+            if (rules.isNullOrEmpty()) current - url else current + (url to rules)
+        }
+        applyRuleLists(globalRegexRules.toList(), nextNovel)
+    }
+
+    private fun applyRuleLists(
+        global: List<RegexRule>,
+        novel: Map<String, List<RegexRule>>,
+    ) {
+        val nextGlobal = global.toList()
+        val nextNovel = novel.toMap()
+        val previousGlobal = globalRegexRules.toList()
+        val previousNovel = novelRegexRules.toMap()
+        if (previousGlobal == nextGlobal && previousNovel == nextNovel) return
+        val originalChanged =
+            originalProjection(previousGlobal) != originalProjection(nextGlobal) ||
+                novelOriginalProjection(previousNovel) != novelOriginalProjection(nextNovel)
+        globalRegexRules.clear()
+        globalRegexRules.addAll(nextGlobal)
+        novelRegexRules.clear()
+        novelRegexRules.putAll(nextNovel)
+        _regexRulesRevision.update { it + 1 }
+        if (originalChanged) _regexRulesOriginalRevision.update { it + 1 }
+    }
+
+    private fun originalProjection(rules: List<RegexRule>): List<RegexRule> =
+        rules.filter { it.appliesTo(RegexRuleTarget.Original) }
+
+    private fun novelOriginalProjection(
+        map: Map<String, List<RegexRule>>,
+    ): Map<String, List<RegexRule>> = map.mapValues { (_, rules) -> originalProjection(rules) }
+
     // Persisted fields only. Used by MiruApp's snapshotFlow writer and by tests;
     // Compose-only state (selection sheets, scroll, ...) never enters the store.
     fun persistedSnapshot(): PersistedSettings = PersistedSettings(
@@ -422,10 +478,9 @@ object AppSettings {
         translationFavorites.addAll(settings.translationFavorites)
         translationRecentPairs.clear()
         translationRecentPairs.addAll(settings.translationRecentPairs)
-        globalRegexRules.clear()
-        globalRegexRules.addAll(settings.globalRegexRules)
-        novelRegexRules.clear()
-        novelRegexRules.putAll(settings.novelRegexRules)
+        // A restore can land while the reader is open: one write updates the
+        // port and — only when the original changes — the open chapter.
+        applyRuleLists(settings.globalRegexRules, settings.novelRegexRules)
         nextRuleId = settings.nextRuleId
         userAgent = settings.userAgent
         cloudflareBypass = settings.cloudflareBypass

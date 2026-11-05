@@ -10,7 +10,8 @@ import dev.mirutime.app.features.reader.document.ReaderChapter
 import dev.mirutime.app.features.reader.document.ReaderDocument
 import dev.mirutime.app.features.reader.document.chapterKey
 import dev.mirutime.core.reader.html.ReaderHtmlParser
-import dev.mirutime.core.text.applyRules
+import dev.mirutime.core.text.RegexRuleTarget
+import dev.mirutime.core.text.applyRulesFor
 import dev.mirutime.data.library.LibraryRepository
 import dev.mirutime.feature.reader.api.ReaderContentSource
 import dev.mirutime.feature.reader.api.ReaderTextRules
@@ -62,6 +63,11 @@ class DefaultReaderRepository(
         chapterIndex: Int,
     ): ReaderDocument? = loadDocument(bookUrl, chapterIndex, touchHistory = false)
 
+    override suspend fun documentForRulesReload(
+        bookUrl: String,
+        chapterIndex: Int,
+    ): ReaderDocument? = loadDocument(bookUrl, chapterIndex, touchHistory = false)
+
     private suspend fun loadDocument(
         bookUrl: String,
         chapterIndex: Int,
@@ -97,11 +103,11 @@ class DefaultReaderRepository(
             bookUrl = bookUrl,
             chapterUrl = chapterUrl,
             chapterIndex = chapterIndex,
-            title = applyRules(rules, content.title),
+            title = applyRulesFor(rules, content.title, RegexRuleTarget.Original),
             // Rules are applied inside the parser, before sentence spans are
             // computed, so rules that shorten text never leave stale offsets.
             blocks = ReaderHtmlParser.parseDocument(content.html, chapterUrl) { text ->
-                applyRules(rules, text)
+                applyRulesFor(rules, text, RegexRuleTarget.Original)
             },
         )
         if (touchHistory) library?.touchHistory(bookUrl, chapterIndex, System.currentTimeMillis())

@@ -17,10 +17,6 @@ object ReaderHtmlParser {
     private val imgTag = Regex("(?is)<img\\b[^>]*>")
     private val srcAttr = Regex("(?is)\\bsrc\\s*=\\s*[\"']([^\"']*)[\"']")
     private val altAttr = Regex("(?is)\\balt\\s*=\\s*[\"']([^\"']*)[\"']")
-    private val namedEntities = mapOf(
-        "amp" to "&", "lt" to "<", "gt" to ">", "quot" to "\"",
-        "apos" to "'", "nbsp" to " ",
-    )
 
     // One malformed EPUB paragraph can contain a whole chapter (a 1.4 MB <p>
     // was enough to OOM Compose TextLayout/semantics). Keep one Text bounded;
@@ -173,12 +169,27 @@ object ReaderHtmlParser {
 
     private fun decodeEntities(text: String): String = entity.replace(text) { match ->
         val value = match.groupValues[1]
-        when {
+        val decoded = when {
             value.startsWith("#x", ignoreCase = true) ->
-                value.drop(2).toIntOrNull(16)?.toChar()?.toString() ?: match.value
+                decodeCodePoint(value.drop(2).toIntOrNull(16))
             value.startsWith("#") ->
-                value.drop(1).toIntOrNull()?.toChar()?.toString() ?: match.value
-            else -> namedEntities[value.lowercase()] ?: match.value
+                decodeCodePoint(value.drop(1).toIntOrNull())
+            else -> HtmlEntities.decode(value)
         }
+        // An unknown reference must never reach TTS as "ampersand foo
+        // semicolon": drop it, the whitespace pass then tidies the line.
+        decoded ?: " "
+    }
+
+    private fun decodeCodePoint(codePoint: Int?): String? {
+        if (codePoint == null) return null
+        if (!Character.isValidCodePoint(codePoint)) return null
+        if (codePoint in 0xD800..0xDFFF) return null
+        if (codePoint < 0x20 && codePoint != 0x09 && codePoint != 0x0A && codePoint != 0x0D) return null
+        if (codePoint in 0x7F..0x9F) return null
+        if (codePoint in 0xFDD0..0xFDEF) return null
+        val low = codePoint and 0xFFFF
+        if (low == 0xFFFE || low == 0xFFFF) return null
+        return StringBuilder().appendCodePoint(codePoint).toString()
     }
 }

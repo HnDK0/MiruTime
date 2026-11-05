@@ -12,6 +12,8 @@ import dev.mirutime.app.features.translation.data.activeTranslationMode
 import dev.mirutime.app.features.translation.data.cacheKey
 import dev.mirutime.app.features.translation.data.metadataConfigFor
 import dev.mirutime.core.text.RegexRule
+import dev.mirutime.core.text.RegexRuleTarget
+import dev.mirutime.core.text.applyRulesFor
 import dev.mirutime.feature.reader.api.ReaderAssetPort
 import dev.mirutime.feature.reader.api.ReaderBookMetadata
 import dev.mirutime.feature.reader.api.ReaderChapterTranslation
@@ -25,6 +27,7 @@ import dev.mirutime.app.features.reader.document.ReaderDocument
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
@@ -32,6 +35,9 @@ import kotlinx.coroutines.flow.stateIn
 class AppReaderTextRules : ReaderTextRules {
     override fun effectiveRules(bookUrl: String?): List<RegexRule> =
         AppSettings.effectiveRules(bookUrl)
+
+    override val revision: StateFlow<Long> = AppSettings.regexRulesRevision
+    override val originalRevision: StateFlow<Long> = AppSettings.regexRulesOriginalRevision
 }
 
 /** Parallel display settings, read straight from the Compose snapshot state. */
@@ -71,27 +77,28 @@ class AppReaderTranslationPort(
     private val context: Context,
 ) : ReaderTranslationPort {
     override val state: StateFlow<Map<String, ReaderChapterTranslation>> =
-        controller.state
-            .map { entries ->
-                entries.mapValues { (_, value) ->
-                    ReaderChapterTranslation(
-                        status = when (value.status) {
-                            dev.mirutime.app.features.translation.data.ChapterTranslationStatus.Loading -> ReaderTranslationStatus.Loading
-                            dev.mirutime.app.features.translation.data.ChapterTranslationStatus.Ready -> ReaderTranslationStatus.Ready
-                            dev.mirutime.app.features.translation.data.ChapterTranslationStatus.Failed -> ReaderTranslationStatus.Failed
-                        },
-                        translations = value.translations,
-                        configKey = value.configKey,
-                        failure = when (value.failure) {
-                            dev.mirutime.app.features.translation.data.ChapterTranslationFailure.LocalNetworkRequired ->
-                                ReaderTranslationFailure.LocalNetworkRequired
-                            dev.mirutime.app.features.translation.data.ChapterTranslationFailure.CleartextNotAllowed ->
-                                ReaderTranslationFailure.CleartextNotAllowed
-                            null -> null
-                        },
-                    )
-                }
+        // Rule edits must reach the translated text immediately, not on the
+        // next controller emission: the revision is a second input.
+        combine(controller.state, AppSettings.regexRulesRevision) { entries, _ ->
+            entries.mapValues { (_, value) ->
+                ReaderChapterTranslation(
+                    status = when (value.status) {
+                        dev.mirutime.app.features.translation.data.ChapterTranslationStatus.Loading -> ReaderTranslationStatus.Loading
+                        dev.mirutime.app.features.translation.data.ChapterTranslationStatus.Ready -> ReaderTranslationStatus.Ready
+                        dev.mirutime.app.features.translation.data.ChapterTranslationStatus.Failed -> ReaderTranslationStatus.Failed
+                    },
+                    translations = cleanTranslatedBlocks(value.bookUrl, value.translations),
+                    configKey = value.configKey,
+                    failure = when (value.failure) {
+                        dev.mirutime.app.features.translation.data.ChapterTranslationFailure.LocalNetworkRequired ->
+                            ReaderTranslationFailure.LocalNetworkRequired
+                        dev.mirutime.app.features.translation.data.ChapterTranslationFailure.CleartextNotAllowed ->
+                            ReaderTranslationFailure.CleartextNotAllowed
+                        null -> null
+                    },
+                )
             }
+        }
             .stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
     override val metadata: StateFlow<Map<String, ReaderBookMetadata>> =
@@ -160,5 +167,21 @@ class AppReaderTranslationPort(
                 config = config,
             ),
         )
+    }
+}
+
+/**
+ * Translation-stage cleanup: only rules that target translations (or both).
+ * An unknown book falls back to the global rules only.
+ */
+internal fun cleanTranslatedBlocks(
+    bookUrl: String,
+    translations: Map<Int, String>,
+): Map<Int, String> {
+    if (translations.isEmpty()) return translations
+    val rules = AppSettings.effectiveRules(bookUrl.takeIf { it.isNotBlank() })
+    if (rules.isEmpty()) return translations
+    return translations.mapValues { (_, text) ->
+        applyRulesFor(rules, text, RegexRuleTarget.Translation)
     }
 }

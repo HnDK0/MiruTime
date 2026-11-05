@@ -67,4 +67,53 @@ class TtsChunkerTest {
         assertTrue(chunks.all { it.text.length <= 3800 })
         assertEquals(text.split(' ').size, chunks.sumOf { it.text.split(' ').size })
     }
+
+    @Test
+    fun `status panels logs and dividers are not spoken`() {
+        val doc = document(
+            paragraph(0, "***"),
+            paragraph(1, "Name: Kaito\nLevel: 12\nHP: 120/150"),
+            paragraph(2, "[12:34] Alice: hi\n[12:35] Bob: yo"),
+            paragraph(3, "Real prose."),
+        )
+
+        val chunks = TtsChunker.chunks(doc)
+
+        assertEquals(listOf("Real prose."), chunks.map { it.text })
+        assertEquals(listOf(3), chunks.map { it.blockId.index })
+    }
+
+    @Test
+    fun `translated noise is not spoken either`() {
+        val doc = document(paragraph(0, "Original prose."))
+
+        val chunks = TtsChunker.chunks(doc, mapOf(0 to "HP: 120 / MP: 30"))
+
+        assertTrue(chunks.isEmpty())
+    }
+
+    @Test
+    fun `decorated text keeps offsets on real characters`() {
+        val text = "*** Hello. ***"
+        val doc = document(paragraph(0, text, listOf(SentenceSpan(4, 10))))
+
+        val chunk = TtsChunker.chunks(doc).single()
+
+        assertEquals("Hello.", chunk.text)
+        assertEquals(4, chunk.startOffset)
+        assertEquals(10, chunk.endOffset)
+        assertEquals("Hello.", text.substring(chunk.startOffset, chunk.endOffset))
+    }
+
+    @Test
+    fun `newlines inside a chunk become spaces without shifting offsets`() {
+        val text = "One.\nTwo."
+        val doc = document(paragraph(0, text, listOf(SentenceSpan(0, 9))))
+
+        val chunk = TtsChunker.chunks(doc).single()
+
+        assertEquals("One. Two.", chunk.text)
+        assertEquals(0, chunk.startOffset)
+        assertEquals(9, chunk.endOffset)
+    }
 }

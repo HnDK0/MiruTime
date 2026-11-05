@@ -5,6 +5,7 @@ import dev.mirutime.app.features.finder.domain.CatalogSort
 import dev.mirutime.app.features.finder.domain.FilterPreset
 import dev.mirutime.app.features.library.domain.CardStyle
 import dev.mirutime.core.text.RegexRule
+import dev.mirutime.core.text.RegexRuleScope
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
 import org.junit.Assert.assertEquals
@@ -471,6 +472,34 @@ class SettingsStoreTest {
         } finally {
             AppSettings.applyPersisted(previous)
         }
+    }
+
+    @Test
+    fun `rule scopes survive a store round trip`() {
+        val rules = listOf(
+            RegexRule(1, "a", "", "", true, false, RegexRuleScope.Original),
+            RegexRule(2, "b", "", "", true, false, RegexRuleScope.Translation),
+            RegexRule(3, "c", "", "", true, false, RegexRuleScope.Both),
+        )
+        val store = SettingsStore(InMemoryKeyValueStore())
+        store.save(PersistedSettings(globalRegexRules = rules))
+
+        val loaded = store.load()
+
+        assertEquals(rules, loaded.globalRegexRules)
+        assertEquals(rules.map { it.scope }, loaded.globalRegexRules.map { it.scope })
+    }
+
+    @Test
+    fun `legacy rule records without a scope decode as both`() {
+        // Records written before scopes existed have six fields, no seventh.
+        val legacy = SettingsStore.encodeRecords(
+            listOf(listOf("1", "a", "", "", "true", "false")),
+        )
+
+        val rules = SettingsStore.decodeRules(legacy)
+
+        assertEquals(RegexRuleScope.Both, rules.single().scope)
     }
 
     private class InMemoryKeyValueStore(

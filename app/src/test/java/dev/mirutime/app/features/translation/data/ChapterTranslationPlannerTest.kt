@@ -6,7 +6,9 @@ import dev.mirutime.app.features.reader.document.ReaderBlock
 import dev.mirutime.app.features.reader.document.ReaderDocument
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.core.text.RegexRule
+import dev.mirutime.core.text.RegexRuleScope
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -179,6 +181,60 @@ class ChapterTranslationPlannerTest {
             )
 
             assertEquals(listOf("baz bar"), request?.units?.map { it.text })
+        } finally {
+            AppSettings.novelRegexRules.remove(bookUrl)
+        }
+    }
+
+    @Test
+    fun `only original rules change the translator input and source hash`() {
+        val config = ChapterTranslationConfig(mode = mode(), prompt = null)
+        val baseline = ChapterTranslationPlanner.requestFromHtml(
+            bookUrl = bookUrl,
+            chapterUrl = chapterUrl,
+            html = "<p>foo bar</p>",
+            config = config,
+        )
+        try {
+            AppSettings.novelRegexRules[bookUrl] = listOf(
+                RegexRule(
+                    id = 1,
+                    pattern = "foo",
+                    replacement = "",
+                    description = "translation only",
+                    enabled = true,
+                    wholeWords = false,
+                    scope = RegexRuleScope.Translation,
+                ),
+            )
+            val translationOnly = ChapterTranslationPlanner.requestFromHtml(
+                bookUrl = bookUrl,
+                chapterUrl = chapterUrl,
+                html = "<p>foo bar</p>",
+                config = config,
+            )
+            assertEquals(listOf("foo bar"), translationOnly?.units?.map { it.text })
+            assertEquals(baseline?.revision?.sourceHash, translationOnly?.revision?.sourceHash)
+
+            AppSettings.novelRegexRules[bookUrl] = listOf(
+                RegexRule(
+                    id = 1,
+                    pattern = "foo",
+                    replacement = "",
+                    description = "original",
+                    enabled = true,
+                    wholeWords = false,
+                    scope = RegexRuleScope.Original,
+                ),
+            )
+            val original = ChapterTranslationPlanner.requestFromHtml(
+                bookUrl = bookUrl,
+                chapterUrl = chapterUrl,
+                html = "<p>foo bar</p>",
+                config = config,
+            )
+            assertEquals(listOf("bar"), original?.units?.map { it.text })
+            assertNotEquals(baseline?.revision?.sourceHash, original?.revision?.sourceHash)
         } finally {
             AppSettings.novelRegexRules.remove(bookUrl)
         }

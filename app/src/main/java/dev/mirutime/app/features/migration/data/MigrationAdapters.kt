@@ -97,7 +97,7 @@ class AppSettingsMigrationSettings(
         }
         AppSettings.novelRegexRules[oldBookUrl]?.let { rules ->
             if (newBookUrl !in AppSettings.novelRegexRules) {
-                AppSettings.novelRegexRules[newBookUrl] = rules
+                AppSettings.replaceNovelRules(newBookUrl, rules)
             }
         }
         AppSettings.novelPrompts.firstOrNull { it.bookUrl == oldBookUrl }?.let { prompt ->
@@ -110,7 +110,7 @@ class AppSettingsMigrationSettings(
 
     override suspend fun deleteNovelSettings(bookUrl: String) {
         AppSettings.novelTranslation.remove(bookUrl)
-        AppSettings.novelRegexRules.remove(bookUrl)
+        AppSettings.replaceNovelRules(bookUrl, null)
         AppSettings.novelPrompts.removeAll { it.bookUrl == bookUrl }
         saveDurably()
     }
