@@ -104,6 +104,19 @@ class SentencePairsTest {
     }
 
     @Test
+    fun `uses provided original spans`() {
+        val text = "Alpha beta. Gamma delta. Epsilon zeta."
+        val custom = listOf(SentenceSpan(0, 10), SentenceSpan(11, text.length))
+
+        val pairs = SentencePairs.pair(custom, text)
+
+        assertEquals(2, pairs.size)
+        assertEquals(custom[0], pairs[0].original)
+        assertEquals(custom[1], pairs[1].original)
+        assertCovered(text, pairs) { it.translated }
+    }
+
+    @Test
     fun `one short sentence pairs whole`() {
         val original = "Hello."
         val translated = "Привет."

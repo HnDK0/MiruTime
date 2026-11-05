@@ -19,8 +19,15 @@ data class SentencePair(
  * yields no pairs: [pair] returns an empty list when either string is empty.
  */
 object SentencePairs {
-    fun pair(original: String, translated: String): List<SentencePair> {
-        val originalSpans = SentenceSplitter.spans(original)
+    /** Convenience overload for callers that only have the source string. */
+    fun pair(original: String, translated: String): List<SentencePair> =
+        pair(SentenceSplitter.spans(original), translated)
+
+    /**
+     * Pairs precomputed original spans (for example [ReaderBlock.sentences])
+     * with translated spans, so the original is never re-split at render time.
+     */
+    fun pair(originalSpans: List<SentenceSpan>, translated: String): List<SentencePair> {
         val translatedSpans = SentenceSplitter.spans(translated)
         if (originalSpans.isEmpty() || translatedSpans.isEmpty()) return emptyList()
 

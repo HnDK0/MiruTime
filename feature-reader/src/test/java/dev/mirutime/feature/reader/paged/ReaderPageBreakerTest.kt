@@ -276,6 +276,23 @@ class ReaderPageBreakerTest {
     }
 
     @Test
+    fun `parallel pairs use precomputed block sentence spans`() {
+        val text = "Alpha beta. Gamma delta. Epsilon zeta."
+        val custom = listOf(SentenceSpan(0, 10), SentenceSpan(11, text.length))
+        val block = ReaderBlock(
+            id = BlockId("c", 0),
+            kind = BlockKind.Paragraph,
+            original = text,
+            sentences = custom,
+        )
+
+        val pairs = parallelPairs(block, text, splitSentences = true)
+
+        assertEquals(custom[0], pairs.first().original)
+        assertEquals(custom[1], pairs.last().original)
+    }
+
+    @Test
     fun `paired rows reserve primary gap and alt height`() {
         val pair = SentencePair(
             original = SentenceSpan(start = 100, end = 140),

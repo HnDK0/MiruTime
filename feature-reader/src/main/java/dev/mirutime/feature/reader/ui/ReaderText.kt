@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,9 +57,10 @@ import dev.mirutime.feature.reader.R
 import dev.mirutime.app.features.reader.document.BlockId
 import dev.mirutime.app.features.reader.document.BlockKind
 import dev.mirutime.app.features.reader.document.ReaderBlock
+import dev.mirutime.app.features.reader.document.ReaderSplit
+import dev.mirutime.app.features.reader.document.SentenceSplitter
 import dev.mirutime.feature.reader.ReaderStyle
 import dev.mirutime.feature.reader.paged.parallelPairs
-import dev.mirutime.feature.tts.TtsChunker
 import dev.mirutime.feature.tts.api.TtsHighlight
 import dev.mirutime.feature.tts.ui.highlightedRange
 import coil3.compose.AsyncImage
@@ -93,7 +95,7 @@ fun ReaderBlockView(
     // optional word-range highlight is disabled. Split paragraphs instead tint
     // only the sentence being spoken (see sentenceHighlightModifier), so one
     // pre-split paragraph never lights up as several.
-    val splitParagraph = style.splitSentences && block.kind == BlockKind.Paragraph
+    val splitParagraph = ReaderSplit.shouldSplit(block, style.splitSentences)
     val activeBlock = ttsHighlight?.blockId == block.id
     val blockTint = activeBlock && !splitParagraph
     val content: @Composable () -> Unit = {
@@ -172,50 +174,53 @@ private fun OriginalText(block: ReaderBlock, style: ReaderStyle, highlight: TtsH
                 )
             }
         }
-        BlockKind.Paragraph -> if (style.splitSentences && block.sentences.isNotEmpty()) {
-            // Keep one Text per sentence even while TTS highlights a range.
-            // Collapsing to a single paragraph Text on highlight start made
-            // the whole block re-layout and blink at every chunk boundary.
-            Column(verticalArrangement = Arrangement.spacedBy(style.paragraphSpacingDp.dp)) {
-                block.sentences.forEach { span ->
-                    val rawStart = span.start.coerceIn(0, block.original.length)
-                    val rawEnd = span.end.coerceIn(rawStart, block.original.length)
-                    val sentence = block.original.substring(rawStart, rawEnd)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .then(
-                                sentenceHighlightModifier(
-                                    blockId = block.id,
-                                    start = rawStart,
-                                    end = rawEnd,
-                                    isTranslated = false,
+        BlockKind.Paragraph -> {
+            val spans = remember(block.sentences, block.original) { ReaderSplit.originalSpans(block) }
+            if (ReaderSplit.shouldSplit(block, style.splitSentences) && spans.isNotEmpty()) {
+                // Keep one Text per sentence even while TTS highlights a range.
+                // Collapsing to a single paragraph Text on highlight start made
+                // the whole block re-layout and blink at every chunk boundary.
+                Column(verticalArrangement = Arrangement.spacedBy(style.paragraphSpacingDp.dp)) {
+                    spans.forEach { span ->
+                        val rawStart = span.start.coerceIn(0, block.original.length)
+                        val rawEnd = span.end.coerceIn(rawStart, block.original.length)
+                        val sentence = block.original.substring(rawStart, rawEnd)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(
+                                    sentenceHighlightModifier(
+                                        blockId = block.id,
+                                        start = rawStart,
+                                        end = rawEnd,
+                                        isTranslated = false,
+                                        highlight = highlight,
+                                    ),
+                                ),
+                        ) {
+                            Text(
+                                text = highlightedSentence(
+                                    sentence = sentence,
+                                    sentenceStart = rawStart,
+                                    block = block,
                                     highlight = highlight,
                                 ),
-                            ),
-                    ) {
-                        Text(
-                            text = highlightedSentence(
-                                sentence = sentence,
-                                sentenceStart = rawStart,
-                                block = block,
-                                highlight = highlight,
-                            ),
-                            style = style.toTextStyle(),
-                        )
+                                style = style.toTextStyle(),
+                            )
+                        }
                     }
                 }
+            } else if (highlight != null) {
+                Text(
+                    text = highlightedText(block.original, block, style, highlight),
+                    style = style.toTextStyle(),
+                )
+            } else {
+                Text(
+                    text = style.paragraphText(block.original),
+                    style = style.toTextStyle(),
+                )
             }
-        } else if (highlight != null) {
-            Text(
-                text = highlightedText(block.original, block, style, highlight),
-                style = style.toTextStyle(),
-            )
-        } else {
-            Text(
-                text = style.paragraphText(block.original),
-                style = style.toTextStyle(),
-            )
         }
     }
 }
@@ -231,9 +236,10 @@ private fun TranslatedText(
     val textStyle = if (kind == BlockKind.Heading) style.headingTextStyle() else style.toTextStyle()
     // Only paragraph splitting gets the per-sentence tint; other kinds keep the
     // whole-block tint from the caller.
-    if (block != null && style.splitSentences && kind == BlockKind.Paragraph) {
+    if (block != null && ReaderSplit.shouldSplit(block, style.splitSentences)) {
+        val spans = remember(text) { SentenceSplitter.spans(text) }
         Column(verticalArrangement = Arrangement.spacedBy(style.paragraphSpacingDp.dp)) {
-            TtsChunker.sentenceSpans(text).forEach { span ->
+            spans.forEach { span ->
                 val sentence = text.substring(span.start, span.end)
                 Box(
                     modifier = Modifier
@@ -296,8 +302,12 @@ internal data class FeedPairCopy(
  * block stays one whole-block pair. Both-blank pairs are dropped and blank
  * sides are skipped when painting, matching paged mode.
  */
-internal fun feedPairPlan(block: ReaderBlock, translated: String): List<FeedPairCopy> =
-    parallelPairs(block, translated, splitSentences = true).mapNotNull { pair ->
+internal fun feedPairPlan(
+    block: ReaderBlock,
+    translated: String,
+    splitSentences: Boolean,
+): List<FeedPairCopy> =
+    parallelPairs(block, translated, splitSentences).mapNotNull { pair ->
         val primary = translated.sliceSpan(pair.translated.start, pair.translated.end)
         val secondary = block.original.sliceSpan(pair.original.start, pair.original.end)
         if (primary.isBlank() && secondary.isBlank()) {
@@ -335,13 +345,16 @@ private fun ParallelTranslation(
     val originalStyle = style.pagedSecondaryTextStyle(block.kind)
     // shortcut: mirrors paged PagedAltGap; share a token if it ever changes.
     val copyGap = 6.dp
-    val pairMode = style.splitSentences && block.kind == BlockKind.Paragraph
+    val pairMode = ReaderSplit.shouldSplit(block, style.splitSentences)
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(style.paragraphSpacingDp.dp),
     ) {
         if (pairMode) {
-            feedPairPlan(block, translated).forEach { copy ->
+            val pairPlan = remember(block.sentences, translated, style.splitSentences) {
+                feedPairPlan(block, translated, style.splitSentences)
+            }
+            pairPlan.forEach { copy ->
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -632,7 +645,7 @@ private fun SplitTtsText(
     highlight: TtsHighlight?,
     isTranslated: Boolean,
 ) {
-    if (!style.splitSentences) {
+    if (!ReaderSplit.shouldSplit(block, style.splitSentences)) {
         Text(
             text = highlightedText(
                 raw = text,
@@ -646,10 +659,8 @@ private fun SplitTtsText(
         )
         return
     }
-    val spans = if (!isTranslated && block.sentences.isNotEmpty()) {
-        block.sentences
-    } else {
-        TtsChunker.sentenceSpans(text)
+    val spans = remember(text, isTranslated, block.sentences) {
+        if (!isTranslated) ReaderSplit.originalSpans(block) else SentenceSplitter.spans(text)
     }
     Column(verticalArrangement = Arrangement.spacedBy(style.paragraphSpacingDp.dp)) {
         spans.forEach { span ->

@@ -66,6 +66,7 @@ import dev.mirutime.app.features.reader.document.BlockKind
 import coil3.compose.AsyncImage
 import dev.mirutime.app.features.reader.document.ReaderBlock
 import dev.mirutime.app.features.reader.document.ReaderDocument
+import dev.mirutime.app.features.reader.document.ReaderSplit
 import dev.mirutime.app.features.reader.document.ReadingAnchor
 import dev.mirutime.app.features.reader.document.SentenceSpan
 import dev.mirutime.app.features.reader.document.SentenceSplitter
@@ -85,7 +86,6 @@ import dev.mirutime.feature.reader.ui.headingTextStyle
 import dev.mirutime.feature.reader.ui.paragraphText
 import dev.mirutime.feature.reader.ui.selectionSearchMenu
 import dev.mirutime.feature.reader.ui.toTextStyle
-import dev.mirutime.feature.tts.TtsChunker
 import dev.mirutime.feature.tts.api.TtsHighlight
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -935,12 +935,12 @@ private fun measurePages(
                 }
                 val source = translated ?: block.original
                 if (source.isBlank()) return@forEach
-                val split = block.kind == BlockKind.Paragraph && style.splitSentences
+                val split = ReaderSplit.shouldSplit(block, style.splitSentences)
                 val segments = if (split) {
                     if (translated != null) {
-                        TtsChunker.sentenceSpans(source)
+                        SentenceSplitter.spans(source)
                     } else {
-                        block.sentences.ifEmpty { SentenceSplitter.spans(source) }
+                        ReaderSplit.originalSpans(block)
                     }
                 } else {
                     listOf(SentenceSpan(0, source.length))

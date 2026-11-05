@@ -26,7 +26,7 @@ class FeedPairPlanTest {
 
     @Test
     fun pairsEverySentenceInOrderWithoutLoss() {
-        val plan = feedPairPlan(block, translated)
+        val plan = feedPairPlan(block, translated, splitSentences = true)
 
         assertEquals(3, plan.size)
         assertEquals(
@@ -59,8 +59,17 @@ class FeedPairPlanTest {
     }
 
     @Test
+    fun splitOffKeepsOneWholeBlockPair() {
+        val plan = feedPairPlan(block, translated, splitSentences = false)
+
+        assertEquals(1, plan.size)
+        assertEquals(original, plan.single().original)
+        assertEquals(translated, plan.single().translated)
+    }
+
+    @Test
     fun blankTranslationKeepsOriginalOnly() {
-        val plan = feedPairPlan(block, "")
+        val plan = feedPairPlan(block, "", splitSentences = true)
 
         assertEquals(1, plan.size)
         assertTrue(plan.single().translated.isBlank())

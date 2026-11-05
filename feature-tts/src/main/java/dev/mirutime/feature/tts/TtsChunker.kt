@@ -4,7 +4,6 @@ import dev.mirutime.app.features.reader.document.BlockId
 import dev.mirutime.app.features.reader.document.BlockKind
 import dev.mirutime.app.features.reader.document.ReaderDocument
 import dev.mirutime.app.features.reader.document.SentenceSplitter
-import dev.mirutime.app.features.reader.document.SentenceSpan
 
 /** One spoken unit. Offsets refer to the text actually spoken. */
 data class TtsChunk(
@@ -88,7 +87,4 @@ object TtsChunker {
         }
         return to
     }
-
-    /** Same sentence boundaries used for speaking and UI split. */
-    fun sentenceSpans(text: String): List<SentenceSpan> = SentenceSplitter.spans(text)
 }

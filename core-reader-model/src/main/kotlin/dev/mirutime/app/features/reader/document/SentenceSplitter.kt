@@ -1,21 +1,32 @@
 package dev.mirutime.app.features.reader.document
 
+/** Why [SentenceSplitter.spans] kept a paragraph whole. Diagnostic surface for tests. */
+internal enum class SplitSkip {
+    STATUS_BLOCK,
+    LOG_BLOCK,
+    FRAME_BLOCK,
+    DASH_DIALOGUE,
+    NO_BOUNDARY,
+    TRIVIAL_BOUNDARY,
+}
+
+/** Spans for one paragraph plus the reason it stayed whole, if it did. */
+internal data class SplitPlan(val spans: List<SentenceSpan>, val skipped: SplitSkip?)
+
 /**
  * Rule-based paragraph-to-sentences splitter, ported from NoveLA.
  *
- * Pure Kotlin stdlib, no dependencies. A paragraph is only split when it is
- * long enough and contains at least one valid sentence boundary; dialogue,
- * status blocks (litRPG), dash-dialogue paragraphs and paragraphs with
- * decorative symbols (frames, emoji, ornamentation) are always kept whole.
+ * Pure Kotlin stdlib, no dependencies. A paragraph is split whenever it has at
+ * least one valid sentence boundary; structural blocks stay whole on purpose:
+ * litRPG status blocks, chat/system log lines, framed decoration lines,
+ * dash-dialogue paragraphs, and paragraphs without a valid boundary.
  *
- * [spans] returns the same segments as NoveLA's `splitParagraph`, but as
- * offsets into [text] (leading/trailing whitespace of each sentence excluded).
+ * Boundary validation follows NoveLA's `splitParagraph`, but the policy is
+ * local: there is no minimum-length gate, decoration is judged per line, and
+ * chat/system log blocks stay whole. [spans] returns offsets into [text]
+ * (leading/trailing whitespace of each sentence excluded).
  */
 object SentenceSplitter {
-    // Threshold lowered from 250 to 100 (data-driven, NoveLA issue-209):
-    // 165 of 1004 web-novel paragraphs in the 100-249 band split into >=2
-    // real sentences; 250 left those whole.
-    private const val MIN_PARAGRAPH_LENGTH = 100
     private const val SHORT_STATUS_LINE_LENGTH = 40
     private const val EM_DASH = '\u2014'
     private const val EN_DASH = '\u2013'
@@ -111,14 +122,29 @@ object SentenceSplitter {
     private val REPEATED_CHAR_DIVIDER = Regex("^(.)\\1{3,}$")
 
     /**
-     * Unicode blocks that signal non-prose ornamentation: box-drawing frames,
-     * block elements, geometric shapes, misc symbols, dingbats and emoji.
-     * Any paragraph containing one of these is kept whole — rule-based
-     * splitting would tear apart visual structure (frames, status boxes, dividers).
+     * Chat/system log line prefix: a timestamp, a bracketed tag, an angle
+     * handle or a bold handle. A bare "Name:" multi-line block is caught by
+     * [isStatusBlock] instead.
      */
-    private val DECORATIVE_RANGES = listOf(
-        0x2500..0x257F, // Box Drawing
-        0x2580..0x259F, // Block Elements
+    private val LOG_PREFIX = Regex(
+        """^\s*(?:\[\d{1,2}:\d{2}(?::\d{2})?]|\[[^\]]{1,24}]|<[^<>]{1,32}>|\*\*[^*]{1,32}\*\*)\s*\S"""
+    )
+
+    /** Box Drawing + Block Elements: chars that form a frame around a block. */
+    private val FRAME_RANGES = listOf(
+        0x2500..0x257F,
+        0x2580..0x259F,
+    )
+
+    /**
+     * Unicode blocks that signal ornamentation: frames plus geometric shapes,
+     * misc symbols, dingbats and emoji.
+     *
+     * A paragraph stays whole only when a line is made of decoration alone or
+     * starts/ends with a frame char. A single emoji inside prose no longer
+     * blocks sentence splitting.
+     */
+    private val DECORATIVE_RANGES = FRAME_RANGES + listOf(
         0x25A0..0x25FF, // Geometric Shapes
         0x2600..0x26FF, // Miscellaneous Symbols
         0x2700..0x27BF, // Dingbats
@@ -126,18 +152,21 @@ object SentenceSplitter {
     )
 
     /**
-     * Splits [text] into sentence spans using NoveLA's rules: paragraphs
-     * shorter than 100 chars, status blocks, dash dialogue, decorative
-     * paragraphs and paragraphs without a valid boundary stay one span.
+     * Splits [text] into sentence spans. Blank text yields no spans; see
+     * [SplitSkip] for the reasons a non-blank paragraph stays one span.
      */
-    fun spans(text: String): List<SentenceSpan> {
-        if (text.isEmpty()) return emptyList()
-        if (text.length < MIN_PARAGRAPH_LENGTH) return listOf(SentenceSpan(0, text.length))
-        if (isStatusBlock(text) || isDashDialogue(text) || hasDecorationSymbols(text)) {
-            return listOf(SentenceSpan(0, text.length))
-        }
+    fun spans(text: String): List<SentenceSpan> = splitPlan(text).spans
+
+    internal fun splitPlan(text: String): SplitPlan {
+        if (text.isBlank()) return SplitPlan(emptyList(), null)
+        if (isLogBlock(text)) return SplitPlan(listOf(SentenceSpan(0, text.length)), SplitSkip.LOG_BLOCK)
+        if (isStatusBlock(text)) return SplitPlan(listOf(SentenceSpan(0, text.length)), SplitSkip.STATUS_BLOCK)
+        if (isFrameBlock(text)) return SplitPlan(listOf(SentenceSpan(0, text.length)), SplitSkip.FRAME_BLOCK)
+        if (isDashDialogue(text)) return SplitPlan(listOf(SentenceSpan(0, text.length)), SplitSkip.DASH_DIALOGUE)
         val boundaries = findValidBoundaries(text)
-        if (boundaries.isEmpty()) return listOf(SentenceSpan(0, text.length))
+        if (boundaries.isEmpty()) {
+            return SplitPlan(listOf(SentenceSpan(0, text.length)), SplitSkip.NO_BOUNDARY)
+        }
 
         val spans = mutableListOf<SentenceSpan>()
         var start = 0
@@ -146,7 +175,13 @@ object SentenceSplitter {
             start = boundary + 1
         }
         addTrimmedSpan(text, start, text.length, spans)
-        return spans.ifEmpty { listOf(SentenceSpan(0, text.length)) }
+        if (spans.size <= 1) {
+            return SplitPlan(
+                spans.ifEmpty { listOf(SentenceSpan(0, text.length)) },
+                SplitSkip.TRIVIAL_BOUNDARY,
+            )
+        }
+        return SplitPlan(spans, null)
     }
 
     /** Mirrors NoveLA's per-segment `.trim()` without losing offsets. */
@@ -158,21 +193,34 @@ object SentenceSplitter {
         if (start < end) out += SentenceSpan(start, end)
     }
 
-    /** True when [text] contains any framing/decoration symbol or emoji. */
-    private fun hasDecorationSymbols(text: String): Boolean {
-        var i = 0
-        while (i < text.length) {
-            val ch = text[i]
-            val cp = if (ch.isHighSurrogate() && i + 1 < text.length && text[i + 1].isLowSurrogate()) {
-                Character.toCodePoint(ch, text[i + 1])
-            } else {
-                ch.code
-            }
-            if (DECORATIVE_RANGES.any { cp in it }) return true
-            i++
-        }
-        return false
+    /**
+     * A paragraph is a log/chat block when its only line starts with a log
+     * prefix, or when at least two lines look like chat lines ("[12:34]",
+     * "<Alice>", "**Alice**"). "Name: ..." lines are status-block territory.
+     */
+    private fun isLogBlock(text: String): Boolean {
+        val lines = text.split('\n')
+        if (lines.size == 1) return LOG_PREFIX.containsMatchIn(text)
+        return lines.count { LOG_PREFIX.containsMatchIn(it) } >= 2
     }
+
+    /**
+     * A paragraph is framed when at least one line is made of decoration alone
+     * or starts/ends with a box-drawing/block-element char.
+     */
+    private fun isFrameBlock(text: String): Boolean = text.lineSequence().any { line ->
+        val trimmed = line.trim()
+        if (trimmed.isEmpty()) return@any false
+        val allDecoration = trimmed.codePoints().allMatch { isDecorationCodePoint(it) }
+        allDecoration || isFrameCodePoint(trimmed.codePointAt(0)) ||
+            isFrameCodePoint(trimmed.codePointBefore(trimmed.length))
+    }
+
+    private fun isDecorationCodePoint(codePoint: Int): Boolean =
+        DECORATIVE_RANGES.any { codePoint in it }
+
+    private fun isFrameCodePoint(codePoint: Int): Boolean =
+        FRAME_RANGES.any { codePoint in it }
 
     /**
      * Scans [text] left to right with a quote/bracket stack. A terminator is a
@@ -305,9 +353,9 @@ object SentenceSplitter {
     }
 
     /**
-     * True when the paragraph looks like a litRPG status block and must be kept
-     * whole: >= 2 "key: value" lines, or any divider line, or >= 2 short lines
-     * without any terminator.
+     * True when the paragraph is a structural block and must be kept whole:
+     * >= 2 "key: value" lines (litRPG), any divider line, or >= 2 short lines
+     * without any terminator (titles, verse, status lists).
      */
     private fun isStatusBlock(paragraph: String): Boolean {
         var keyValueLines = 0

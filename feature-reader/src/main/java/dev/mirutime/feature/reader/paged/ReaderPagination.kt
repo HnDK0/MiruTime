@@ -3,6 +3,7 @@ package dev.mirutime.feature.reader.paged
 import dev.mirutime.app.features.reader.document.BlockId
 import dev.mirutime.app.features.reader.document.BlockKind
 import dev.mirutime.app.features.reader.document.ReaderBlock
+import dev.mirutime.app.features.reader.document.ReaderSplit
 import dev.mirutime.app.features.reader.document.ReadingAnchor
 import dev.mirutime.app.features.reader.document.SentencePair
 import dev.mirutime.app.features.reader.document.SentencePairs
@@ -63,8 +64,8 @@ fun parallelPairs(
     translated: String,
     splitSentences: Boolean,
 ): List<SentencePair> {
-    if (block.kind == BlockKind.Paragraph && splitSentences) {
-        val pairs = SentencePairs.pair(block.original, translated)
+    if (ReaderSplit.shouldSplit(block, splitSentences)) {
+        val pairs = SentencePairs.pair(ReaderSplit.originalSpans(block), translated)
         if (pairs.isNotEmpty()) return pairs
     }
     return listOf(

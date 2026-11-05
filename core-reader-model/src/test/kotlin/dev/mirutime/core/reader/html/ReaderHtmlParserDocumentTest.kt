@@ -20,8 +20,7 @@ class ReaderHtmlParserDocumentTest {
         assertEquals(BlockId("b#chapter=1", 0), blocks[0].id)
         assertEquals(BlockId("b#chapter=1", 1), blocks[1].id)
         assertEquals(
-            // Below the 100-char splitter threshold the paragraph is one span.
-            listOf(SentenceSpan(0, 9)),
+            listOf(SentenceSpan(0, 4), SentenceSpan(5, 9)),
             blocks[1].sentences,
         )
     }

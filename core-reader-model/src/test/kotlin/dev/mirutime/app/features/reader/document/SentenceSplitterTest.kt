@@ -5,8 +5,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * NoveLA SentenceSplitter parity cases. Expected segments are the exact
- * strings NoveLA produces; spans must reconstruct those segments.
+ * Rule-level splitter cases: boundary validation, typography and the
+ * intentional "keep whole" blocks. Genre/language matrix lives in
+ * [SentenceSplitterCorpusTest].
  */
 class SentenceSplitterTest {
 
@@ -26,19 +27,19 @@ class SentenceSplitterTest {
     // --- Size gate -----------------------------------------------------------
 
     @Test
-    fun `short paragraph with two sentences is kept whole`() {
+    fun `short paragraph with two sentences splits`() {
         val input = "He walked home. The sun was setting."
-        assertEquals(listOf(input), segments(input))
+        assertEquals(listOf("He walked home.", "The sun was setting."), segments(input))
     }
 
     @Test
-    fun `99 chars stay whole and 100 chars can split`() {
+    fun `paragraph length no longer gates splitting`() {
         val under = "A".repeat(96) + ". B"
         val over = "A".repeat(97) + ". B"
         assertEquals(99, under.length)
         assertEquals(100, over.length)
 
-        assertEquals(listOf(under), segments(under))
+        assertEquals(listOf("A".repeat(96) + ".", "B"), segments(under))
         assertEquals(listOf("A".repeat(97) + ".", "B"), segments(over))
     }
 
@@ -96,6 +97,7 @@ class SentenceSplitterTest {
     fun `dash dialogue paragraph is kept whole`() {
         val input = "— Привет, как дела? — спросил он, подходя ближе и протягивая руку для рукопожатия. — Хорошо, спасибо, — ответила она и улыбнулась, глядя ему в глаза. — Отлично, тогда пойдём прогуляемся по парку, — предложил он и показал рукой в сторону аллеи. — С удовольствием, — согласилась она, поправляя шарф."
         assertEquals(listOf(input), segments(input))
+        assertEquals(SplitSkip.DASH_DIALOGUE, SentenceSplitter.splitPlan(input).skipped)
     }
 
     @Test
@@ -170,18 +172,46 @@ class SentenceSplitterTest {
     fun `status block with key value lines stays whole`() {
         val input = "Имя: Джон\nУровень: 5\nHP: 120/120\nMP: 100/100\nСила: 15\nЛовкость: 12\nИнтеллект: 18\nМудрость: 14\nХаризма: 11\nВыносливость: 20\nСкорость: 16\nУдача: 8\nЗдоровье: 120\nМана: 90\nОпыт: 3500\nЗолото: 450\nАтака: 30\nЗащита: 25"
         assertEquals(listOf(input), segments(input))
+        assertEquals(SplitSkip.STATUS_BLOCK, SentenceSplitter.splitPlan(input).skipped)
     }
 
     @Test
     fun `status divider line stays whole`() {
         val input = "Глава первая: Встреча\n***\nОн шёл домой и думал о том, что произошло сегодня на работе, и не мог найти ответа на вопрос, который мучил его весь вечер и не давал покоя."
         assertEquals(listOf(input), segments(input))
+        assertEquals(SplitSkip.STATUS_BLOCK, SentenceSplitter.splitPlan(input).skipped)
     }
 
     @Test
-    fun `emoji decorated paragraph stays whole`() {
+    fun `emoji in prose does not block splitting`() {
         val input = "Капитан поднялся на палубу и улыбнулся, глядя на горизонт, где уже вставало солнце и разгоняло утренний туман, окутывающий корабль, и на мачтах хлопали паруса. 🌅"
+        assertEquals(
+            listOf(
+                "Капитан поднялся на палубу и улыбнулся, глядя на горизонт, где уже вставало солнце и разгоняло утренний туман, окутывающий корабль, и на мачтах хлопали паруса.",
+                "🌅",
+            ),
+            segments(input),
+        )
+    }
+
+    @Test
+    fun `emoji-only line keeps paragraph whole`() {
+        val input = "🌅🌅🌅"
         assertEquals(listOf(input), segments(input))
+    }
+
+    @Test
+    fun `frame block stays whole`() {
+        val input = "╔══════════════════════════════════════════════════════╗\n║ A very long framed message that should stay untouched ║\n╚══════════════════════════════════════════════════════╝"
+        assertEquals(listOf(input), segments(input))
+        assertEquals(SplitSkip.FRAME_BLOCK, SentenceSplitter.splitPlan(input).skipped)
+    }
+
+    @Test
+    fun `status block with emoji stays whole`() {
+        val input = "🔥 HP: 120/120\nMP: 100/100\nСила: 15\nЛовкость: 12"
+        assertEquals(listOf(input), segments(input))
+        assertEquals(SplitSkip.STATUS_BLOCK, SentenceSplitter.splitPlan(input).skipped)
     }
 
     @Test
@@ -195,6 +225,62 @@ class SentenceSplitterTest {
             ),
             segments(input),
         )
+    }
+
+    // --- Logs / chats --------------------------------------------------------
+
+    @Test
+    fun `system message log line stays whole`() {
+        val input = "[System] You have leveled up! Reward: 100 gold. New skill: Fireball."
+        assertEquals(listOf(input), segments(input))
+        assertEquals(SplitSkip.LOG_BLOCK, SentenceSplitter.splitPlan(input).skipped)
+    }
+
+    @Test
+    fun `angle bracket chat line stays whole`() {
+        val input = "<Alice> Are you there? Hello? It's me, the one who called you yesterday."
+        assertEquals(listOf(input), segments(input))
+        assertEquals(SplitSkip.LOG_BLOCK, SentenceSplitter.splitPlan(input).skipped)
+    }
+
+    @Test
+    fun `timed multi line chat block stays whole`() {
+        val input = "[12:34] Alice: Are you there? Hello?\n[12:35] Bob: Yes. What happened?"
+        assertEquals(listOf(input), segments(input))
+        assertEquals(SplitSkip.LOG_BLOCK, SentenceSplitter.splitPlan(input).skipped)
+    }
+
+    @Test
+    fun `named multi line chat block stays whole`() {
+        val input = "Alice: Are you there? Hello?\nBob: Yes. What happened?"
+        assertEquals(listOf(input), segments(input))
+    }
+
+    @Test
+    fun `single named chat line without brackets is prose`() {
+        val input = "Alice: Are you there? Hello? It's me, the one who called you yesterday."
+        assertEquals(
+            listOf(
+                "Alice: Are you there?",
+                "Hello?",
+                "It's me, the one who called you yesterday.",
+            ),
+            segments(input),
+        )
+    }
+
+    @Test
+    fun `prose with colon is not a chat log`() {
+        val input = "Он сказал: Привет. Как дела? Я давно тебя не видел, и мне есть что рассказать тебе сегодня вечером."
+        assertEquals(3, segments(input).size)
+    }
+
+    // --- Edge cases ----------------------------------------------------------
+
+    @Test
+    fun `blank text yields no spans`() {
+        assertTrue(SentenceSplitter.spans("").isEmpty())
+        assertTrue(SentenceSplitter.spans("   \n\t").isEmpty())
     }
 
     // --- Shadow Slave ch.3 recon fixtures -----------------------------------
