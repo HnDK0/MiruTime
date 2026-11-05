@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.ContextualFlowRow
 import androidx.compose.foundation.layout.ContextualFlowRowOverflow
 import androidx.compose.foundation.layout.ContextualFlowRowOverflowScope
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,7 +33,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -70,10 +68,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -113,7 +109,6 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
@@ -125,10 +120,12 @@ import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.app.design.components.BookCover
 import dev.mirutime.uikit.MiruCard
-import dev.mirutime.uikit.MiruFilterChip
+import dev.mirutime.uikit.MiruActionRow
+import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
+import dev.mirutime.uikit.StatCell
+import dev.mirutime.uikit.StatPanel
 import dev.mirutime.uikit.SkeletonBar
-import dev.mirutime.uikit.miruCardElevation
 import dev.mirutime.uikit.miruCardSurface
 import dev.mirutime.app.core.chapterRowKey
 import dev.mirutime.core.log.MiruLog
@@ -2028,7 +2025,7 @@ private fun AnnounceCard(
 @Composable
 private fun ShelfChip(shelf: String, onClick: () -> Unit) {
     val extra = LocalMiruExtraColors.current
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(MiruRadius.Chip)
     Box(
         modifier = Modifier
             .heightIn(min = MiruSize.Touch)
@@ -2143,7 +2140,7 @@ private fun GenreTag(
     onClick: (() -> Unit)? = null,
 ) {
     val extra = LocalMiruExtraColors.current
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(MiruRadius.Chip)
     val ink = if (emphasized) extra.accent else MaterialTheme.colorScheme.onSurface
     Box(
         modifier = modifier
@@ -2186,11 +2183,11 @@ private fun StatStrip(book: BookDetails, chaptersLoading: Boolean) {
     val readLabel = formatDurationLocalized(book.readMinutes * 60_000L)
     val ttsLabel = formatDurationLocalized(book.ttsMinutes * 60_000L)
     val chaptersKnown = bookChaptersCountKnown(chaptersLoading, book.totalChapters)
-    BookStatPanel(
+    StatPanel(
         cells = buildList {
             if (book.rating > 0f) {
                 add(
-                    BookStatCell(
+                    StatCell(
                         value = formatRating(book.rating),
                         label = stringResource(R.string.book_stat_rating),
                         icon = Icons.Filled.Star,
@@ -2198,7 +2195,7 @@ private fun StatStrip(book: BookDetails, chaptersLoading: Boolean) {
                 )
             }
             add(
-                BookStatCell(
+                StatCell(
                     value = if (chaptersKnown) {
                         stringResource(
                             R.string.card_ratio_fmt,
@@ -2219,7 +2216,7 @@ private fun StatStrip(book: BookDetails, chaptersLoading: Boolean) {
                 ),
             )
             add(
-                BookStatCell(
+                StatCell(
                     value = stringResource(
                         if (book.ongoing) R.string.book_stat_ongoing else R.string.book_stat_completed,
                     ),
@@ -2227,7 +2224,7 @@ private fun StatStrip(book: BookDetails, chaptersLoading: Boolean) {
                 ),
             )
             add(
-                BookStatCell(
+                StatCell(
                     value = formatDurationLocalized((book.readMinutes + book.ttsMinutes) * 60_000L),
                     label = if (book.ttsMinutes > 0) {
                         stringResource(R.string.book_stat_time_labels_fmt, ttsLabel)
@@ -2238,84 +2235,6 @@ private fun StatStrip(book: BookDetails, chaptersLoading: Boolean) {
             )
         },
     )
-}
-
-// Same plate as the shared StatPanel (equal cells, hairline dividers,
-// titleMedium values) with one addition: an optional leading glyph, needed
-// only here for the rating star. The shared cell is text-only.
-private data class BookStatCell(
-    val value: String,
-    val label: String,
-    val icon: ImageVector? = null,
-)
-
-@Composable
-private fun BookStatPanel(
-    cells: List<BookStatCell>,
-    modifier: Modifier = Modifier,
-) {
-    val extra = LocalMiruExtraColors.current
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = miruCardSurface(),
-        shadowElevation = miruCardElevation(),
-        tonalElevation = 0.dp,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(IntrinsicSize.Min)
-                .padding(vertical = MiruSpace.M),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-        ) {
-            cells.forEachIndexed { index, cell ->
-                if (index > 0) {
-                    VerticalDivider(
-                        modifier = Modifier.padding(vertical = 2.dp),
-                        thickness = 1.dp,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
-                }
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = MiruSpace.Xs),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
-                    ) {
-                        cell.icon?.let { icon ->
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                tint = extra.accent,
-                                modifier = Modifier.size(14.dp),
-                            )
-                        }
-                        Text(
-                            text = cell.value,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                    }
-                    Text(
-                        text = cell.label,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = extra.muted,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                    )
-                }
-            }
-        }
-    }
 }
 
 // Continue / Start / Read again as the page's loudest action: one
@@ -2544,7 +2463,7 @@ private fun ChapterDeleteErrorNotice(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(MiruRadius.Chip))
             .background(MaterialTheme.colorScheme.errorContainer)
             .padding(start = MiruSpace.M, top = MiruSpace.Xxs, bottom = MiruSpace.Xxs),
         verticalAlignment = Alignment.CenterVertically,
@@ -2588,7 +2507,7 @@ private fun PlateActionButton(
     iconTint: Color? = null,
 ) {
     val extra = LocalMiruExtraColors.current
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(MiruRadius.Chip)
     val ink = when {
         muted -> extra.muted
         active -> extra.accent
@@ -2763,14 +2682,14 @@ private fun ToolsSection(
         description = stringResource(R.string.book_section_tools_desc),
         contentPadding = PaddingValues(vertical = MiruSpace.Xs),
     ) {
-        ToolRow(
+        MiruActionRow(
             icon = Icons.Filled.Translate,
             title = stringResource(R.string.tool_translator),
             subtitle = stringResource(R.string.tool_translator_desc),
             onClick = onTranslator,
         )
-        ToolDivider()
-        ToolRow(
+        MiruRowDivider()
+        MiruActionRow(
             icon = Icons.Filled.Download,
             title = stringResource(R.string.tool_epub),
             subtitle = if (epubBusy) {
@@ -2780,17 +2699,30 @@ private fun ToolsSection(
             },
             onClick = onEpub,
             enabled = epubEnabled,
-            busy = epubBusy,
+            trailing = if (epubBusy) {
+                {
+                    val exportingLabel = stringResource(R.string.loading_exporting)
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        color = LocalMiruExtraColors.current.accent,
+                        modifier = Modifier
+                            .size(16.dp)
+                            .semantics { contentDescription = exportingLabel },
+                    )
+                }
+            } else {
+                null
+            },
         )
-        ToolDivider()
-        ToolRow(
+        MiruRowDivider()
+        MiruActionRow(
             icon = Icons.Filled.Rule,
             title = stringResource(R.string.tool_regex),
             subtitle = stringResource(R.string.tool_regex_desc),
             onClick = onRegex,
         )
-        ToolDivider()
-        ToolRow(
+        MiruRowDivider()
+        MiruActionRow(
             icon = Icons.Filled.DriveFileMove,
             title = stringResource(R.string.tool_migrate),
             subtitle = stringResource(
@@ -2804,78 +2736,6 @@ private fun ToolsSection(
             enabled = migrateEnabled,
         )
     }
-}
-
-@Composable
-private fun ToolRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-    busy: Boolean = false,
-) {
-    val extra = LocalMiruExtraColors.current
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .defaultMinSize(minHeight = MiruSize.Row)
-            .padding(horizontal = MiruSpace.L, vertical = MiruSpace.S),
-        horizontalArrangement = Arrangement.spacedBy(MiruSpace.M),
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (enabled) extra.accent else extra.muted,
-            modifier = Modifier.size(22.dp),
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                color = if (enabled) MaterialTheme.colorScheme.onSurface else extra.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = extra.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (busy) {
-            val exportingLabel = stringResource(R.string.loading_exporting)
-            CircularProgressIndicator(
-                strokeWidth = 2.dp,
-                color = extra.accent,
-                modifier = Modifier
-                    .size(16.dp)
-                    .semantics { contentDescription = exportingLabel },
-            )
-        } else {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                contentDescription = null,
-                tint = extra.muted,
-                modifier = Modifier.size(16.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun ToolDivider() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = MiruSpace.L)
-            .height(1.dp)
-            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
-    )
 }
 
 // Source-page block: the same one-card construction and the same row
@@ -2895,7 +2755,7 @@ private fun SourcePageSection(
         description = stringResource(R.string.book_section_page_desc),
         contentPadding = PaddingValues(vertical = MiruSpace.Xs),
     ) {
-        ToolRow(
+        MiruActionRow(
             icon = Icons.Filled.Public,
             title = stringResource(R.string.book_open_page),
             subtitle = host,
@@ -2904,8 +2764,8 @@ private fun SourcePageSection(
             },
         )
         if (book.authUrl != null) {
-            ToolDivider()
-            ToolRow(
+            MiruRowDivider()
+            MiruActionRow(
                 icon = Icons.Filled.Login,
                 title = stringResource(R.string.book_open_login),
                 subtitle = host,
@@ -3232,7 +3092,7 @@ private fun BrowserButton(
     enabled: Boolean = true,
 ) {
     val extra = LocalMiruExtraColors.current
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(MiruRadius.Chip)
     val ink = if (enabled) {
         MaterialTheme.colorScheme.onSurface
     } else {
@@ -3309,7 +3169,7 @@ private fun SelectionBar(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(MiruSpace.M))
+            .clip(RoundedCornerShape(MiruRadius.Control))
             .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -3422,7 +3282,7 @@ private fun SelectionAction(
     enabled: Boolean = true,
 ) {
     val extra = LocalMiruExtraColors.current
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(MiruRadius.Chip)
     val ink = if (enabled) color else extra.muted.copy(alpha = 0.55f)
     Box(
         modifier = Modifier
@@ -3548,7 +3408,7 @@ private fun ChapterRow(
                     else -> Color.Transparent
                 },
             )
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(MiruRadius.Chip))
             // Trailing Pause/Resume/Cancel/retry/status glyphs end at the same
             // 8dp gutter as the scrollbar rail. The rail's 48dp lane reaches
             // into the row but only claims the visible 8dp track on touch-down,
@@ -3729,7 +3589,7 @@ private fun ChapterRow(
                 Box(
                     modifier = Modifier
                         .size(18.dp)
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(RoundedCornerShape(MiruRadius.Split))
                         .clickable(role = Role.Button, onClick = onRetryTranslation),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -3878,7 +3738,7 @@ private fun TranslateIconButton(onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .size(MiruSize.Touch)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(MiruRadius.Control))
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

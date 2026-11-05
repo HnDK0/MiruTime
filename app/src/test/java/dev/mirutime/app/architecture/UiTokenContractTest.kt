@@ -51,7 +51,6 @@ class UiTokenContractTest {
 
     // path relative to repo root -> number of numeric RoundedCornerShape literals.
     private val baseline = mapOf(
-        "app/src/main/java/dev/mirutime/app/features/book/ui/BookScreen.kt" to 9,
         "app/src/main/java/dev/mirutime/app/features/dashboard/ui/TimeStatsPanel.kt" to 5,
         "app/src/main/java/dev/mirutime/app/features/downloads/ui/DownloadsScreen.kt" to 1,
         "app/src/main/java/dev/mirutime/app/features/finder/ui/FinderCommon.kt" to 1,
