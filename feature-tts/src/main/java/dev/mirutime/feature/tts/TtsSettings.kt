@@ -16,6 +16,9 @@ const val TtsFloatingMinOpacity = 0.35f
 const val TtsFloatingDefaultOpacity = 0.95f
 const val TtsFloatingDefaultWidth = 300f
 
+/** Auto-next is the product default; the store and the data class share it. */
+internal const val TtsAutoNextChapterDefault = true
+
 /** NoveLA's three paragraph presentations; same ids keep backups readable. */
 val TtsFloatingParagraphModes = setOf("tts", "both", "inverse")
 val TtsFloatingGlowModes = setOf("auto", "on", "off")
@@ -29,7 +32,9 @@ data class TtsSettings(
     val translatedEngineId: String? = null,
     val speed: Float = 1f,
     val pitch: Float = 1f,
-    val autoNextChapter: Boolean = false,
+    val autoNextChapter: Boolean = TtsAutoNextChapterDefault,
+    /** Keep the mini player in the reader menu even when TTS is not running. */
+    val miniPlayerAlways: Boolean = false,
     /** Optional in-reader overlay; off unless the user turns it on. */
     val floatingPlayer: Boolean = false,
     /** Saved top-left positions in dp; negative means "use the default". */

@@ -15,12 +15,18 @@ class TtsSettingsTest {
             engineId = "com.google.android.tts",
             speed = 1.3f,
             pitch = 0.9f,
-            autoNextChapter = true,
+            autoNextChapter = false,
+            miniPlayerAlways = true,
         )
 
         store.save(saved)
 
         assertEquals(saved, store.load())
+    }
+
+    @Test
+    fun autoNextChapterIsOnByDefault() {
+        assertTrue(TtsSettings().autoNextChapter)
     }
 
     @Test
@@ -206,6 +212,7 @@ class TtsSettingsTest {
     fun floatingPlayerAndSavedVoicesPersistTogether() {
         val store = InMemoryTtsSettingsStore()
         val saved = TtsSettings(
+            miniPlayerAlways = true,
             floatingPlayer = true,
             floatingBubbleX = 120f,
             floatingBubbleY = 640f,

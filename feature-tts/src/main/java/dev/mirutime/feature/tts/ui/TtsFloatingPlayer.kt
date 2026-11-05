@@ -93,9 +93,11 @@ import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.feature.tts.TtsFloatingMaxWidth
 import dev.mirutime.feature.tts.TtsFloatingMinWidth
 import dev.mirutime.feature.tts.TtsSettings
+import dev.mirutime.feature.tts.TtsSleepTimerState
 import dev.mirutime.feature.tts.TtsStatus
 import dev.mirutime.feature.tts.formatTtsDuration
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -181,6 +183,8 @@ fun TtsFloatingPlayer(
     chapterCount: Int,
     chapterPercent: Int,
     remainingSeconds: Int,
+    sleepTimer: StateFlow<TtsSleepTimerState?>? = null,
+    onSleepTimerClick: (() -> Unit)? = null,
     atEnd: Boolean,
     glowColorArgb: Long,
     settings: TtsSettings,
@@ -493,8 +497,14 @@ fun TtsFloatingPlayer(
                         chapterLabel = chapterLabel,
                         chapterDescription = chapterDescription,
                         progress = animatedProgress,
-                        timerLabel = timerLabel,
-                        timerDescription = timerDescription,
+                        timerChip = {
+                            TtsFloatingTimerChip(
+                                sleepTimer = sleepTimer,
+                                listeningLabel = timerLabel,
+                                listeningDescription = timerDescription,
+                                onSleepTimerClick = onSleepTimerClick,
+                            )
+                        },
                         playing = playing,
                         session = session,
                         canNext = session && !atEnd,
@@ -767,8 +777,7 @@ private fun FloatingControlRow(
     chapterLabel: String,
     chapterDescription: String,
     progress: Float,
-    timerLabel: String,
-    timerDescription: String,
+    timerChip: @Composable () -> Unit,
     playing: Boolean,
     session: Boolean,
     canNext: Boolean,
@@ -828,25 +837,7 @@ private fun FloatingControlRow(
                         .background(MaterialTheme.colorScheme.primary),
                 )
             }
-            Surface(
-                shape = RoundedCornerShape(MiruRadius.Badge),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.clearAndSetSemantics {
-                    contentDescription = timerDescription
-                },
-            ) {
-                Text(
-                    text = timerLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    maxLines = 1,
-                    modifier = Modifier.padding(
-                        horizontal = MiruSpace.Xs,
-                        vertical = MiruSpace.Xxs,
-                    ),
-                )
-            }
+            timerChip()
             FloatingCompactAction(
                 icon = Icons.AutoMirrored.Rounded.NavigateBefore,
                 contentDescription = stringResource(R.string.rd_tts_prev_chunk),

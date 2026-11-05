@@ -23,6 +23,7 @@ import dev.mirutime.feature.reader.ReaderStyle
 import dev.mirutime.feature.reader.api.ReaderAssetPort
 import dev.mirutime.feature.tts.TtsCapabilities
 import dev.mirutime.feature.tts.TtsSettings
+import dev.mirutime.feature.tts.TtsSleepTimerState
 import dev.mirutime.feature.tts.TtsStatus
 import dev.mirutime.feature.tts.ui.TtsSettingsPanel
 import dev.mirutime.uikit.AppBottomSheet
@@ -30,6 +31,7 @@ import dev.mirutime.uikit.MiruActionRow
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.SettingsSwitchRow
 import dev.mirutime.uikit.SheetSection
+import kotlinx.coroutines.flow.StateFlow
 
 // One reader panel at a time; every panel is the standard 70%-capped sheet.
 enum class ReaderPanel { Style, More, Translation, Tts }
@@ -64,6 +66,10 @@ fun ReaderPanelHost(
     onTtsHighlightChange: (Boolean) -> Unit = {},
     onHighlightColorChange: (Long) -> Unit = {},
     onTtsDiscoverVoices: () -> Unit = {},
+    sleepTimer: StateFlow<TtsSleepTimerState?>? = null,
+    onSleepTimerMinutes: (Int) -> Unit = {},
+    onSleepTimerChapters: (Int) -> Unit = {},
+    onSleepTimerCancel: () -> Unit = {},
     autoScrollEnabled: Boolean = false,
     autoScrollSupported: Boolean = true,
     autoScrollSubtitle: String? = null,
@@ -123,6 +129,10 @@ fun ReaderPanelHost(
                 onHighlightColorChange = onHighlightColorChange,
                 onDismiss = onDismiss,
                 onDiscoverVoices = onTtsDiscoverVoices,
+                sleepTimer = sleepTimer,
+                onSleepTimerMinutes = onSleepTimerMinutes,
+                onSleepTimerChapters = onSleepTimerChapters,
+                onSleepTimerCancel = onSleepTimerCancel,
             )
         }
         null -> Unit

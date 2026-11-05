@@ -62,8 +62,8 @@ internal fun splitDividerX(
     return (width * fraction.coerceIn(0f, 1f)).coerceIn(minLeft, maxLeft)
 }
 
-private val SplitHeight = 16.dp
-internal val SplitProgressWidth = 56.dp
+private val SplitHeight = MiruSize.SplitProgressHeight
+internal val SplitProgressWidth = MiruSize.SplitProgress
 private val SlantWidth = 3.dp
 private val MinLeft = 18.dp
 private val MinRight = 26.dp

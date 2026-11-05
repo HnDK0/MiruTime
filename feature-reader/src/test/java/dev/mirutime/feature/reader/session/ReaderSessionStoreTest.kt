@@ -383,6 +383,26 @@ class ReaderSessionStoreTest {
     }
 
     @Test
+    fun `goToChapter restores the provided anchor`() = runTest {
+        val store = ReaderSessionStore(
+            content = TestRepository(chapters, docs),
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(TestRepository(chapters, docs)),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+
+        val anchor = ReadingAnchor("book#chapter=2", BlockId("book#chapter=2", 1), charOffset = 3)
+        store.goToChapter(2, anchor = anchor)
+        advanceUntilIdle()
+
+        assertEquals(2, store.state.value.activeChapterIndex)
+        assertEquals(anchor, store.state.value.anchor)
+    }
+
+    @Test
     fun `next and previous chapter stay inside the book`() = runTest {
         val store = ReaderSessionStore(
             content = TestRepository(chapters, docs),

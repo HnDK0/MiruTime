@@ -34,14 +34,17 @@ import dev.mirutime.feature.tts.R
 import dev.mirutime.feature.tts.TtsController
 import dev.mirutime.feature.tts.TtsNotificationInfo
 import dev.mirutime.feature.tts.TtsPlaybackIntent
+import dev.mirutime.feature.tts.TtsSleepTimerMode
 import dev.mirutime.feature.tts.TtsState
 import dev.mirutime.feature.tts.TtsStatus
 import dev.mirutime.feature.tts.TtsTransportAction
 import dev.mirutime.feature.tts.TtsTransportCommand
 import dev.mirutime.feature.tts.ttsNotificationInfo
 import dev.mirutime.feature.tts.ttsProgressPercent
+import dev.mirutime.feature.tts.ttsSleepTimerNotificationKey
 import dev.mirutime.feature.tts.ttsTransportCommand
 import java.io.File
+import java.util.Date
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -88,7 +91,7 @@ class TtsPlaybackService : Service() {
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY && isActive()) {
-                ttsController.pause()
+                ttsController.pauseFromSystem()
             }
         }
     }
@@ -181,6 +184,7 @@ class TtsPlaybackService : Service() {
         }
         registerNoisyReceiver()
         observeState()
+        observeSleepTimer()
         MiruLog.event("tts", "service-create")
     }
 
@@ -253,7 +257,7 @@ class TtsPlaybackService : Service() {
         unregisterNoisyReceiver()
         mediaSession.isActive = false
         mediaSession.release()
-        if (isActive()) ttsController.pause()
+        if (isActive()) ttsController.pauseFromSystem()
         MiruLog.event("tts", "service-destroy")
         super.onDestroy()
     }
@@ -263,6 +267,22 @@ class TtsPlaybackService : Service() {
             ttsController.state.collect { state ->
                 if (!started) return@collect
                 handleState(state)
+            }
+        }
+    }
+
+    /**
+     * The timer emits every second, but the notification label is static.
+     * Republish only when the stable key (deadline / chapter boundary) changes.
+     */
+    private fun observeSleepTimer() {
+        serviceScope.launch {
+            var lastKey: String? = null
+            ttsController.sleepTimer.collect { timer ->
+                val key = ttsSleepTimerNotificationKey(timer)
+                if (key == lastKey) return@collect
+                lastKey = key
+                if (started && foregroundStarted) ensureForeground()
             }
         }
     }
@@ -316,7 +336,8 @@ class TtsPlaybackService : Service() {
     private fun contentKey(info: TtsNotificationInfo): String {
         val state = ttsController.state.value
         return "${state.status}|${info.action}|${info.title}|${info.text}|" +
-            "${ttsProgressPercent(state)}|$chapterNumber|$chapterCount|$coverKey"
+            "${ttsProgressPercent(state)}|$chapterNumber|$chapterCount|$coverKey|" +
+            ttsSleepTimerNotificationKey(ttsController.sleepTimer.value)
     }
 
     private fun stopPlayback() {
@@ -448,6 +469,7 @@ class TtsPlaybackService : Service() {
     private fun playbackSubtitle(): String? {
         val state = ttsController.state.value
         val parts = mutableListOf<String>()
+        sleepTimerNotificationLabel()?.let(parts::add)
         if (chapterNumber > 0 && chapterCount > 0) {
             parts += getString(R.string.tts_chapter_fmt, chapterNumber, chapterCount)
         }
@@ -456,6 +478,26 @@ class TtsPlaybackService : Service() {
         }
         return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
     }
+
+    /**
+     * Static sleep-timer label. Minutes show the wall-clock end time so the
+     * notification never has to tick; chapters change only at a boundary.
+     */
+    private fun sleepTimerNotificationLabel(): String? =
+        when (val timer = ttsController.sleepTimer.value) {
+            null -> null
+            else -> when (timer.mode) {
+                TtsSleepTimerMode.Minutes -> getString(
+                    R.string.tts_sleep_timer_until_fmt,
+                    android.text.format.DateFormat.getTimeFormat(this)
+                        .format(Date(timer.endsAtEpochMillis)),
+                )
+                TtsSleepTimerMode.Chapters -> getString(
+                    R.string.tts_sleep_timer_chapters_fmt,
+                    timer.chaptersRemaining,
+                )
+            }
+        }
 
     private fun updateMediaSession() {
         val info = ttsNotificationInfo(ttsController.state.value, bookTitle, chapterTitle)

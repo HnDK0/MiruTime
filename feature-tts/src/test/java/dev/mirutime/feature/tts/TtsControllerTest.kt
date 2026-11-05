@@ -6,10 +6,12 @@ import dev.mirutime.app.features.reader.document.ReaderBlock
 import dev.mirutime.app.features.reader.document.ReaderDocument
 import dev.mirutime.app.features.reader.document.SentenceSpan
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -699,7 +701,12 @@ class TtsControllerTest {
     @Test
     fun `auto-next off ends the chapter without a request`() = runTest {
         val engine = FakeEngine()
-        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        val controller = TtsController(
+            engine,
+            this,
+            InMemoryTtsSessionStore(),
+            InMemoryTtsSettingsStore(TtsSettings(autoNextChapter = false)),
+        )
         val requests = mutableListOf<TtsChapterDirection>()
         val job = launch { controller.chapterRequests.collect { requests += it } }
         runCurrent()
@@ -849,6 +856,307 @@ class TtsControllerTest {
             listOf("com.google.android.tts"),
             controller.capabilities.value.engines.map { it.id },
         )
+    }
+
+    private fun finishChapter(engine: FakeEngine) {
+        val last = engine.spoken.last()
+        engine.listener?.onStart(last)
+        engine.listener?.onDone(last)
+    }
+
+    @Test
+    fun `sleep timer stops playback and keeps the session`() = runTest {
+        val engine = FakeEngine()
+        val store = InMemoryTtsSessionStore()
+        val controller = TtsController(
+            engine,
+            this,
+            store,
+            InMemoryTtsSettingsStore(),
+            now = { testScheduler.currentTime },
+        )
+        controller.play(document)
+        controller.setSleepTimer(1)
+
+        advanceTimeBy(60_000)
+        runCurrent()
+
+        assertEquals(TtsStatus.Idle, controller.state.value.status)
+        assertTrue(engine.stops > 0)
+        assertNotNull(store.load())
+        assertFalse(controller.state.value.atEnd)
+        assertNull(controller.sleepTimer.value)
+    }
+
+    @Test
+    fun `sleep timer ticks down every second`() = runTest {
+        val controller = TtsController(
+            FakeEngine(),
+            this,
+            InMemoryTtsSessionStore(),
+            now = { testScheduler.currentTime },
+        )
+        controller.play(document)
+        controller.setSleepTimer(1)
+
+        advanceTimeBy(2_000)
+        runCurrent()
+
+        assertEquals(58, controller.sleepTimer.value?.remainingSeconds)
+        controller.cancelSleepTimer()
+    }
+
+    @Test
+    fun `user pause cancels the sleep timer`() = runTest {
+        val controller = TtsController(
+            FakeEngine(),
+            this,
+            InMemoryTtsSessionStore(),
+            now = { testScheduler.currentTime },
+        )
+        controller.play(document)
+        controller.setSleepTimer(1)
+
+        controller.pause()
+        assertNull(controller.sleepTimer.value)
+
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertEquals(TtsStatus.Paused, controller.state.value.status)
+    }
+
+    @Test
+    fun `system pause keeps the sleep timer running`() = runTest {
+        val controller = TtsController(
+            FakeEngine(),
+            this,
+            InMemoryTtsSessionStore(),
+            now = { testScheduler.currentTime },
+        )
+        controller.play(document)
+        controller.setSleepTimer(1)
+
+        controller.pauseFromSystem()
+        assertNotNull(controller.sleepTimer.value)
+
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertEquals(TtsStatus.Idle, controller.state.value.status)
+    }
+
+    @Test
+    fun `test utterance keeps the sleep timer`() = runTest {
+        val controller = TtsController(
+            FakeEngine(),
+            this,
+            InMemoryTtsSessionStore(),
+            now = { testScheduler.currentTime },
+        )
+        controller.play(document)
+        controller.setSleepTimer(5)
+
+        controller.testUtterance("sample")
+
+        assertNotNull(controller.sleepTimer.value)
+        controller.cancelSleepTimer()
+    }
+
+    @Test
+    fun `chapter timer continues chapters without auto-next and stops at zero`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(
+            engine,
+            this,
+            InMemoryTtsSessionStore(),
+            now = { testScheduler.currentTime },
+        )
+        val requests = mutableListOf<TtsChapterDirection>()
+        val job = launch { controller.chapterRequests.collect { requests += it } }
+        runCurrent()
+        controller.play(document)
+        controller.setSleepTimerChapters(2)
+
+        finishChapter(engine)
+        runCurrent()
+        assertEquals(listOf(TtsChapterDirection.Next), requests)
+        assertEquals(TtsStatus.Loading, controller.state.value.status)
+        assertEquals(1, controller.sleepTimer.value?.chaptersRemaining)
+
+        controller.play(document)
+        finishChapter(engine)
+        runCurrent()
+
+        assertEquals(1, requests.size)
+        assertEquals(TtsStatus.Idle, controller.state.value.status)
+        assertTrue(controller.state.value.atEnd)
+        assertNull(controller.sleepTimer.value)
+        job.cancel()
+    }
+
+    @Test
+    fun `manual chapter skip does not spend the chapter timer`() = runTest {
+        val controller = TtsController(
+            FakeEngine(),
+            this,
+            InMemoryTtsSessionStore(),
+            now = { testScheduler.currentTime },
+        )
+        controller.play(document)
+        controller.setSleepTimerChapters(2)
+
+        controller.skipNextChapter()
+        runCurrent()
+
+        assertEquals(2, controller.sleepTimer.value?.chaptersRemaining)
+        controller.cancelSleepTimer()
+    }
+
+    @Test
+    fun `stop and close clear the sleep timer`() = runTest {
+        val controller = TtsController(
+            FakeEngine(),
+            this,
+            InMemoryTtsSessionStore(),
+            now = { testScheduler.currentTime },
+        )
+        controller.play(document)
+        controller.setSleepTimerChapters(2)
+        controller.stop()
+        assertNull(controller.sleepTimer.value)
+
+        controller.play(document)
+        controller.setSleepTimer(5)
+        controller.close()
+        assertNull(controller.sleepTimer.value)
+    }
+
+    @Test
+    fun `natural chapter end without auto-next clears the minutes timer`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(
+            engine = engine,
+            scope = this,
+            sessions = InMemoryTtsSessionStore(),
+            settingsStore = InMemoryTtsSettingsStore(TtsSettings(autoNextChapter = false)),
+            now = { testScheduler.currentTime },
+        )
+        controller.play(document)
+        controller.setSleepTimer(5)
+
+        finishChapter(engine)
+        runCurrent()
+
+        assertEquals(TtsStatus.Idle, controller.state.value.status)
+        assertNull(controller.sleepTimer.value)
+    }
+
+    @Test
+    fun `sleep timer is ignored while playback is idle`() = runTest {
+        val controller = TtsController(
+            FakeEngine(),
+            this,
+            InMemoryTtsSessionStore(),
+            now = { testScheduler.currentTime },
+        )
+
+        controller.setSleepTimer(5)
+        controller.setSleepTimerChapters(2)
+
+        assertNull(controller.sleepTimer.value)
+    }
+
+    @Test
+    fun `expired timer blocks a chapter hand-off`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(
+            engine,
+            this,
+            InMemoryTtsSessionStore(),
+            now = { testScheduler.currentTime },
+        )
+        controller.play(document)
+        controller.setSleepTimer(1)
+        advanceTimeBy(60_000)
+        runCurrent()
+
+        val spoken = engine.spoken.size
+        assertFalse(controller.playHandoff(document))
+        assertEquals(spoken, engine.spoken.size)
+        assertEquals(TtsStatus.Idle, controller.state.value.status)
+
+        controller.play(document)
+        assertEquals(TtsStatus.Playing, controller.state.value.status)
+    }
+
+    @Test
+    fun `manual skip at the timer boundary cannot resurrect the chapter`() = runTest {
+        val controller = TtsController(
+            FakeEngine(),
+            this,
+            InMemoryTtsSessionStore(),
+            now = { testScheduler.currentTime },
+        )
+        controller.play(document)
+        controller.setSleepTimer(1)
+        controller.skipNextChapter()
+        advanceTimeBy(60_000)
+        runCurrent()
+
+        assertFalse(controller.playHandoff(document))
+        assertEquals(TtsStatus.Idle, controller.state.value.status)
+    }
+
+    @Test
+    fun `stop during a chapter handoff drops it`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        controller.play(document)
+        finishChapter(engine)
+        runCurrent()
+        assertEquals(TtsStatus.Loading, controller.state.value.status)
+
+        controller.stop()
+        val spoken = engine.spoken.size
+
+        assertFalse(controller.playHandoff(document))
+        assertEquals(spoken, engine.spoken.size)
+        assertEquals(TtsStatus.Idle, controller.state.value.status)
+    }
+
+    @Test
+    fun `pause during a chapter handoff drops it`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        controller.play(document)
+        finishChapter(engine)
+        runCurrent()
+
+        controller.pause()
+
+        assertFalse(controller.playHandoff(document))
+        assertEquals(TtsStatus.Paused, controller.state.value.status)
+    }
+
+    @Test
+    fun `handoff without a request is ignored`() = runTest {
+        val controller = TtsController(FakeEngine(), this, InMemoryTtsSessionStore())
+
+        assertFalse(controller.playHandoff(document))
+        assertEquals(TtsStatus.Idle, controller.state.value.status)
+    }
+
+    @Test
+    fun `stop remembers the last session`() = runTest {
+        val sessions = InMemoryTtsSessionStore()
+        val controller = TtsController(FakeEngine(), this, sessions)
+        controller.play(document)
+
+        controller.stop()
+
+        val stopped = controller.lastStoppedSession
+        assertNotNull(stopped)
+        assertEquals(document.bookUrl, stopped?.bookUrl)
+        assertEquals(document.chapterIndex, stopped?.chapterIndex)
     }
 
 }

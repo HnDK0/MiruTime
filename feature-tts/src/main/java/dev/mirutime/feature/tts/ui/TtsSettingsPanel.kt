@@ -14,6 +14,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +35,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
@@ -63,6 +66,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -76,6 +80,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.feature.tts.R
@@ -84,7 +90,9 @@ import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.uikit.MiruButton
 import dev.mirutime.uikit.MiruButtonStyle
+import dev.mirutime.uikit.MiruCompactTextField
 import dev.mirutime.uikit.MiruRowDivider
+import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSlider
 import dev.mirutime.uikit.SettingsSwitchRow
 import dev.mirutime.feature.tts.TtsCapabilities
@@ -95,6 +103,10 @@ import dev.mirutime.feature.tts.TtsMinSpeed
 import dev.mirutime.feature.tts.TtsPitchStep
 import dev.mirutime.feature.tts.TtsSavedVoice
 import dev.mirutime.feature.tts.TtsSettings
+import dev.mirutime.feature.tts.TtsSleepTimerMaxChapters
+import dev.mirutime.feature.tts.TtsSleepTimerMaxMinutes
+import dev.mirutime.feature.tts.TtsSleepTimerMode
+import dev.mirutime.feature.tts.TtsSleepTimerState
 import dev.mirutime.feature.tts.TtsSpeedStep
 import dev.mirutime.feature.tts.TtsStatus
 import dev.mirutime.feature.tts.TtsVoice
@@ -110,12 +122,13 @@ import dev.mirutime.feature.tts.ttsSortVoices
 import dev.mirutime.feature.tts.ttsToggleVoiceFavorite
 import dev.mirutime.feature.tts.ttsVoiceLabel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 
 private val TtsSpeedSliderSteps = ttsSliderSteps(TtsMinSpeed..TtsMaxSpeed, TtsSpeedStep)
 private val TtsPitchSliderSteps = ttsSliderSteps(TtsMinPitch..TtsMaxPitch, TtsPitchStep)
 private const val VoiceSearchDebounceMs = 220L
 
-private enum class TtsSettingSection { Engine, AutoNext, Highlight, TestReset }
+private enum class TtsSettingSection { Engine, AutoNext, SleepTimer, Highlight, TestReset }
 
 // Secondary TTS surfaces. They replace the settings sheet instead of stacking
 // a second ModalBottomSheet on top of it (one sheet window at a time).
@@ -129,7 +142,6 @@ private enum class TtsOverlay { Voices, SavedVoices, DeleteSavedVoice }
 @Composable
 fun TtsMiniPlayer(
     status: TtsStatus,
-    chapterPercent: Int,
     onToggle: () -> Unit,
     onStop: () -> Unit,
     onStartHere: () -> Unit,
@@ -140,13 +152,11 @@ fun TtsMiniPlayer(
 ) {
     val playing = status == TtsStatus.Playing || status == TtsStatus.Loading
     val session = playing || status == TtsStatus.Paused
-    val progress = (chapterPercent / 100f).coerceIn(0f, 1f)
     val shape = RoundedCornerShape(18.dp)
     val accent = MaterialTheme.colorScheme.primary
 
-    // Thin bar: playback + Start here/Focus/Next chapter, one 2dp progress line.
-    // Chapter title and text progress are deliberately absent — the reader
-    // already shows them (FR-054/FR-055).
+    // Thin bar: playback + Start here/Focus/Next chapter. Chapter number and
+    // progress live in the reader chrome, not here (FR-054/FR-055).
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -184,7 +194,6 @@ fun TtsMiniPlayer(
             MiniIconAction(
                 icon = Icons.Filled.TouchApp,
                 description = stringResource(R.string.rd_tts_start_here),
-                enabled = session,
                 onClick = onStartHere,
             )
             MiniIconAction(
@@ -194,9 +203,8 @@ fun TtsMiniPlayer(
                 onClick = onFocus,
             )
             Spacer(Modifier.weight(1f))
-            MiniStopButton(onStop = onStop)
+            if (session) MiniStopButton(onStop = onStop)
         }
-        TtsProgressBar(progress = progress, height = 2.dp)
     }
 }
 
@@ -268,6 +276,10 @@ fun TtsSettingsPanel(
     onHighlightColorChange: (Long) -> Unit,
     onDismiss: () -> Unit,
     onDiscoverVoices: () -> Unit = {},
+    sleepTimer: StateFlow<TtsSleepTimerState?>? = null,
+    onSleepTimerMinutes: (Int) -> Unit = {},
+    onSleepTimerChapters: (Int) -> Unit = {},
+    onSleepTimerCancel: () -> Unit = {},
 ) {
     val ready = capabilities.ready
     val failed = status == TtsStatus.Failed
@@ -483,6 +495,14 @@ fun TtsSettingsPanel(
 
         MiruRowDivider()
         SettingsSwitchRow(
+            title = stringResource(R.string.rd_tts_mini_player),
+            subtitle = stringResource(R.string.rd_tts_mini_player_desc),
+            checked = settings.miniPlayerAlways,
+            onChange = { onSettingsChange(settings.copy(miniPlayerAlways = it)) },
+            horizontalPadding = 0.dp,
+        )
+        MiruRowDivider()
+        SettingsSwitchRow(
             title = stringResource(R.string.rd_tts_floating_player),
             subtitle = stringResource(R.string.rd_tts_floating_desc),
             checked = settings.floatingPlayer,
@@ -552,6 +572,26 @@ fun TtsSettingsPanel(
                 checked = settings.autoNextChapter,
                 onChange = { onSettingsChange(settings.copy(autoNextChapter = it)) },
                 horizontalPadding = 0.dp,
+            )
+        }
+
+        if (sleepTimer != null) {
+            TtsSleepTimerAccordion(
+                sleepTimer = sleepTimer,
+                expanded = section == TtsSettingSection.SleepTimer,
+                enabled = status == TtsStatus.Playing ||
+                    status == TtsStatus.Loading ||
+                    status == TtsStatus.Paused,
+                onToggle = {
+                    section = if (section == TtsSettingSection.SleepTimer) {
+                        null
+                    } else {
+                        TtsSettingSection.SleepTimer
+                    }
+                },
+                onMinutes = onSleepTimerMinutes,
+                onChapters = onSleepTimerChapters,
+                onCancel = onSleepTimerCancel,
             )
         }
 
@@ -627,6 +667,133 @@ fun TtsSettingsPanel(
                     Text(stringResource(R.string.rd_tts_reset))
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun TtsSleepTimerAccordion(
+    sleepTimer: StateFlow<TtsSleepTimerState?>,
+    expanded: Boolean,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+    onMinutes: (Int) -> Unit,
+    onChapters: (Int) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val timer by sleepTimer.collectAsState()
+    val timerState = timer
+    var minutesDraft by rememberSaveable { mutableStateOf("") }
+    var chaptersDraft by rememberSaveable { mutableStateOf("") }
+    val value = if (timerState != null) {
+        ttsSleepTimerLabel(timerState)
+    } else {
+        stringResource(R.string.rd_tts_sleep_timer_off)
+    }
+    TtsAccordion(
+        title = stringResource(R.string.rd_tts_sleep_timer),
+        value = value,
+        expanded = expanded,
+        onToggle = onToggle,
+    ) {
+        SleepTimerRow(
+            label = stringResource(R.string.rd_tts_sleep_timer_minutes),
+            active = timerState?.mode == TtsSleepTimerMode.Minutes,
+            enabled = enabled,
+            value = minutesDraft,
+            max = TtsSleepTimerMaxMinutes,
+            onValueChange = { minutesDraft = it },
+            onApply = {
+                minutesDraft = it.toString()
+                onMinutes(it)
+            },
+            onCancel = onCancel,
+        )
+        SleepTimerRow(
+            label = stringResource(R.string.rd_tts_sleep_timer_chapters),
+            active = timerState?.mode == TtsSleepTimerMode.Chapters,
+            enabled = enabled,
+            value = chaptersDraft,
+            max = TtsSleepTimerMaxChapters,
+            onValueChange = { chaptersDraft = it },
+            onApply = {
+                chaptersDraft = it.toString()
+                onChapters(it)
+            },
+            onCancel = onCancel,
+        )
+        Text(
+            text = stringResource(
+                if (enabled) {
+                    R.string.rd_tts_sleep_timer_pause_cancels
+                } else {
+                    R.string.rd_tts_sleep_timer_start_hint
+                },
+            ),
+            style = MaterialTheme.typography.labelSmall,
+            color = LocalMiruExtraColors.current.muted,
+            modifier = Modifier.padding(top = MiruSpace.Xs),
+        )
+    }
+}
+
+@Composable
+private fun SleepTimerRow(
+    label: String,
+    active: Boolean,
+    enabled: Boolean,
+    value: String,
+    max: Int,
+    onValueChange: (String) -> Unit,
+    onApply: (Int) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val parsed = value.toIntOrNull()
+    val valid = parsed != null && parsed in 1..max
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = MiruSize.Touch)
+            .padding(top = MiruSpace.Xs),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        MiruCompactTextField(
+            value = value,
+            onValueChange = { input ->
+                onValueChange(input.filter { it.isDigit() }.take(max.toString().length))
+            },
+            enabled = enabled,
+            isError = value.isNotEmpty() && !valid,
+            contentDescription = label,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Done,
+            ),
+            keyboardActions = KeyboardActions(
+                onDone = { if (!active && valid) parsed?.let(onApply) },
+            ),
+        )
+        IconButton(
+            onClick = { if (active) onCancel() else parsed?.let(onApply) },
+            enabled = enabled && (active || valid),
+        ) {
+            Icon(
+                imageVector = if (active) Icons.Filled.Close else Icons.Filled.Check,
+                contentDescription = stringResource(
+                    if (active) {
+                        R.string.rd_tts_sleep_timer_cancel
+                    } else {
+                        R.string.rd_tts_sleep_timer_apply
+                    },
+                ),
+            )
         }
     }
 }
@@ -1353,30 +1520,6 @@ private fun TtsStatusPill(status: TtsStatus, atEnd: Boolean) {
                 color = color,
             )
         }
-    }
-}
-
-@Composable
-private fun TtsProgressBar(progress: Float, height: androidx.compose.ui.unit.Dp) {
-    val animated by animateFloatAsState(
-        targetValue = progress.coerceIn(0f, 1f),
-        animationSpec = tween(280),
-        label = "tts-progress",
-    )
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(height)
-            .clip(RoundedCornerShape(50))
-            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth(animated)
-                .height(height)
-                .clip(RoundedCornerShape(50))
-                .background(MaterialTheme.colorScheme.primary),
-        )
     }
 }
 

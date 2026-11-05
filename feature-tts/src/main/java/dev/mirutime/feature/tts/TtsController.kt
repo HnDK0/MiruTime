@@ -1,15 +1,19 @@
 package dev.mirutime.feature.tts
 
+import android.os.SystemClock
 import dev.mirutime.app.features.reader.document.BlockId
 import dev.mirutime.app.features.reader.document.ReaderDocument
 import dev.mirutime.core.log.MiruLog
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 enum class TtsStatus { Idle, Loading, Playing, Paused, Failed }
 
@@ -43,6 +47,8 @@ class TtsController(
     private val scope: CoroutineScope,
     private val sessions: TtsSessionStore = InMemoryTtsSessionStore(),
     private val settingsStore: TtsSettingsStore = InMemoryTtsSettingsStore(),
+    /** Monotonic clock; tests inject the virtual scheduler time. */
+    private val now: () -> Long = { SystemClock.elapsedRealtime() },
 ) {
     private val _state = MutableStateFlow(TtsState())
     val state: StateFlow<TtsState> = _state.asStateFlow()
@@ -61,6 +67,77 @@ class TtsController(
      * and calls [play] so the controller never guesses what comes next.
      */
     val chapterRequests: SharedFlow<TtsChapterDirection> = _chapterRequests.asSharedFlow()
+
+    private val _sleepTimer = MutableStateFlow<TtsSleepTimerState?>(null)
+
+    /** Running sleep timer, or null. A tick updates only [TtsSleepTimerState.remainingSeconds]. */
+    val sleepTimer: StateFlow<TtsSleepTimerState?> = _sleepTimer.asStateFlow()
+
+    /** Stops playback after [minutes]. Setting a new timer replaces the old one. */
+    fun setSleepTimer(minutes: Int) {
+        if (!sleepTimerAvailable()) return
+        clearSleepTimer()
+        val seconds = clampSleepTimerMinutes(minutes) * 60
+        sleepDeadline = now() + seconds * 1000L
+        _sleepTimer.value = TtsSleepTimerState(
+            mode = TtsSleepTimerMode.Minutes,
+            remainingSeconds = seconds,
+            totalSeconds = seconds,
+            endsAtEpochMillis = System.currentTimeMillis() + seconds * 1000L,
+        )
+        startSleepTicker()
+    }
+
+    /** Stops at the end of the [chapters]th chapter counted from now. */
+    fun setSleepTimerChapters(chapters: Int) {
+        if (!sleepTimerAvailable()) return
+        clearSleepTimer()
+        val count = clampSleepTimerChapters(chapters)
+        _sleepTimer.value = TtsSleepTimerState(
+            mode = TtsSleepTimerMode.Chapters,
+            chaptersRemaining = count,
+            chaptersTotal = count,
+        )
+    }
+
+    fun cancelSleepTimer() {
+        clearSleepTimer()
+    }
+
+    /** A timer makes sense only while a TTS session exists and can still stop. */
+    private fun sleepTimerAvailable(): Boolean =
+        chunks.isNotEmpty() &&
+            _state.value.status != TtsStatus.Idle &&
+            _state.value.status != TtsStatus.Failed
+
+    private fun clearSleepTimer() {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        sleepDeadline = 0L
+        _sleepTimer.value = null
+    }
+
+    private fun startSleepTicker() {
+        sleepTimerJob = scope.launch {
+            while (true) {
+                val left = ((sleepDeadline - now()) / 1000L).coerceAtLeast(0L).toInt()
+                val current = _sleepTimer.value ?: return@launch
+                if (current.mode == TtsSleepTimerMode.Minutes &&
+                    current.remainingSeconds != left
+                ) {
+                    _sleepTimer.value = current.copy(remainingSeconds = left)
+                }
+                if (left <= 0) {
+                    // resetPlayback drops a hand-off that was requested just
+                    // before the deadline, so waiting for Loading is unnecessary.
+                    _sleepTimer.value = null
+                    resetPlayback(clearSession = false)
+                    return@launch
+                }
+                delay(250)
+            }
+        }
+    }
 
     /**
      * True only while the pending chapter request came from the queue finishing
@@ -90,6 +167,20 @@ class TtsController(
     private var voiceId: String? = _settings.value.voiceId
     private var speed = _settings.value.speed
     private var pitch = _settings.value.pitch
+    private var sleepTimerJob: Job? = null
+    private var sleepDeadline = 0L
+    // Set when a chapter hand-off is requested and not yet applied. Stop, pause,
+    // timer, close and explicit starts clear it, so a stale request can never
+    // resurrect playback.
+    @Volatile
+    private var handoffPending = false
+    // Snapshot for the reader's revert: stop() clears the persisted session, so
+    // the last spoken cursor would otherwise be lost.
+    private var _lastStoppedSession: TtsSession? = null
+
+    /** Last session captured by a user Stop; null after a new start/resume. */
+    val lastStoppedSession: TtsSession?
+        get() = _lastStoppedSession
 
     fun play(document: ReaderDocument, translations: Map<Int, String> = emptyMap()) {
         playFrom(document, translations, blockIndex = null)
@@ -106,6 +197,8 @@ class TtsController(
         blockIndex: Int?,
         charOffset: Int = 0,
     ) {
+        handoffPending = false
+        _lastStoppedSession = null
         val next = TtsChunker.chunks(document, translations)
         if (next.isEmpty()) {
             setState(TtsState(status = TtsStatus.Failed, message = "Nothing to read"))
@@ -224,17 +317,25 @@ class TtsController(
 
     fun pause() {
         pausedByFocusLoss = false
-        pauseInternal()
+        pauseInternal(cancelSleepTimer = true)
     }
 
     /** Pause caused by a transient audio-focus loss; a focus gain may resume it. */
     fun pauseForFocusLoss() {
         if (!active && _state.value.status != TtsStatus.Loading) return
         pausedByFocusLoss = true
-        pauseInternal()
+        pauseInternal(cancelSleepTimer = false)
     }
 
-    private fun pauseInternal() {
+    /**
+     * Pause not initiated by the user (headphone unplugged, service teardown).
+     * The sleep timer keeps running: the user did not ask to cancel it.
+     */
+    fun pauseFromSystem() = pauseInternal(cancelSleepTimer = false)
+
+    private fun pauseInternal(cancelSleepTimer: Boolean) {
+        handoffPending = false
+        if (cancelSleepTimer) clearSleepTimer()
         if (!active && _state.value.status != TtsStatus.Loading) return
         pending = null
         invalidateUtterances()
@@ -245,6 +346,8 @@ class TtsController(
     }
 
     fun resume() {
+        handoffPending = false
+        _lastStoppedSession = null
         pausedByFocusLoss = false
         if (chunks.isEmpty()) return
         active = true
@@ -310,6 +413,11 @@ class TtsController(
         // Keep the old cursor paused so a rejected request can resume it.
         setState(chunkState(current, TtsStatus.Paused))
         persist(wasPlaying = false, immediate = true)
+        requestHandoff(direction)
+    }
+
+    private fun requestHandoff(direction: TtsChapterDirection) {
+        handoffPending = true
         _chapterRequests.tryEmit(direction)
     }
 
@@ -321,22 +429,48 @@ class TtsController(
         }
     }
 
+    /**
+     * Starts speech on a chapter the reader loaded for a [chapterRequests]
+     * hand-off. A request is consumed only once: Stop, Pause, a new start or
+     * the sleep timer clears it, so a stale hand-off cannot resurrect playback.
+     */
+    fun playHandoff(
+        document: ReaderDocument,
+        translations: Map<Int, String> = emptyMap(),
+    ): Boolean {
+        if (!handoffPending) return false
+        handoffPending = false
+        play(document, translations)
+        return true
+    }
+
     fun stop() {
+        _lastStoppedSession = sessions.load()
+        clearSleepTimer()
+        resetPlayback(clearSession = true)
+    }
+
+    private fun resetPlayback(clearSession: Boolean) {
+        handoffPending = false
         pausedByFocusLoss = false
         active = false
         pending = null
         invalidateUtterances()
         engine.stop()
+        // Persist before chunks/bookUrl are cleared, or the cursor is lost.
+        if (!clearSession) persist(wasPlaying = false, immediate = true)
         chunks = emptyList()
         chunkCharSuffix = IntArray(0)
         current = 0
         bookUrl = ""
         chapterIndex = 0
-        sessions.clear(immediate = true)
-        setState(TtsState())
+        if (clearSession) sessions.clear(immediate = true)
+        setState(TtsState(status = TtsStatus.Idle))
     }
 
     fun close() {
+        handoffPending = false
+        clearSleepTimer()
         active = false
         pending = null
         invalidateUtterances()
@@ -420,7 +554,7 @@ class TtsController(
             )
             return
         }
-        if (active) pause()
+        if (active) pauseFromSystem()
         applyPlaybackSettings()
         engine.preview(text)
     }
@@ -653,6 +787,35 @@ class TtsController(
             if (index < chunks.lastIndex || !active) return
             active = false
             persist(wasPlaying = false, immediate = true)
+            val timer = _sleepTimer.value
+            if (timer?.mode == TtsSleepTimerMode.Chapters) {
+                val left = timer.chaptersRemaining - 1
+                if (left <= 0) {
+                    clearSleepTimer()
+                    invalidateUtterances()
+                    setState(
+                        _state.value.copy(
+                            status = TtsStatus.Idle,
+                            atEnd = true,
+                            estimatedRemainingSeconds = 0,
+                        ),
+                    )
+                    return
+                }
+                // The chapter timer continues chapters on its own, even when
+                // auto-next is off: that is what "stop after N chapters" means.
+                _sleepTimer.value = timer.copy(chaptersRemaining = left)
+                chapterEndedNaturally = true
+                setState(
+                    _state.value.copy(
+                        status = TtsStatus.Loading,
+                        atEnd = true,
+                        estimatedRemainingSeconds = 0,
+                    ),
+                )
+                requestHandoff(TtsChapterDirection.Next)
+                return
+            }
             if (_settings.value.autoNextChapter) {
                 // Keep the status active across the chapter load so the
                 // foreground service is not torn down between chapters.
@@ -664,8 +827,11 @@ class TtsController(
                         estimatedRemainingSeconds = 0,
                     ),
                 )
-                _chapterRequests.tryEmit(TtsChapterDirection.Next)
+                requestHandoff(TtsChapterDirection.Next)
             } else {
+                // Playback ends here; a running minutes timer has nothing left
+                // to stop and would only fire into an idle session.
+                clearSleepTimer()
                 setState(
                     _state.value.copy(
                         status = TtsStatus.Idle,
@@ -677,6 +843,8 @@ class TtsController(
         }
 
         override fun onError() {
+            handoffPending = false
+            clearSleepTimer()
             setState(_state.value.copy(status = TtsStatus.Failed, message = "TTS error"))
             active = false
             persist(wasPlaying = false, immediate = true)

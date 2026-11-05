@@ -34,22 +34,32 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSlider
 import dev.mirutime.uikit.MiruSpace
+import dev.mirutime.uikit.MiruSplitProgress
 import dev.mirutime.feature.reader.R
 import dev.mirutime.feature.tts.R as TtsR
+import dev.mirutime.feature.tts.TtsSleepTimerState
 import dev.mirutime.feature.tts.TtsStatus
+import dev.mirutime.feature.tts.ui.ttsSleepTimerDescription
+import dev.mirutime.feature.tts.ui.ttsSleepTimerLabel
+import kotlinx.coroutines.flow.StateFlow
 
 @Composable
 internal fun ReaderChrome(
@@ -62,6 +72,7 @@ internal fun ReaderChrome(
     canNext: Boolean,
     canOpenWebView: Boolean,
     ttsStatus: TtsStatus,
+    sleepTimer: StateFlow<TtsSleepTimerState?>,
     ttsEnabled: Boolean = true,
     manga: Boolean = false,
     mangaPage: Int = 0,
@@ -207,15 +218,11 @@ internal fun ReaderChrome(
                         onClick = onPrev,
                     )
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = stringResource(R.string.rd_chapter_fmt, chapterIndex, chapterCount),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Text(
-                            text = stringResource(R.string.rd_percent_fmt, chapterPercent),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ReaderChapterProgress(
+                            chapterIndex = chapterIndex,
+                            chapterCount = chapterCount,
+                            chapterPercent = chapterPercent,
+                            sleepTimer = sleepTimer,
                         )
                     }
                     ReaderIconButton(
@@ -379,4 +386,69 @@ internal fun ReaderIconButton(
             modifier = Modifier.size(22.dp),
         )
     }
+}
+
+/**
+ * Chapter progress in the bottom dock: a card-style split pill (chapters X/Y)
+ * with the percent under it. While a sleep timer runs the caption shows its
+ * countdown instead of the percent. Width follows the font scale, exactly like
+ * the book cards, or the split numbers clip at 200% text.
+ */
+@Composable
+private fun ReaderChapterProgress(
+    chapterIndex: Int,
+    chapterCount: Int,
+    chapterPercent: Int,
+    sleepTimer: StateFlow<TtsSleepTimerState?>,
+) {
+    val fontScale = LocalDensity.current.fontScale.coerceIn(1f, 2f)
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        MiruSplitProgress(
+            read = chapterIndex,
+            total = chapterCount,
+            modifier = Modifier
+                .width(MiruSize.SplitProgress * fontScale)
+                .height(MiruSize.SplitProgressHeight * fontScale),
+            contentDescription = stringResource(
+                R.string.rd_chapter_fmt,
+                chapterIndex,
+                chapterCount,
+            ),
+        )
+        ReaderProgressCaption(
+            sleepTimer = sleepTimer,
+            chapterPercent = chapterPercent,
+        )
+    }
+}
+
+@Composable
+private fun ReaderProgressCaption(
+    sleepTimer: StateFlow<TtsSleepTimerState?>,
+    chapterPercent: Int,
+) {
+    val timer by sleepTimer.collectAsState()
+    val timerState = timer
+    val text = if (timerState != null) {
+        ttsSleepTimerLabel(timerState)
+    } else {
+        stringResource(R.string.rd_percent_fmt, chapterPercent)
+    }
+    val description = if (timerState != null) {
+        ttsSleepTimerDescription(timerState)
+    } else {
+        null
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = if (description != null) {
+            Modifier.clearAndSetSemantics { contentDescription = description }
+        } else {
+            Modifier
+        },
+    )
 }

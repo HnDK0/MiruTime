@@ -72,6 +72,8 @@
     <string name="rd_tts_saved_delete_confirm">Delete</string>
     <string name="rd_tts_saved_detail_fmt">%1$.2f× · pitch %2$.2f</string>
     <string name="rd_tts_floating_player">Floating player</string>
+    <string name="rd_tts_mini_player">Mini player</string>
+    <string name="rd_tts_mini_player_desc">Keep the mini player in the reader menu even when TTS is stopped.</string>
     <string name="rd_tts_floating_open">Open floating TTS player</string>
     <string name="rd_tts_floating_collapse">Collapse to bubble</string>
     <string name="rd_tts_floating_desc">Show reading status and controls over the page.</string>
@@ -126,4 +128,17 @@
     <string name="rd_tts_next_chunk">Next sentence</string>
     <string name="rd_tts_auto_next">Auto-next chapter</string>
     <string name="rd_tts_auto_next_desc">Continue with the next chapter when this one ends.</string>
+    <string name="rd_tts_sleep_timer">Sleep timer</string>
+    <string name="rd_tts_sleep_timer_off">Off</string>
+    <string name="rd_tts_sleep_timer_minutes">Minutes</string>
+    <string name="rd_tts_sleep_timer_chapters">Chapters</string>
+    <string name="rd_tts_sleep_timer_minutes_value_fmt">%1$d min</string>
+    <string name="rd_tts_sleep_timer_chapters_value_fmt">%1$d ch.</string>
+    <string name="rd_tts_sleep_timer_active_fmt">Sleep timer: stops in %1$s</string>
+    <string name="rd_tts_sleep_timer_pause_cancels">Pausing cancels the timer.</string>
+    <string name="rd_tts_sleep_timer_start_hint">Start TTS to use the sleep timer.</string>
+    <string name="rd_tts_sleep_timer_apply">Set</string>
+    <string name="rd_tts_sleep_timer_cancel">Cancel timer</string>
+    <string name="tts_sleep_timer_until_fmt">Sleep until %1$s</string>
+    <string name="tts_sleep_timer_chapters_fmt">Sleep: %1$d ch. left</string>
 </resources>

@@ -51,6 +51,8 @@ object MiruSize {
     val Touch = 48.dp
     val Control = 40.dp      // round icon buttons (visual), 12dp radius
     val Chip = 28.dp         // filter chips (visual; at least 48dp touch)
+    val SplitProgress = 56.dp // split-progress pill (chapters read / total)
+    val SplitProgressHeight = 16.dp
     val Button = 44.dp       // secondary buttons / plate pills
     val ButtonPrimary = 52.dp // the one loud action of a screen
     val Row = 56.dp          // single-line list rows (tools, settings)

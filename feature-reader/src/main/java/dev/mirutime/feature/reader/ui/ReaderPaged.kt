@@ -337,6 +337,19 @@ private fun ReaderPagedPager(
         if (target in pages.indices) pagerState.animateScrollToPage(target)
     }
 
+    // TTS auto-follow: turn to the page that owns the spoken cursor, exactly
+    // like the feed. Pages are sized by text, so a long block may span several
+    // pages; matching the char offset (not just the block) turns the page as
+    // soon as the cursor crosses the boundary.
+    val ttsTargetPage = remember(pages, ttsHighlight) {
+        ttsFollowPage(pages, ttsHighlight)
+    }
+    LaunchedEffect(ttsTargetPage, pages) {
+        if (ttsTargetPage in pages.indices && ttsTargetPage != pagerState.currentPage) {
+            pagerState.animateScrollToPage(ttsTargetPage)
+        }
+    }
+
     LaunchedEffect(pagerState, pages, chapterIndex) {
         snapshotFlow { pagerState.settledPage }
             .distinctUntilChanged()
@@ -721,6 +734,37 @@ private fun PagedSelection(
         Modifier
     }
     SelectionContainer(state = state, modifier = modifier) { content() }
+}
+
+/** Cursor comparison in the space the line paints (alt span for translations). */
+private fun PageLine.containsTtsCursor(translated: Boolean, cursor: Int): Boolean {
+    val altSpan = if (translated) alt else null
+    return containsCursor(
+        start = altSpan?.start ?: start,
+        end = altSpan?.end ?: end,
+        cursor = cursor,
+    )
+}
+
+/**
+ * Page that owns the spoken cursor. Matching the char offset (not just the
+ * block) matters because one block can span several pages: the page must turn
+ * when the cursor crosses the boundary, not when the next block starts.
+ * Falls back to the block's first page when offsets are in another space
+ * (for example translated speech over original-based parallel lines).
+ */
+internal fun ttsFollowPage(pages: List<ReaderPage>, highlight: TtsHighlight?): Int {
+    if (highlight == null) return -1
+    val exact = pages.indexOfFirst { page ->
+        page.lines.any { line ->
+            line.blockId == highlight.blockId &&
+                line.containsTtsCursor(highlight.translated, highlight.start)
+        }
+    }
+    if (exact >= 0) return exact
+    return pages.indexOfFirst { page ->
+        page.lines.any { it.blockId == highlight.blockId }
+    }
 }
 
 private fun pagedLineHighlightModifier(

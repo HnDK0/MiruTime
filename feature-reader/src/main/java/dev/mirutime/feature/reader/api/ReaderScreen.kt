@@ -453,6 +453,9 @@ fun ReaderScreen(
                 }
                 return@collect
             }
+            val previousChapter = sessionChapter
+            val previousUrl = store.state.value.documents[previousChapter]?.chapterUrl
+            val previousAnchor = store.state.value.anchor?.takeIf { it.chapterUrl == previousUrl }
             ttsHandoffChapter = target
             store.goToChapter(target)
             val document = store.state.value.documents[target]
@@ -467,10 +470,36 @@ fun ReaderScreen(
             } else {
                 emptyMap()
             }
-            graph.tts.play(
+            // A manual chapter choice wins over an auto-next that was already
+            // loading; never let the hand-off pull the reader back.
+            if (!ttsHandoffApplies(store.state.value.activeChapterIndex, target)) {
+                ttsHandoffChapter = null
+                graph.tts.stop()
+                return@collect
+            }
+            val started = graph.tts.playHandoff(
                 document,
                 available[document.chapterUrl]?.translations.orEmpty(),
             )
+            if (!started) {
+                ttsHandoffChapter = null
+                if (ttsHandoffApplies(store.state.value.activeChapterIndex, target)) {
+                    // Timer/Stop/Pause dropped the hand-off: return to the
+                    // chapter and cursor that were actually spoken.
+                    val last = graph.ttsSessions.load() ?: graph.tts.lastStoppedSession
+                    val session = last?.takeIf { it.bookUrl == bookUrl }
+                    val revertChapter = session?.chapterIndex ?: previousChapter
+                    val revertAnchor = session?.let {
+                        ReadingAnchor(
+                            chapterUrl = it.chapterUrl,
+                            blockId = BlockId(it.chapterUrl, it.blockIndex),
+                            charOffset = it.charOffset,
+                            sentenceIndex = it.sentenceIndex,
+                        )
+                    } ?: previousAnchor
+                    store.goToChapter(revertChapter, anchor = revertAnchor)
+                }
+            }
         }
     }
 
@@ -590,35 +619,42 @@ fun ReaderScreen(
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
+    // One start path for "start"/"start here": begin at the visible anchor, not
+    // the chapter top, so a restarted TTS (including after a sleep-timer stop)
+    // continues where the reader is. The anchor is written by the feed/pager.
+    fun startTtsAtAnchor() {
+        val document = activeDocument ?: return
+        val anchor = store.state.value.anchor?.takeIf { it.chapterUrl == document.chapterUrl }
+        graph.tts.playFrom(
+            document = document,
+            translations = visibleTranslations[document.chapterUrl]?.translations.orEmpty(),
+            blockIndex = anchor?.blockId?.index,
+            charOffset = anchor?.charOffset ?: 0,
+        )
+    }
     val toggleTts: () -> Unit = {
         ensureTtsNotificationPermission()
         val document = activeDocument
         if (document != null) {
-            graph.tts.toggle(
-                document,
-                visibleTranslations[document.chapterUrl]?.translations.orEmpty(),
-            )
+            val status = graph.tts.state.value.status
+            if (status == TtsStatus.Idle || status == TtsStatus.Failed) {
+                startTtsAtAnchor()
+            } else {
+                graph.tts.toggle(
+                    document,
+                    visibleTranslations[document.chapterUrl]?.translations.orEmpty(),
+                )
+            }
         }
     }
     val stopTts: () -> Unit = {
         graph.tts.stop()
         graph.stopTtsPlayback()
     }
-    // "Start here" uses the reader's own visible anchor. The anchor is written
-    // by the feed/pager on scroll, so this starts at the paragraph the user is
-    // looking at instead of the chapter top.
+    // "Start here" uses the reader's own visible anchor.
     val startTtsHere: () -> Unit = {
         ensureTtsNotificationPermission()
-        val document = activeDocument
-        if (document != null) {
-            val anchor = store.state.value.anchor
-            graph.tts.playFrom(
-                document = document,
-                translations = visibleTranslations[document.chapterUrl]?.translations.orEmpty(),
-                blockIndex = anchor?.blockId?.index,
-                charOffset = anchor?.charOffset ?: 0,
-            )
-        }
+        startTtsAtAnchor()
     }
     // Focus closes the sheet first: scrolling behind an open sheet would not
     // let the user see the paragraph that was just brought into view.
@@ -653,24 +689,25 @@ fun ReaderScreen(
         }
     }
     // The persistent player belongs to the bottom reader menu, above the dock.
-    // Settings sheets stay settings-only; they do not grow a second player.
-    val ttsDockMini: (@Composable () -> Unit)? = if (ttsSessionActive) {
-        {
-            TtsMiniPlayer(
-                status = ttsState.status,
-                chapterPercent = chapterPercent,
-                onToggle = toggleTts,
-                onStop = stopTts,
-                onStartHere = startTtsHere,
-                onFocus = focusTtsBlock,
-                onPrevParagraph = { ttsAdjacentParagraph(-1) },
-                onNextParagraph = { ttsAdjacentParagraph(1) },
-                modifier = Modifier.fillMaxWidth(),
-            )
+    // With "mini player always" it stays there even when TTS is stopped, so the
+    // menu can start a new session without opening the settings sheet.
+    val ttsDockMini: (@Composable () -> Unit)? =
+        if ((ttsSessionActive || ttsSettings.miniPlayerAlways) && !isManga) {
+            {
+                TtsMiniPlayer(
+                    status = ttsState.status,
+                    onToggle = toggleTts,
+                    onStop = stopTts,
+                    onStartHere = startTtsHere,
+                    onFocus = focusTtsBlock,
+                    onPrevParagraph = { ttsAdjacentParagraph(-1) },
+                    onNextParagraph = { ttsAdjacentParagraph(1) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        } else {
+            null
         }
-    } else {
-        null
-    }
     LaunchedEffect(ttsState.status) {
         if (ttsState.status == TtsStatus.Failed) chromeVisible = true
     }
@@ -949,6 +986,7 @@ fun ReaderScreen(
                 canNext = chapterPosition >= 0 && chapterPosition < chapterCount - 1,
                 canOpenWebView = chapterUrl.isNotBlank(),
                 ttsStatus = ttsState.status,
+                sleepTimer = graph.tts.sleepTimer,
                 ttsEnabled = !isManga,
                 manga = isManga,
                 mangaPage = mangaPage,
@@ -1025,6 +1063,8 @@ fun ReaderScreen(
                 chapterCount = chapterCount,
                 chapterPercent = chapterPercent,
                 remainingSeconds = ttsState.estimatedRemainingSeconds,
+                sleepTimer = graph.tts.sleepTimer,
+                onSleepTimerClick = { chromeVisible = true; panel = ReaderPanel.Tts },
                 atEnd = ttsState.atEnd,
                 glowColorArgb = style.highlightColor,
                 settings = ttsSettings,
@@ -1065,6 +1105,10 @@ fun ReaderScreen(
         onTtsTest = graph.tts::testUtterance,
         onTtsReset = graph.tts::resetSettings,
         onTtsDiscoverVoices = graph.tts::refreshEngines,
+        sleepTimer = graph.tts.sleepTimer,
+        onSleepTimerMinutes = graph.tts::setSleepTimer,
+        onSleepTimerChapters = graph.tts::setSleepTimerChapters,
+        onSleepTimerCancel = graph.tts::cancelSleepTimer,
         onTtsRetry = graph.tts::retry,
         onTtsToggle = toggleTts,
         onTtsHighlightChange = { enabled ->
@@ -1123,3 +1167,7 @@ internal fun isFreshTtsSession(session: TtsSession, progress: SavedReading?): Bo
         (anchor.sentenceIndex ?: session.sentenceIndex) == session.sentenceIndex
     return sameSpot || session.updatedAt >= progress.updatedAt
 }
+
+/** True while a chapter hand-off still targets the chapter the reader shows. */
+internal fun ttsHandoffApplies(activeChapterIndex: Int, target: Int): Boolean =
+    activeChapterIndex == target

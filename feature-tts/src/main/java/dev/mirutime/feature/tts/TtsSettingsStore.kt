@@ -1,6 +1,7 @@
 package dev.mirutime.feature.tts
 
 import android.content.Context
+import android.content.SharedPreferences
 
 /**
  * Durable defaults for the next TTS session. A restored [TtsSession] still wins
@@ -23,9 +24,15 @@ class InMemoryTtsSettingsStore(
 
 // The same preferences file as the session slot: one reader-owned TTS store,
 // and PrefsReaderBackupStore already backs that file up.
-class PrefsTtsSettingsStore(context: Context) : TtsSettingsStore {
-    private val prefs = context.applicationContext
-        .getSharedPreferences(PrefsTtsSessionStore.PREFS_NAME, Context.MODE_PRIVATE)
+class PrefsTtsSettingsStore internal constructor(
+    private val prefs: SharedPreferences,
+) : TtsSettingsStore {
+    constructor(context: Context) : this(
+        context.applicationContext.getSharedPreferences(
+            PrefsTtsSessionStore.PREFS_NAME,
+            Context.MODE_PRIVATE,
+        ),
+    )
 
     override fun load(): TtsSettings = TtsSettings(
         voiceId = prefs.getString(PrefsTtsSessionStore.KEY_VOICE_ID, null),
@@ -34,7 +41,11 @@ class PrefsTtsSettingsStore(context: Context) : TtsSettingsStore {
         translatedEngineId = prefs.getString(PrefsTtsSessionStore.KEY_TRANSLATED_ENGINE_ID, null),
         speed = clampTtsSpeed(readFloat(PrefsTtsSessionStore.KEY_SPEED) ?: 1f),
         pitch = clampTtsPitch(readFloat(PrefsTtsSessionStore.KEY_PITCH) ?: 1f),
-        autoNextChapter = readBoolean(PrefsTtsSessionStore.KEY_AUTO_NEXT),
+        autoNextChapter = readBoolean(
+            PrefsTtsSessionStore.KEY_AUTO_NEXT,
+            default = TtsAutoNextChapterDefault,
+        ),
+        miniPlayerAlways = readBoolean(PrefsTtsSessionStore.KEY_MINI_PLAYER_ALWAYS),
         floatingPlayer = readBoolean(PrefsTtsSessionStore.KEY_FLOATING_PLAYER),
         floatingBubbleX = readFloat(PrefsTtsSessionStore.KEY_FLOATING_BUBBLE_X) ?: -1f,
         floatingBubbleY = readFloat(PrefsTtsSessionStore.KEY_FLOATING_BUBBLE_Y) ?: -1f,
@@ -48,7 +59,10 @@ class PrefsTtsSettingsStore(context: Context) : TtsSettingsStore {
             readFloat(PrefsTtsSessionStore.KEY_FLOATING_OPACITY)
                 ?: TtsFloatingDefaultOpacity,
         ),
-        floatingShowText = readBoolean(PrefsTtsSessionStore.KEY_FLOATING_SHOW_TEXT, default = true),
+        floatingShowText = readBoolean(
+            PrefsTtsSessionStore.KEY_FLOATING_SHOW_TEXT,
+            default = true,
+        ),
         floatingGlow = prefs.getString(PrefsTtsSessionStore.KEY_FLOATING_GLOW, null) ?: "auto",
         floatingParagraphMode = prefs.getString(
             PrefsTtsSessionStore.KEY_FLOATING_PARAGRAPH_MODE,
@@ -80,6 +94,10 @@ class PrefsTtsSettingsStore(context: Context) : TtsSettingsStore {
             .putString(
                 PrefsTtsSessionStore.KEY_AUTO_NEXT,
                 if (sanitized.autoNextChapter) "1" else "0",
+            )
+            .putString(
+                PrefsTtsSessionStore.KEY_MINI_PLAYER_ALWAYS,
+                if (sanitized.miniPlayerAlways) "1" else "0",
             )
             .putString(
                 PrefsTtsSessionStore.KEY_FLOATING_PLAYER,

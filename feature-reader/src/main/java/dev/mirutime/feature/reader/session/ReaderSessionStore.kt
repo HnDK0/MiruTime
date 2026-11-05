@@ -142,11 +142,18 @@ class ReaderSessionStore(
         launchPrefetch()
     }
 
-    suspend fun goToChapter(index: Int, atEnd: Boolean = false) {
+    suspend fun goToChapter(
+        index: Int,
+        atEnd: Boolean = false,
+        anchor: ReadingAnchor? = null,
+    ) {
         if (_state.value.chapters.none { it.index == index }) return
         sessionTracker?.stop()
         _state.update { it.copy(restorePhase = RestorePhase.Restoring, endOfBook = false) }
-        loadChapter(index, null, restoreAnchor = false, makeActive = true, atEnd = atEnd)
+        val saved = anchor?.let {
+            SavedReading(it, offsetPx = 0, seq = seq, updatedAt = System.currentTimeMillis())
+        }
+        loadChapter(index, saved, restoreAnchor = saved != null, makeActive = true, atEnd = atEnd)
         _state.update {
             it.copy(restorePhase = RestorePhase.Ready, scrollToken = it.scrollToken + 1)
         }

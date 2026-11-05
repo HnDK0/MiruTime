@@ -55,6 +55,7 @@ class PrefsTtsSessionStore(context: Context) : TtsSessionStore {
         const val KEY_SPEED = "settings_speed"
         const val KEY_PITCH = "settings_pitch"
         const val KEY_AUTO_NEXT = "settings_auto_next"
+        const val KEY_MINI_PLAYER_ALWAYS = "settings_mini_player_always"
         const val KEY_FLOATING_PLAYER = "settings_floating_player"
         const val KEY_FLOATING_BUBBLE_X = "settings_floating_bubble_x"
         const val KEY_FLOATING_BUBBLE_Y = "settings_floating_bubble_y"
@@ -77,6 +78,7 @@ class PrefsTtsSessionStore(context: Context) : TtsSessionStore {
             KEY_SPEED,
             KEY_PITCH,
             KEY_AUTO_NEXT,
+            KEY_MINI_PLAYER_ALWAYS,
             KEY_FLOATING_PLAYER,
             KEY_FLOATING_BUBBLE_X,
             KEY_FLOATING_BUBBLE_Y,
