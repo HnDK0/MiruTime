@@ -1267,9 +1267,11 @@ private fun ResumeCard(
     reloadKey: Any? = null,
 ) {
     val title = book.translatedTitle ?: book.title
-    // Position-based progress: the saved chapter Continue restores, not the
-    // number of fully finished chapters.
-    val progress = book.progressChapter.toFloat() / book.totalChapters.coerceAtLeast(1)
+    // Progress counts finished chapters (the same metric as the grid cards);
+    // the saved Continue position stays visible as its own meta segment.
+    val total = book.totalChapters.coerceAtLeast(0)
+    val read = book.readChapters.coerceIn(0, total)
+    val progress = if (total > 0) read.toFloat() / total else 0f
     val percent = (progress * 100).roundToInt()
     MiruCard(
         contentPadding = PaddingValues(0.dp),
@@ -1308,13 +1310,24 @@ private fun ResumeCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = stringResource(
-                        R.string.lib_resume_meta_fmt,
-                        book.progressChapter,
-                        book.totalChapters,
-                        book.sourceLabel,
-                        book.lastReadLabel,
-                    ),
+                    text = if (book.progressChapter > 0) {
+                        stringResource(
+                            R.string.lib_resume_meta_chapter_fmt,
+                            read,
+                            total,
+                            book.progressChapter,
+                            book.sourceLabel,
+                            book.lastReadLabel,
+                        )
+                    } else {
+                        stringResource(
+                            R.string.lib_resume_meta_fmt,
+                            read,
+                            total,
+                            book.sourceLabel,
+                            book.lastReadLabel,
+                        )
+                    },
                     // Small meta is never bare ≤14sp on the photo: it rides
                     // the TOP strip's zonal soft ink at 14sp (classic keeps
                     // the 10sp muted line verbatim).

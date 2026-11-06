@@ -289,6 +289,7 @@
     <string name="lib_empty_hint">Попробуйте другую полку, запрос или фильтр.</string>
     <string name="lib_resume_eyebrow">ПРОДОЛЖИТЬ ЧТЕНИЕ</string>
     <string name="lib_resume_meta_fmt">%1$d/%2$d · %3$s · %4$s</string>
+    <string name="lib_resume_meta_chapter_fmt">%1$d/%2$d · гл. %3$d · %4$s · %5$s</string>
     <string name="lib_resume_complete_fmt">готово на %1$d%%</string>
     <string name="lib_continue_desc_fmt">Продолжить · %1$s</string>
     <string name="lib_cd_selected">Выбрано</string>

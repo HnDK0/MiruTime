@@ -293,6 +293,7 @@
     <string name="lib_empty_hint">Try another shelf, query or filter.</string>
     <string name="lib_resume_eyebrow">PICK UP WHERE YOU LEFT OFF</string>
     <string name="lib_resume_meta_fmt">%1$d/%2$d · %3$s · %4$s</string>
+    <string name="lib_resume_meta_chapter_fmt">%1$d/%2$d · Ch. %3$d · %4$s · %5$s</string>
     <string name="lib_resume_complete_fmt">%1$d%% complete</string>
     <string name="lib_continue_desc_fmt">Continue · %1$s</string>
     <string name="lib_cd_selected">Selected</string>
