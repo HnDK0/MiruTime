@@ -1,6 +1,9 @@
 package dev.mirutime.core.engine
 
+import com.fleeksoft.ksoup.Ksoup
+import dev.mirutime.core.engine.binding.ElementTables
 import dev.mirutime.core.engine.binding.HtmlBindings
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 class HtmlBindingsTest {
@@ -66,11 +69,12 @@ class HtmlBindingsTest {
               local card = html_select_first(body, ".book")
               local links = card:select("a")
               return links[1]:attr("href") .. "|" .. card:select(".meta a")[1].text .. "|" .. links[1].href
+                  .. "|" .. card.attr("class")
             end
             """.trimIndent()
         )
         check(r.error == null) { r.error!! }
-        check(r.data == dev.mirutime.core.engine.LuaData.LuaStr("/b/1|Go|/b/1")) { r.data.toString() }
+        check(r.data == dev.mirutime.core.engine.LuaData.LuaStr("/b/1|Go|/b/1|book")) { r.data.toString() }
     }
 
     @Test
@@ -133,6 +137,24 @@ class HtmlBindingsTest {
         )
         check(r.error == null) { r.error!! }
         check(r.data == dev.mirutime.core.engine.LuaData.LuaStr("one|two")) { r.data.toString() }
+    }
+
+    @Test
+    fun `html_select on a parse result uses the live document, not a re-parse of stored html`() {
+        // The stored `html` is a snapshot taken at parse time. Selecting on it
+        // again would resurrect a node detached through `doc.body`, so a
+        // parse-table argument must resolve to the wrapped Document.
+        val r = eval(
+            """
+            function main()
+              local doc = html_parse("<div><p id='a'>A</p><p id='b'>B</p></div>")
+              html_remove(html_select_first(doc.body, "#a"))
+              return #html_select(doc, "#a")
+            end
+            """.trimIndent()
+        )
+        check(r.error == null) { r.error!! }
+        check(r.data == dev.mirutime.core.engine.LuaData.LuaNum(0.0)) { r.data.toString() }
     }
 
     @Test
@@ -274,5 +296,93 @@ class HtmlBindingsTest {
         check(r.error == null) { r.error!! }
         val html = (r.data as dev.mirutime.core.engine.LuaData.LuaStr).value
         check(html.contains("&lt;") && html.contains("&amp;") && !html.contains("1 < 2")) { html }
+    }
+
+    // -- one element metatable per session (AC-1) --
+
+    @Test
+    fun `element tables share one metatable per factory`() {
+        val tables = ElementTables()
+        val metatable = tables.from(Ksoup.parse("<p>a</p>", "").selectFirst("p")!!).getmetatable()
+
+        assertSame(metatable, tables.from(Ksoup.parse("<p>b</p>", "").selectFirst("p")!!).getmetatable())
+        repeat(200) {
+            val table = tables.from(Ksoup.parse("<p>c</p>", "").selectFirst("p")!!)
+            assertSame(metatable, table.getmetatable())
+        }
+    }
+
+    // -- html_* contract for a parse result table (its Document, not its html string) --
+
+    @Test
+    fun `document level bindings accept a parse result`() {
+        val r = eval(
+            """
+            function main()
+              local doc = html_parse("<html><head><title>T</title></head><body><p id='x'>hi</p></body></html>")
+              local attr = html_attr(doc, "p", "id")
+              local inner = html_html(doc)
+              local outer = html_outerHtml(doc)
+              local text = html_text(doc)
+              local abs = html_absUrl(doc, "href")
+              return attr .. "|" .. tostring(inner:find("<p id=\"x\">hi</p>") ~= nil)
+                  .. "|" .. tostring(outer:find("<html>") ~= nil)
+                  .. "|" .. tostring(text:find("hi") ~= nil)
+                  .. "|" .. tostring(abs == "")
+            end
+            """.trimIndent()
+        )
+        check(r.error == null) { r.error!! }
+        check(r.data == dev.mirutime.core.engine.LuaData.LuaStr("x|true|true|true|true")) { r.data.toString() }
+    }
+
+    @Test
+    fun `html_remove on a parse result mutates the document`() {
+        val r = eval(
+            """
+            function main()
+              local doc = html_parse("<div><script>x()</script><p>keep</p></div>")
+              local cleaned = html_remove(doc, "script")
+              local detached = html_remove(html_parse("<p>a</p>"))
+              return tostring(cleaned:find("script") == nil)
+                  .. "|" .. tostring(cleaned:find("keep") ~= nil)
+                  .. "|" .. tostring(detached == nil)
+            end
+            """.trimIndent()
+        )
+        check(r.error == null) { r.error!! }
+        check(r.data == dev.mirutime.core.engine.LuaData.LuaStr("true|true|true")) { r.data.toString() }
+    }
+
+    @Test
+    fun `pairs on a parse result exposes the wrapped element key`() {
+        val r = eval(
+            """
+            function main()
+              local doc = html_parse("<p>a</p>")
+              local seen = false
+              for k, _ in pairs(doc) do
+                if k == "__element" then seen = true end
+              end
+              return tostring(seen)
+            end
+            """.trimIndent()
+        )
+        check(r.error == null) { r.error!! }
+        check(r.data == dev.mirutime.core.engine.LuaData.LuaStr("true")) { r.data.toString() }
+    }
+
+    @Test
+    fun `html_select keeps accepting a hand built table with an html key`() {
+        val r = eval(
+            """
+            function main()
+              local wrapper = { html = "<ul><li>x</li></ul>" }
+              return #html_select(wrapper, "li")
+            end
+            """.trimIndent()
+        )
+        check(r.error == null) { r.error!! }
+        check(r.data == dev.mirutime.core.engine.LuaData.LuaNum(1.0)) { r.data.toString() }
     }
 }

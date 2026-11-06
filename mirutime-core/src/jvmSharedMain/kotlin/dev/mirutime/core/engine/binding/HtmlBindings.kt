@@ -19,13 +19,17 @@ import org.luaj.vm2.lib.ZeroArgFunction
 // and return element TABLES with a __element userdata plus a lazily evaluated
 // metatable, so both dot access (`el.text`, `el.href`) and colon methods
 // (`el:attr("x")`, `el:select(sel)`, `el:remove()`) behave as in NoveLA.
-object HtmlBindings {
 
-    // Key holding the wrapped Ksoup Element inside an element table.
-    private const val ELEMENT_KEY = "__element"
+// Key holding the wrapped Ksoup Element inside an element table. Top-level so
+// ElementTables reads it without reaching back into HtmlBindings.
+internal const val ELEMENT_KEY = "__element"
+
+object HtmlBindings {
 
     fun install(session: LuaSession) {
         val globals = session.globals
+        // One metatable for every element table this session builds.
+        val tables = ElementTables()
         // NoveLA LuaSourceLoader.kt:1025-1035: html_parse(html) → { text, html,
         // title, body } (1-arg); body is an element table, so select/text keep
         // working on `parsed.body`. Any failure → nil.
@@ -33,10 +37,14 @@ object HtmlBindings {
             override fun call(html: LuaValue): LuaValue = try {
                 val doc = Ksoup.parse(html.checkjstring(), "")
                 LuaTable().also { t ->
+                    // The parsed Document itself: html_select(doc, ...) and
+                    // friends then reuse this tree instead of re-parsing the
+                    // `html` snapshot taken below.
+                    t.set(ELEMENT_KEY, LuaUserdata(doc))
                     t.set("text", LuaValue.valueOf(doc.text()))
                     t.set("html", LuaValue.valueOf(doc.html()))
                     t.set("title", LuaValue.valueOf(doc.title()))
-                    t.set("body", elementToTable(doc.body()))
+                    t.set("body", tables.from(doc.body()))
                 }
             } catch (_: Exception) {
                 LuaValue.NIL
@@ -52,7 +60,7 @@ object HtmlBindings {
                     Ksoup.parse(el.checkjstring(), "").select(selector)
                 }
                 LuaTable().also { table ->
-                    matches.forEachIndexed { i, child -> table.set(i + 1, elementToTable(child)) }
+                    matches.forEachIndexed { i, child -> table.set(i + 1, tables.from(child)) }
                 }
             } catch (_: Exception) {
                 LuaTable()
@@ -67,7 +75,7 @@ object HtmlBindings {
                 } else {
                     Ksoup.parse(el.checkjstring(), "").selectFirst(selector)
                 }
-                if (first != null) elementToTable(first) else LuaValue.NIL
+                if (first != null) tables.from(first) else LuaValue.NIL
             } catch (_: Exception) {
                 LuaValue.NIL
             }
@@ -159,87 +167,15 @@ object HtmlBindings {
         })
     }
 
-    // Extracts the wrapped Ksoup Element from an element table (`__element`
-    // userdata) or directly from a userdata value. A html_parse result table
-    // ({text,html,title,body}) carries no __element: its stored html is
-    // re-parsed so select/text keep accepting it (NoveLA returns an empty
-    // selection there; the factory pipeline relies on the lenient form).
+    // Lenient resolver for html_* arguments: the wrapped element first, then a
+    // hand-built table's `html` string (re-parsed). NoveLA returns an empty
+    // selection for such tables; the factory pipeline relies on the lenient
+    // form instead.
     private fun elementFromValue(v: LuaValue): Element? {
-        if (v.istable()) {
-            val table = v.checktable()
-            val user = table.get(ELEMENT_KEY)
-            if (user.isuserdata()) return user.touserdata() as? Element
-            val html = table.get("html")
-            if (html.isstring()) return Ksoup.parse(html.tojstring(), "")
-            return null
-        }
-        if (v.isuserdata()) return v.touserdata() as? Element
-        return null
-    }
-
-    // Builds an element table whose metatable evaluates properties on demand
-    // and caches them, and exposes attr/select/remove callable either as
-    // `el:method(...)` (self prepended) or `el.method(...)`.
-    private fun elementToTable(el: Element): LuaTable {
-        val t = LuaTable()
-        t.set(ELEMENT_KEY, LuaUserdata(el))
-
-        val mt = LuaTable()
-        mt.set(LuaValue.INDEX, object : TwoArgFunction() {
-            override fun call(table: LuaValue, key: LuaValue): LuaValue {
-                val keyStr = key.optjstring(null) ?: return LuaValue.NIL
-                val value = when (keyStr) {
-                    "text" -> LuaValue.valueOf(el.text())
-                    "html" -> LuaValue.valueOf(el.html())
-                    "href" -> LuaValue.valueOf(el.attr("abs:href").ifEmpty { el.attr("href") })
-                    "src" -> LuaValue.valueOf(el.attr("abs:src").ifEmpty { el.attr("src") })
-                    "title" -> LuaValue.valueOf(el.attr("title"))
-                    "class" -> LuaValue.valueOf(el.attr("class"))
-                    "id" -> LuaValue.valueOf(el.attr("id"))
-                    "get_text" -> object : ZeroArgFunction() {
-                        override fun call(): LuaValue = LuaValue.valueOf(el.text())
-                    }
-                    "get_html" -> object : ZeroArgFunction() {
-                        override fun call(): LuaValue = LuaValue.valueOf(el.html())
-                    }
-                    "attr" -> object : VarArgFunction() {
-                        override fun invoke(args: Varargs): Varargs {
-                            // `el:attr("x")` prepends self — take the last arg.
-                            val name = if (args.narg() >= 2) args.arg(2) else args.arg(1)
-                            return try {
-                                LuaValue.valueOf(el.attr(name.checkjstring()))
-                            } catch (_: Exception) {
-                                LuaValue.valueOf("")
-                            }
-                        }
-                    }
-                    "select" -> object : VarArgFunction() {
-                        override fun invoke(args: Varargs): Varargs {
-                            val selector = if (args.narg() >= 2) args.arg(2) else args.arg(1)
-                            return try {
-                                val elems = el.select(selector.checkjstring())
-                                LuaTable().also { out ->
-                                    elems.forEachIndexed { i, child -> out.set(i + 1, elementToTable(child)) }
-                                }
-                            } catch (_: Exception) {
-                                LuaTable()
-                            }
-                        }
-                    }
-                    "remove" -> object : ZeroArgFunction() {
-                        override fun call(): LuaValue {
-                            el.remove()
-                            return LuaValue.NIL
-                        }
-                    }
-                    else -> LuaValue.NIL
-                }
-                if (value != LuaValue.NIL) table.set(key, value)
-                return value
-            }
-        })
-        t.setmetatable(mt)
-        return t
+        elementOf(v)?.let { return it }
+        if (!v.istable()) return null
+        val html = v.checktable().get("html")
+        return if (html.isstring()) Ksoup.parse(html.tojstring(), "") else null
     }
 
     // ── html_text: NoveLA TextExtractor parity ───────────────────────────────
@@ -306,4 +242,92 @@ object HtmlBindings {
                 else -> if (child is TextNode) child.text() else innerTraverse(child)
             }
         }
+}
+
+// One element-table factory per Lua session: every element table shares a
+// single metatable, so a select() over a chapter allocates one table per
+// element instead of a table + a metatable + an __index closure per element.
+// Per-session rather than process-wide: this is a live LuaTable and LuaJ
+// tables are not thread-safe; the saving is the same either way, the sharing
+// risk is not taken.
+internal class ElementTables {
+    private val metatable: LuaTable =
+        LuaTable().also { mt ->
+            mt.set(LuaValue.INDEX, object : TwoArgFunction() {
+                override fun call(table: LuaValue, key: LuaValue): LuaValue {
+                    // Strict lookup: a lenient (re-parsing) resolver here would
+                    // re-parse the HTML on every property read if a plugin
+                    // attached this metatable to its own table from Lua.
+                    val el = elementOf(table) ?: return LuaValue.NIL
+                    val keyStr = key.optjstring(null) ?: return LuaValue.NIL
+                    val value = when (keyStr) {
+                        "text" -> LuaValue.valueOf(el.text())
+                        "html" -> LuaValue.valueOf(el.html())
+                        "href" -> LuaValue.valueOf(el.attr("abs:href").ifEmpty { el.attr("href") })
+                        "src" -> LuaValue.valueOf(el.attr("abs:src").ifEmpty { el.attr("src") })
+                        "title" -> LuaValue.valueOf(el.attr("title"))
+                        "class" -> LuaValue.valueOf(el.attr("class"))
+                        "id" -> LuaValue.valueOf(el.attr("id"))
+                        "get_text" -> object : ZeroArgFunction() {
+                            override fun call(): LuaValue = LuaValue.valueOf(el.text())
+                        }
+                        "get_html" -> object : ZeroArgFunction() {
+                            override fun call(): LuaValue = LuaValue.valueOf(el.html())
+                        }
+                        "attr" -> object : VarArgFunction() {
+                            override fun invoke(args: Varargs): Varargs {
+                                // `el:attr("x")` prepends self — take the last arg.
+                                val name = if (args.narg() >= 2) args.arg(2) else args.arg(1)
+                                return try {
+                                    LuaValue.valueOf(el.attr(name.checkjstring()))
+                                } catch (_: Exception) {
+                                    LuaValue.valueOf("")
+                                }
+                            }
+                        }
+                        "select" -> object : VarArgFunction() {
+                            override fun invoke(args: Varargs): Varargs {
+                                val selector = if (args.narg() >= 2) args.arg(2) else args.arg(1)
+                                return try {
+                                    val elems = el.select(selector.checkjstring())
+                                    LuaTable().also { out ->
+                                        elems.forEachIndexed { i, child -> out.set(i + 1, from(child)) }
+                                    }
+                                } catch (_: Exception) {
+                                    LuaTable()
+                                }
+                            }
+                        }
+                        "remove" -> object : ZeroArgFunction() {
+                            override fun call(): LuaValue {
+                                el.remove()
+                                return LuaValue.NIL
+                            }
+                        }
+                        else -> LuaValue.NIL
+                    }
+                    if (value != LuaValue.NIL) table.set(key, value)
+                    return value
+                }
+            })
+        }
+
+    // Element tables still pay one table per element, and the method closures
+    // (attr/select/remove/get_text/get_html) stay per element too: dot-form
+    // `el.attr("x")` has no self argument, so a shared function cannot recover
+    // the element. Lifting those would break the supported dot form.
+    fun from(el: Element): LuaTable = LuaTable().also {
+        it.set(ELEMENT_KEY, LuaUserdata(el))
+        it.setmetatable(metatable)
+    }
+}
+
+// Strict resolver used by the element metatable: only the wrapped element,
+// never a re-parse of a table's stored `html`.
+internal fun elementOf(v: LuaValue): Element? {
+    if (v.istable()) {
+        val user = v.checktable().get(ELEMENT_KEY)
+        return if (user.isuserdata()) user.touserdata() as? Element else null
+    }
+    return if (v.isuserdata()) v.touserdata() as? Element else null
 }
