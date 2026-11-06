@@ -79,6 +79,42 @@ class PluginBookIndexTest {
         assertEquals(500, present)
     }
 
+    @Test
+    fun `display title prefers the cached plugin title`() {
+        PluginBookIndex.putTitle("https://site/book/1", "Book One")
+
+        assertEquals("Book One", PluginBookIndex.displayTitle("https://site/book/1"))
+    }
+
+    @Test
+    fun `display title never returns untitled for a trailing slash url`() {
+        assertEquals("1234", PluginBookIndex.displayTitle("https://ranobehub.org/ranobe/1234/"))
+    }
+
+    @Test
+    fun `display title decodes a cyrillic slug`() {
+        val encoded = "https://site/novel/" +
+            "%D0%92%D0%BB%D0%B0%D0%B4%D1%8B%D0%BA%D0%B0-%D0%A2%D0%B0%D0%B9%D0%BD"
+
+        assertEquals("Владыка Тайн", PluginBookIndex.displayTitle(encoded))
+    }
+
+    @Test
+    fun `display title falls back to the host when the path is empty`() {
+        assertEquals("site.example", PluginBookIndex.displayTitle("https://site.example/"))
+    }
+
+    @Test
+    fun `display title strips the scheme from local urls`() {
+        assertEquals("abc", PluginBookIndex.displayTitle("local://abc"))
+        assertEquals("", PluginBookIndex.displayTitle(""))
+    }
+
+    @Test
+    fun `display title survives a malformed url`() {
+        assertEquals("not a url", PluginBookIndex.displayTitle("not a url"))
+    }
+
     private fun runConcurrently(threads: Int, perThread: Int, block: (thread: Int, index: Int) -> Unit) {
         PluginBookIndex.clear()
         val start = CountDownLatch(1)

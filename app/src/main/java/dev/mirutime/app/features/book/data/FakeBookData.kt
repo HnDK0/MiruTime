@@ -510,7 +510,9 @@ object BookCatalog {
             .joinToString(" ") { part ->
                 part.replaceFirstChar { it.uppercase(Locale.US) }
             }
-            .ifBlank { "Untitled" }
+            .ifBlank {
+                url.substringAfter("://").substringBefore('/').ifBlank { url }
+            }
         val source = url.substringAfter("fake://").substringBefore('/')
         val hash = abs(url.hashCode())
         val total = 140 + hash % 460

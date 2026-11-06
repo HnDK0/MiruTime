@@ -2,6 +2,8 @@ package dev.mirutime.app.features.book.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import java.net.URI
+import java.net.URLDecoder
 
 // Maps a bookUrl to the plugin (sourceId) that serves it, plus its display
 // title. The book route carries only the bookUrl, and the shell header reads a
@@ -49,6 +51,14 @@ object PluginBookIndex {
         titleByBook[bookUrl] ?: prefs?.getString("$TitlePrefix$bookUrl", null)
     }
 
+    // Synchronous header/screen title: the cached plugin title wins; a miss
+    // falls back to a readable URL label, never a synthesized "Untitled".
+    fun displayTitle(bookUrl: String): String =
+        titleFor(bookUrl)?.takeIf { it.isNotBlank() }
+            ?: urlDisplayTitle(bookUrl).ifBlank {
+                bookUrl.substringAfter("://").ifBlank { bookUrl }
+            }
+
     // Test seam / full reset.
     fun clear() = synchronized(lock) {
         sourceByBook.clear()
@@ -69,3 +79,21 @@ private const val PrefsName = "plugin_book_index"
 private const val SourcePrefix = "s:"
 private const val TitlePrefix = "t:"
 private const val MaxEntries = 500
+
+// Last readable path segment of an http(s) URL: decoded, separators turned
+// into spaces. Empty for local/content/file URLs (they have no useful slug).
+internal fun urlDisplayTitle(url: String): String {
+    val scheme = url.substringBefore(':', "").lowercase()
+    if (scheme != "http" && scheme != "https") return ""
+    val uri = runCatching { URI(url) }.getOrNull() ?: return ""
+    val segment = uri.path.orEmpty()
+        .split('/')
+        .lastOrNull { it.isNotBlank() }
+        ?: return uri.host.orEmpty()
+    val label = runCatching { URLDecoder.decode(segment, "UTF-8") }
+        .getOrDefault(segment)
+        .replace('-', ' ')
+        .replace('_', ' ')
+        .trim()
+    return label.ifBlank { uri.host.orEmpty() }
+}

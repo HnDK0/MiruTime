@@ -380,12 +380,11 @@ fun MiruShell(
             // its display title through the shared catalog so every entry
             // point opens one book state.
             val bookUrl = entry?.arguments?.getString("bookUrl")?.let(Uri::decode)
-            // Real plugin books cache their title when opened; fixtures fall
-            // back to the shared catalogue (URL slug), so the header never
-            // shows a synthesized title for a plugin book.
-            val bookTitle = bookUrl?.let {
-                PluginBookIndex.titleFor(it) ?: dev.mirutime.app.features.book.data.BookCatalog.titleFor(it)
-            }
+            // Real plugin books cache their title when opened; a miss falls
+            // back to a readable URL label, never a synthesized "Untitled".
+            val bookTitle = bookUrl
+                ?.takeIf { it.isNotBlank() }
+                ?.let { PluginBookIndex.displayTitle(it).takeIf(String::isNotBlank) }
             // Source catalogue: header shows the source name.
             val sourceId = entry?.arguments?.getString("sourceId")?.let(Uri::decode)
             val sourceName = sourceId?.let { id ->

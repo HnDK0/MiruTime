@@ -52,7 +52,7 @@ import dev.mirutime.uikit.MiruSectionCard
 import dev.mirutime.uikit.SettingsHint
 import dev.mirutime.uikit.SettingsPage
 import dev.mirutime.uikit.SettingsSwitchRow
-import dev.mirutime.app.features.book.data.BookCatalog
+import dev.mirutime.app.features.book.data.PluginBookIndex
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.core.text.RegexRule
 import dev.mirutime.core.text.RegexRuleScope
@@ -107,7 +107,7 @@ fun RegexRulesScreen(
         if (novelUrl != null) {
             item(key = "novel") {
                 MiruSectionCard(
-                    title = stringResource(R.string.st_rx_novel_title_fmt, BookCatalog.titleFor(novelUrl)),
+                    title = stringResource(R.string.st_rx_novel_title_fmt, PluginBookIndex.displayTitle(novelUrl)),
                     description = stringResource(
                         R.string.st_rx_novel_desc_fmt,
                         s.globalRegexRules.count { it.enabled },
