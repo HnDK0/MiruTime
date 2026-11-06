@@ -47,6 +47,9 @@ fun MiruCard(
         modifier = modifier,
         shape = shape,
         color = miruCardSurface(),
+        // Same contract as AppBottomSheet: the photo plate is not a scheme
+        // role, so pin the ink instead of letting contentColorFor() emit black.
+        contentColor = MaterialTheme.colorScheme.onSurface,
         shadowElevation = miruCardElevation(),
         tonalElevation = 0.dp,
     ) {

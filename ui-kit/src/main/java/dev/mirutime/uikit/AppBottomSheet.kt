@@ -142,6 +142,11 @@ fun AppBottomSheet(
         sheetMaxWidth = MiruSize.ContentMaxWidth,
         shape = RoundedCornerShape(MiruRadius.Sheet),
         containerColor = miruCardSurface(),
+        // miruCardSurface() is not a scheme role on the photo theme (alpha
+        // < 1), so contentColorFor() would return Unspecified and every
+        // colourless Text in the sheet would fall back to black. Pin the
+        // plate ink explicitly: one owner for every sheet.
+        contentColor = MaterialTheme.colorScheme.onSurface,
         // Compact handle: the sheet still drags natively, but the header spends
         // 24dp instead of the 48dp native handle. Its measured height feeds the
         // seventy-percent budget like before. Compact panels have no handle.
