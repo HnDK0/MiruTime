@@ -3004,45 +3004,32 @@ private fun DownloadPanel(
     onNext: (Int) -> Unit,
     onAllUnread: () -> Unit,
 ) {
+    // House standard: header + action rows, no compact chip grid.
     AppBottomSheet(
         title = stringResource(R.string.book_action_download),
         description = stringResource(R.string.book_download_panel_desc),
         onClose = onClose,
-        compact = true,
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-            MiruCompactButton(
-                label = stringResource(R.string.book_download_next_fmt, 10),
+        listOf(10, 50, 100).forEachIndexed { index, count ->
+            if (index > 0) MiruRowDivider()
+            MiruActionRow(
+                icon = Icons.Filled.Download,
+                title = stringResource(R.string.book_download_next_fmt, count),
+                subtitle = stringResource(R.string.book_download_next_desc),
                 enabled = !busy,
-                busy = busy,
-                onClick = { onNext(10) },
-                modifier = Modifier.weight(1f),
-            )
-            MiruCompactButton(
-                label = stringResource(R.string.book_download_next_fmt, 50),
-                enabled = !busy,
-                busy = busy,
-                onClick = { onNext(50) },
-                modifier = Modifier.weight(1f),
+                trailing = {},
+                onClick = { onNext(count) },
             )
         }
-        Spacer(modifier = Modifier.height(MiruSpace.S))
-        Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-            MiruCompactButton(
-                label = stringResource(R.string.book_download_next_fmt, 100),
-                enabled = !busy,
-                busy = busy,
-                onClick = { onNext(100) },
-                modifier = Modifier.weight(1f),
-            )
-            MiruCompactButton(
-                label = stringResource(R.string.book_download_all_unread),
-                selected = true,
-                enabled = !busy,
-                onClick = onAllUnread,
-                modifier = Modifier.weight(1f),
-            )
-        }
+        MiruRowDivider()
+        MiruActionRow(
+            icon = Icons.Filled.Download,
+            title = stringResource(R.string.book_download_all_unread),
+            subtitle = stringResource(R.string.book_download_all_unread_desc),
+            enabled = !busy,
+            trailing = {},
+            onClick = onAllUnread,
+        )
     }
 }
 

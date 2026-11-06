@@ -1476,6 +1476,7 @@
     <string name="migration_all_sources">Все источники</string>
     <string name="migration_search_query">Название книги в новом источнике</string>
     <string name="migration_search_action">Искать</string>
+    <string name="migration_search_progress_fmt">%1$d/%2$d</string>
     <string name="migration_searching">Поиск по источникам…</string>
     <string name="migration_search_empty">Книги не найдены. Попробуйте более короткое название.</string>
     <plurals name="migration_result_chapters">
@@ -1712,6 +1713,8 @@
     <string name="book_source_login_desc">VIP-главы и cookies</string>
     <string name="book_source_page_desc">Открыть страницу источника во встроенном браузере</string>
     <string name="book_download_panel_desc">Следующие главы от текущей позиции</string>
+    <string name="book_download_next_desc">От текущей позиции</string>
+    <string name="book_download_all_unread_desc">Все непрочитанные главы</string>
     <string name="book_tool_migrate_needs_library">Нужна библиотека</string>
     <string name="book_tool_source">Источник</string>
     <string name="book_tools_scope">Только для этого тайтла</string>
