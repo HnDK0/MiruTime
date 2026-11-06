@@ -97,6 +97,22 @@ class PluginBookDataProvider(
 ) : BookDataProvider {
     private val graph: PluginGraph
         get() = requireNotNull(graphOrNull) { "plugin graph is not configured" }
+
+    // Installed plugins keep the display name; the DB row only stores the id.
+    // Library cards already resolve through this map, so the book page and the
+    // shell header must use the same name instead of the raw install id.
+    private suspend fun sourceLabel(id: String, fallback: String = id): String {
+        val live = graphOrNull?.installed?.value.orEmpty()
+        // A cold start can open a cached library row before bootstrap has
+        // published the installed list; wait for that scan once so the page
+        // never caches a raw install id as the display name.
+        val installed = live.ifEmpty { graphOrNull?.installedNow().orEmpty() }
+        return installed
+            .firstOrNull { it.id == id }
+            ?.name
+            ?.takeIf { it.isNotBlank() }
+            ?: fallback
+    }
     private val details = mutableMapOf<String, BookDetails>()
     // Last typed plugin failure per book, read by BookScreen after a null
     // metadata result; cleared by the next successful load.
@@ -213,7 +229,10 @@ class PluginBookDataProvider(
         val built = BookDetails(
             bookUrl = bookUrl,
             title = title,
-            source = source.metadata.name.ifBlank { hostOf(bookUrl) },
+            source = sourceLabel(
+                sourceId,
+                source.metadata.name.ifBlank { hostOf(bookUrl) },
+            ),
             author = meta.author?.takeIf { it.isNotBlank() }
                 ?: existing.authorRaw.ifBlank { existing.author }.ifBlank { "Unknown" },
             originLanguage = meta.extras["language"]?.takeIf { it.isNotBlank() }
@@ -350,7 +369,10 @@ class PluginBookDataProvider(
         val built = BookDetails(
             bookUrl = bookUrl,
             title = title,
-            source = source.metadata.name.ifBlank { hostOf(bookUrl) },
+            source = sourceLabel(
+                sourceId,
+                source.metadata.name.ifBlank { hostOf(bookUrl) },
+            ),
             author = meta.author?.takeIf { it.isNotBlank() } ?: "Unknown",
             originLanguage = meta.extras["language"]?.takeIf { it.isNotBlank() }
                 ?: meta.extras["originLanguage"]?.takeIf { it.isNotBlank() }
@@ -406,7 +428,7 @@ class PluginBookDataProvider(
     private suspend fun bookDetailsFromRow(row: BookEntity): BookDetails = BookDetails(
         bookUrl = row.url,
         title = row.title,
-        source = row.installId,
+        source = sourceLabel(row.installId),
         author = row.authorRaw.ifBlank { row.author }.ifBlank { "Unknown" },
         originLanguage = row.originLanguage,
         contentType = runCatching { ContentType.valueOf(row.contentType) }

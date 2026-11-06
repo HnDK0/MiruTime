@@ -93,6 +93,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -159,6 +160,7 @@ import dev.mirutime.app.design.components.PluginErrorState
 import dev.mirutime.app.features.book.data.BookDataProvider
 import dev.mirutime.app.features.book.data.MembershipResult
 import dev.mirutime.app.features.book.data.PluginBookIndex
+import dev.mirutime.app.shell.LocalImeBottom
 import dev.mirutime.app.features.book.data.BookEpubExporter
 import dev.mirutime.app.features.book.data.EpubExportResult
 import dev.mirutime.app.features.book.data.epubFileName
@@ -315,6 +317,7 @@ fun BookScreen(
     // The saved reader position is the same source the tap uses; the CTA
     // label must not fall back to "Start · Chapter 1" while it is non-zero.
     var savedContinue by remember(bookUrl) { mutableStateOf<Int?>(null) }
+    var searchFocused by remember { mutableStateOf(false) }
     // Chapter the saved reading position belongs to; opening exactly this row
     // restores its saved offset instead of starting at the chapter top.
     var savedChapterIndex by remember(bookUrl) { mutableStateOf<Int?>(null) }
@@ -1218,6 +1221,7 @@ fun BookScreen(
         )
     }
     val metadataEntry = metadata[bookUrl]?.takeIf { it.config == metadataConfig }
+    val imeBottom = LocalImeBottom.current
     LazyColumn(
         state = if (current == null) loadingListState else pageListState,
         modifier = Modifier.fillMaxSize(),
@@ -1228,7 +1232,8 @@ fun BookScreen(
             start = MiruSpace.M,
             end = MiruSpace.M,
             top = contentPadding.calculateTopPadding() + MiruSpace.Xs,
-            bottom = contentPadding.calculateBottomPadding() + BottomClearance,
+            bottom = contentPadding.calculateBottomPadding() + BottomClearance +
+                if (searchFocused) imeBottom else 0.dp,
         ),
     ) {
         if (current == null) {
@@ -1452,6 +1457,8 @@ fun BookScreen(
                         ChapterBrowser(
                             book = current,
                             listState = chapterListState,
+                            searchFocused = searchFocused,
+                            onSearchFocusChanged = { searchFocused = it },
                             translatedTitles = metadataEntry?.chapterTitles.orEmpty(),
                             newestFirst = newestFirst,
                             bulkBusy = bulkBusy,
@@ -3230,6 +3237,8 @@ private fun ChapterOrderToggle(newestFirst: Boolean, onClick: () -> Unit) {
 private fun ChapterBrowser(
     book: BookDetails,
     listState: LazyListState,
+    searchFocused: Boolean,
+    onSearchFocusChanged: (Boolean) -> Unit,
     translatedTitles: Map<Int, String>,
     newestFirst: Boolean,
     bulkBusy: BulkAction?,
@@ -3322,11 +3331,13 @@ private fun ChapterBrowser(
 
     val searchFocusRequester = remember { FocusRequester() }
     val searchBringIntoView = remember { BringIntoViewRequester() }
-    var searchFocused by remember { mutableStateOf(false) }
+    val resultsPeek = with(LocalDensity.current) { 320.dp.toPx() }
     LaunchedEffect(searchFocused) {
         if (!searchFocused) return@LaunchedEffect
         repeat(7) {
-            searchBringIntoView.bringIntoView()
+            // Keep the field and a slice of the results above the keyboard,
+            // not just the 40dp input row.
+            searchBringIntoView.bringIntoView(Rect(0f, 0f, 1f, resultsPeek))
             delay(80)
         }
     }
@@ -3341,7 +3352,7 @@ private fun ChapterBrowser(
                 .fillMaxWidth()
                 .bringIntoViewRequester(searchBringIntoView),
             focusRequester = searchFocusRequester,
-            onFocusChanged = { searchFocused = it },
+            onFocusChanged = onSearchFocusChanged,
         )
         Spacer(modifier = Modifier.height(MiruSpace.S))
         // Three compact plates. They are secondary tools, not page-level

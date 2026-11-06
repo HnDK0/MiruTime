@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -42,7 +43,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -155,6 +158,10 @@ private val Tabs = listOf(
     NavTab(MiruDestination.Finder, Icons.Filled.Explore),
     NavTab(MiruDestination.Settings, Icons.Filled.Settings),
 )
+
+// Raw IME height captured above the NavHost's imePadding, so screens that own
+// a nested scroll area can reserve room for results instead of only the field.
+internal val LocalImeBottom = compositionLocalOf { 0.dp }
 
 // App shell: pinned header on top, four-tab bottom navigation, standard
 // system-plus-header back behavior. Extra themes live behind the header
@@ -499,6 +506,11 @@ fun MiruShell(
             }
         },
     ) { padding ->
+        // The NavHost consumes the IME inset below; capture it here so a
+        // focused chapter search can reserve scroll room and keep its results
+        // above the keyboard instead of only keeping the field barely visible.
+        val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
+        CompositionLocalProvider(LocalImeBottom provides imeBottom) {
         NavHost(
             navController = navController,
             startDestination = MiruDestination.Dashboard.route,
@@ -954,6 +966,7 @@ fun MiruShell(
                     },
                 )
             }
+        }
         }
     }
     // Root-level opaque strip over the gesture inset. Scaffold's content can
