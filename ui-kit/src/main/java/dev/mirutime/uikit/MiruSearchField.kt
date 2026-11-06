@@ -1,21 +1,16 @@
 package dev.mirutime.uikit
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
@@ -34,6 +29,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.text.KeyboardOptions
 
 /** String convenience adapter; IME policy and all query state belong to its caller. */
 @Composable
@@ -52,6 +48,7 @@ fun MiruSearchField(
     trailing: (@Composable RowScope.() -> Unit)? = null,
     focusRequester: FocusRequester? = null,
     onFocusChanged: ((Boolean) -> Unit)? = null,
+    plate: Boolean = true,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
@@ -70,7 +67,11 @@ fun MiruSearchField(
         keyboardActions = keyboardActions,
         interactionSource = interactionSource,
         textStyle = MaterialTheme.typography.bodyMedium.copy(
-            color = if (enabled) MaterialTheme.colorScheme.onSurface else extra.muted,
+            color = if (enabled) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            },
         ),
         cursorBrush = SolidColor(extra.accent),
         decorationBox = { innerTextField ->
@@ -89,8 +90,9 @@ fun MiruSearchField(
                 focused = focused,
                 enabled = enabled,
                 leadingIcon = leadingIcon,
+                plate = plate,
                 trailing = {
-                    if (value.isNotEmpty()) {
+                    if (value.isNotEmpty() && enabled) {
                         Box(
                             modifier = Modifier
                                 .size(MiruSize.Control)
@@ -124,27 +126,25 @@ fun MiruSearchDecoration(
     enabled: Boolean = true,
     leadingIcon: (@Composable () -> Unit)? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
+    plate: Boolean = true,
 ) {
-    val scheme = MaterialTheme.colorScheme
     val extra = LocalMiruExtraColors.current
-    val shape = MaterialTheme.shapes.small
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = MiruSize.Control)
-            .background(miruCardSurface(), shape)
-            .border(
-                if (focused) MiruSpace.Xxs else MiruSize.Stroke,
-                if (focused && enabled) extra.accent else scheme.outlineVariant,
-                shape,
-            ),
-        verticalAlignment = Alignment.CenterVertically,
+    MiruFieldFrame(
+        modifier = modifier,
+        focused = focused,
+        enabled = enabled,
+        plate = plate,
     ) {
         Box(Modifier.size(MiruSize.Control), contentAlignment = Alignment.Center) {
             if (leadingIcon != null) {
                 leadingIcon()
             } else {
-                Icon(Icons.Filled.Search, contentDescription = null, tint = extra.muted, modifier = Modifier.size(MiruSize.Icon))
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = null,
+                    tint = extra.muted,
+                    modifier = Modifier.size(MiruSize.Icon),
+                )
             }
         }
         Box(

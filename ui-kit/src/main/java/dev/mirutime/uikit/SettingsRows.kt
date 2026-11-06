@@ -22,7 +22,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -297,8 +296,9 @@ fun MiruLabeledSliderRow(
     }
 }
 
-// Labelled text field with an optional tip under it. Used for keys, URLs,
-// prompts; `error` turns it red and shows the message instead of the tip.
+// Shared labelled field for keys, URLs and prompts; delegates to MiruTextField
+// so settings and screens use the same chrome. `error` turns it red and shows
+// the message instead of the tip.
 @Composable
 fun SettingsTextField(
     label: String,
@@ -312,35 +312,27 @@ fun SettingsTextField(
     minLines: Int = 1,
     maxLines: Int = if (singleLine) 1 else 6,
     keyboardType: KeyboardType = KeyboardType.Text,
+    revealable: Boolean = false,
 ) {
-    val extra = LocalMiruExtraColors.current
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = MiruSpace.L, vertical = MiruSpace.S),
     ) {
-        OutlinedTextField(
+        MiruTextField(
             value = value,
             onValueChange = onChange,
-            label = { Text(text = label) },
-            placeholder = placeholder?.let { { Text(text = it) } },
+            modifier = Modifier.fillMaxWidth(),
+            label = label,
+            placeholder = placeholder,
             isError = error != null,
+            supportingText = error ?: tip,
             singleLine = singleLine,
             minLines = minLines,
             maxLines = maxLines,
             keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-            shape = MaterialTheme.shapes.small,
-            modifier = Modifier.fillMaxWidth(),
+            revealable = revealable,
         )
-        val message = error ?: tip
-        if (message != null) {
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (error != null) MaterialTheme.colorScheme.error else extra.muted,
-                modifier = Modifier.padding(top = MiruSpace.Xs),
-            )
-        }
     }
 }
 

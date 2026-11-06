@@ -144,6 +144,7 @@ fun MiruIconButton(
     enabled: Boolean = true,
     busy: Boolean = false,
     busyDescription: String? = null,
+    stateDescription: String? = null,
     tint: Color? = null,
     iconSize: Dp = MiruSize.Icon,
     contentAlignment: Alignment = Alignment.Center,
@@ -166,7 +167,9 @@ fun MiruIconButton(
                 selected?.let { this.selected = it }
                 if (busy) {
                     progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate
-                    busyDescription?.let { stateDescription = it }
+                }
+                (stateDescription ?: if (busy) busyDescription else null)?.let {
+                    this.stateDescription = it
                 }
             }
             .clip(shape)

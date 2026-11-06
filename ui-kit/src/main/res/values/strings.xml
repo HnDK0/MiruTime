@@ -78,4 +78,8 @@
     <!-- Shared components -->
     <string name="lib_close">Close</string>
     <string name="card_star_fmt">★ %1$s</string>
+    <string name="field_clear">Clear</string>
+    <string name="field_clear_search">Clear search</string>
+    <string name="field_show_secret">Show value</string>
+    <string name="field_hide_secret">Hide value</string>
 </resources>

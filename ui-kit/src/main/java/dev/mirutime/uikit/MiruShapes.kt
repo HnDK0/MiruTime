@@ -50,7 +50,7 @@ val CoverInset = 4.dp
 // (40 / 32). Text: body 12sp, labels 11sp, meta 10sp.
 object MiruSize {
     val Touch = 48.dp
-    val Control = 40.dp      // round icon buttons (visual), 6dp radius
+    val Control = 40.dp      // round icon buttons and field rows (visual), 6dp radius
     val Chip = 24.dp         // filter chips (visual; at least 48dp touch)
     val SplitProgress = 56.dp // split-progress pill (chapters read / total)
     val SplitProgressHeight = 16.dp
@@ -77,6 +77,7 @@ object MiruSize {
     val Icon = 22.dp
     val Indicator = 16.dp
     val Stroke = 1.dp
+    val StrokeFocus = 2.dp
     val ContentMaxWidth = 600.dp
     const val SheetMaxFraction = 0.7f
     // Compact sheet handle: the visual bar sits in a short box so the header

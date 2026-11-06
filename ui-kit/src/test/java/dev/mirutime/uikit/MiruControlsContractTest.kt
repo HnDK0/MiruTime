@@ -25,6 +25,8 @@ class MiruControlsContractTest {
         assertEquals(24.dp, MiruSize.Chip)
         assertEquals(48.dp, MiruSize.Touch)
         assertEquals(40.dp, MiruSize.Control)
+        assertEquals(1.dp, MiruSize.Stroke)
+        assertEquals(2.dp, MiruSize.StrokeFocus)
         assertEquals(22.dp, MiruSize.Icon)
         assertEquals(18.dp, MiruSize.IconCompact)
         assertEquals(listOf(MiruIconButtonStyle.Bare, MiruIconButtonStyle.Plate), MiruIconButtonStyle.entries.toList())
@@ -128,5 +130,46 @@ class MiruControlsContractTest {
         val choice = source("SettingsRows").substringAfter("fun <T> ChoiceSheet(")
         assertTrue(choice.indexOf("onSelect(option.key)") >= 0)
         assertTrue(!choice.contains("onClose()"))
+    }
+
+    @Test
+    fun `field frame keeps the 40dp row and token borders for focus and error`() {
+        val frame = source("MiruFieldFrame")
+        assertTrue(frame.contains("minHeight: Dp = MiruSize.Control"))
+        assertTrue(frame.contains("MiruSize.StrokeFocus"))
+        assertTrue(frame.contains("MiruSize.Stroke"))
+        assertTrue(frame.contains("miruCardSurface()"))
+        assertFalse(frame.contains("Color(0x"))
+    }
+
+    @Test
+    fun `text field owns label semantics, error state and 40dp inner targets`() {
+        val field = source("MiruTextField")
+        assertTrue(field.contains("contentDescription = it"))
+        assertTrue(field.contains("error(supportingText)"))
+        assertTrue(field.contains("PasswordVisualTransformation"))
+        assertTrue(field.contains("size(MiruSize.Control)"))
+        assertTrue(field.contains("field_show_secret"))
+        assertTrue(field.contains("field_hide_secret"))
+        assertFalse(field.contains("Color(0x"))
+    }
+
+    @Test
+    fun `search bar owns the IME policy while the stateless field keeps none`() {
+        val bar = source("MiruSearchBar")
+        assertTrue(bar.contains("ImeAction.Search"))
+        assertTrue(bar.contains("clearFocus()"))
+        assertTrue(bar.contains("onSearch"))
+        val search = source("MiruSearchField")
+        assertFalse(search.contains("ImeAction.Search"))
+    }
+
+    @Test
+    fun `settings text field delegates to the shared text field`() {
+        val rows = source("SettingsRows")
+            .substringAfter("fun SettingsTextField(")
+            .substringBefore("// Radio row")
+        assertTrue(rows.contains("MiruTextField("))
+        assertFalse(rows.contains("OutlinedTextField("))
     }
 }

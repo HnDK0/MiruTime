@@ -78,4 +78,8 @@
     <!-- Shared components -->
     <string name="lib_close">Закрыть</string>
     <string name="card_star_fmt">★ %1$s</string>
+    <string name="field_clear">Очистить</string>
+    <string name="field_clear_search">Очистить поиск</string>
+    <string name="field_show_secret">Показать значение</string>
+    <string name="field_hide_secret">Скрыть значение</string>
 </resources>

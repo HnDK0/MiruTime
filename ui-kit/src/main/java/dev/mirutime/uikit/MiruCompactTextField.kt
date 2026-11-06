@@ -54,7 +54,7 @@ fun MiruCompactTextField(
     val shape = RoundedCornerShape(MiruRadius.Control)
     val border = when {
         isError -> MaterialTheme.colorScheme.error
-        focused -> MaterialTheme.colorScheme.primary
+        focused -> extra.accent
         else -> MaterialTheme.colorScheme.outlineVariant
     }
     val description = contentDescription
@@ -89,10 +89,14 @@ fun MiruCompactTextField(
             keyboardOptions = keyboardOptions,
             keyboardActions = keyboardActions,
             textStyle = textStyle.copy(
-                color = if (enabled) MaterialTheme.colorScheme.onSurface else extra.muted,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                },
                 textAlign = TextAlign.Center,
             ),
-            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            cursorBrush = SolidColor(extra.accent),
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = MiruSpace.S),
