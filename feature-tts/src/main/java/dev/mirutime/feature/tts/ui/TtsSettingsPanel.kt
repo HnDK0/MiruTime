@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -64,7 +63,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -135,10 +133,12 @@ import dev.mirutime.feature.tts.ttsToggleVoiceFavorite
 import dev.mirutime.feature.tts.ttsVoiceLabel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
+import dev.mirutime.uikit.MiruSearchBar
+import dev.mirutime.uikit.MiruTextField
+import dev.mirutime.uikit.MiruSearchDebounceMillis
 
 private val TtsSpeedSliderSteps = ttsSliderSteps(TtsMinSpeed..TtsMaxSpeed, TtsSpeedStep)
 private val TtsPitchSliderSteps = ttsSliderSteps(TtsMinPitch..TtsMaxPitch, TtsPitchStep)
-private const val VoiceSearchDebounceMs = 220L
 
 private enum class TtsSettingSection { Engine, AutoNext, SleepTimer, Highlight, TestReset }
 
@@ -884,7 +884,7 @@ private fun TtsVoicePickerSheet(
     // Typing stays immediate; filtering waits briefly so a large all-engine
     // catalog is not searched on every keystroke.
     LaunchedEffect(query) {
-        if (query.isNotBlank()) delay(VoiceSearchDebounceMs)
+        if (query.isNotBlank()) delay(MiruSearchDebounceMillis)
         debouncedQuery = query
     }
     val engineLabels = remember(capabilities.engines) {
@@ -973,24 +973,13 @@ private fun TtsVoicePickerSheet(
         // verticalScroll would measure it with an infinite height.
         contentScrollable = false,
     ) {
-        OutlinedTextField(
+        MiruSearchBar(
             value = query,
             onValueChange = { query = it },
-            placeholder = { Text(stringResource(R.string.rd_tts_voice_search)) },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            trailingIcon = {
-                if (query.isNotEmpty()) {
-                    IconButton(onClick = { query = "" }) {
-                        Icon(
-                            imageVector = Icons.Filled.Close,
-                            contentDescription = stringResource(R.string.rd_tts_voice_search_clear),
-                        )
-                    }
-                }
-            },
-            singleLine = true,
+            placeholder = stringResource(R.string.rd_tts_voice_search),
+            onClear = { query = "" },
+            clearContentDescription = stringResource(R.string.rd_tts_voice_search_clear),
             enabled = capabilities.voices.isNotEmpty(),
-            shape = MaterialTheme.shapes.small,
             modifier = Modifier.fillMaxWidth(),
         )
         if (!capabilities.ready) {
@@ -1280,12 +1269,11 @@ private fun TtsSavedVoicesSheet(
             horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            OutlinedTextField(
+            MiruTextField(
                 value = presetName,
                 onValueChange = { presetName = it },
-                placeholder = { Text(stringResource(R.string.rd_tts_saved_name)) },
+                placeholder = stringResource(R.string.rd_tts_saved_name),
                 singleLine = true,
-                shape = MaterialTheme.shapes.small,
                 modifier = Modifier.weight(1f),
             )
             Button(
