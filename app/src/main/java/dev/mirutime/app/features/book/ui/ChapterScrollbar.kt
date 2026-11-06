@@ -131,13 +131,13 @@ internal fun ChapterScrollbar(
             )
 
             drawRoundRect(
-                color = extra.muted.copy(alpha = 0.20f),
+                color = extra.muted.copy(alpha = 0.10f),
                 topLeft = Offset(line.left, 0f),
                 size = Size(line.width, size.height),
                 cornerRadius = CornerRadius(line.radius),
             )
             drawRoundRect(
-                color = extra.accent.copy(alpha = 0.85f),
+                color = extra.accent.copy(alpha = 0.55f),
                 topLeft = Offset(line.left, thumbTop),
                 size = Size(line.width, thumbHeight),
                 cornerRadius = CornerRadius(line.radius),

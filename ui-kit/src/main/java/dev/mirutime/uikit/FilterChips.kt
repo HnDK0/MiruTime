@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.Role
 
@@ -97,6 +98,7 @@ fun MiruFilterChip(
     modifier: Modifier = Modifier,
     leadingIcon: ImageVector? = null,
     enabled: Boolean = true,
+    touchTarget: Dp = MiruSize.Touch,
 ) {
     val extra = LocalMiruExtraColors.current
     // Same pair of looks in every theme: unselected = the plate + onSurface
@@ -125,7 +127,7 @@ fun MiruFilterChip(
         border = MaterialTheme.colorScheme.outline
     }
     val shape = RoundedCornerShape(MiruRadius.Chip)
-    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides MiruSize.Touch) {
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides touchTarget) {
         Box(
             modifier = modifier
                 .clip(shape)

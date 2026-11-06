@@ -53,7 +53,6 @@ object MiruSize {
     val Control = 40.dp      // round icon buttons (visual), 6dp radius
     val Chip = 24.dp         // filter chips (visual; at least 48dp touch)
     val SplitProgress = 56.dp // split-progress pill (chapters read / total)
-    val SplitProgressWide = 96.dp // stat-strip split: values fit without a slider look
     val SplitProgressHeight = 16.dp
     val Button = 40.dp       // secondary buttons / plate pills
     val ButtonCompact = 32.dp // compact plates (chapter toolbar, selection strip)
@@ -62,6 +61,7 @@ object MiruSize {
     val RowDense = 40.dp     // dense list rows (chapters) with compact meta
     val IconSlot = 20.dp     // non-interactive glyph slot next to a row title
     val NarrowContent = 340.dp // stack paired actions below this content width
+    val StatStripHeight = 72.dp // fixed row so centered cells and dividers agree
     val ScreenPad = MiruSpace.L
     val Gap = MiruSpace.L    // between stacked cards
     val SectionGap = MiruSpace.Xl

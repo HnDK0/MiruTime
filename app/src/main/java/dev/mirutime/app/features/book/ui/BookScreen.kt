@@ -15,7 +15,6 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -139,6 +138,7 @@ import dev.mirutime.uikit.MiruCompactButton
 import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruIconButton
 import dev.mirutime.uikit.MiruSearchField
+import dev.mirutime.uikit.MiruSplitProgress
 import dev.mirutime.uikit.MiruSourceChip
 import dev.mirutime.uikit.MiruTabPill
 import dev.mirutime.uikit.MiruToolTile
@@ -348,7 +348,7 @@ fun BookScreen(
     var shelfSheetOpen by rememberSaveable { mutableStateOf(false) }
     var sourcePanelOpen by rememberSaveable { mutableStateOf(false) }
     var downloadPanelOpen by rememberSaveable { mutableStateOf(false) }
-    var toolsExpanded by rememberSaveable { mutableStateOf(true) }
+    var toolsExpanded by rememberSaveable { mutableStateOf(false) }
     var translatorSheetOpen by rememberSaveable { mutableStateOf(false) }
     var migrationSheetOpen by rememberSaveable { mutableStateOf(false) }
     var epubSheetOpen by rememberSaveable { mutableStateOf(false) }
@@ -2078,8 +2078,6 @@ private fun AnnounceCard(
                 modifier = Modifier
                     .width(MiruSize.DetailCoverWidth)
                     .height(MiruSize.DetailCoverHeight),
-                badge = book.originLanguage?.takeIf { it.isNotBlank() } ?: book.source,
-                badgeAlignment = Alignment.BottomCenter,
                 corner = MiruRadius.Cover,
                 onRetry = onCoverRetry,
             )
@@ -2256,7 +2254,17 @@ private fun StatStrip(
         stringResource(R.string.book_stat_none)
     }
     val ratingCell: @Composable (Modifier) -> Unit = { modifier ->
-        Column(modifier) {
+        Column(
+            modifier = modifier,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = ratingValue,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xxs),
@@ -2265,41 +2273,33 @@ private fun StatStrip(
                     imageVector = Icons.Filled.Star,
                     contentDescription = null,
                     tint = extra.accent,
-                    modifier = Modifier.size(MiruSize.IconSmall),
+                    modifier = Modifier.size(12.dp),
                 )
                 Text(
-                    text = ratingValue,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    text = stringResource(R.string.book_stat_rating),
+                    style = MiruCardType.Meta,
+                    color = extra.muted,
                     maxLines = 1,
                 )
             }
-            Text(
-                text = stringResource(R.string.book_stat_rating),
-                style = MiruCardType.Meta,
-                color = extra.muted,
-                maxLines = 1,
-            )
         }
     }
     val progressCell: @Composable (Modifier) -> Unit = { modifier ->
-        Column(modifier) {
+        Column(
+            modifier = modifier,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
             if (chaptersKnown) {
-                Text(
-                    text = stringResource(
+                MiruSplitProgress(
+                    read = book.readCount,
+                    total = book.totalChapters,
+                    modifier = Modifier.width(MiruSize.SplitProgress),
+                    contentDescription = stringResource(
                         R.string.card_ratio_fmt,
                         book.readCount,
                         book.totalChapters,
                     ),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                )
-                Spacer(modifier = Modifier.height(MiruSpace.Xxs))
-                CardProgressBar(
-                    fraction = book.progressFraction,
-                    height = 4.dp,
-                    modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(modifier = Modifier.height(MiruSpace.Xxs))
                 Text(
@@ -2308,13 +2308,15 @@ private fun StatStrip(
                     color = extra.muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
                 )
                 Text(
                     text = stringResource(R.string.book_stat_downloaded_fmt, downloaded),
                     style = MiruCardType.Meta,
-                    color = extra.muted,
+                    color = extra.accent,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
                 )
             } else {
                 Text(
@@ -2334,10 +2336,11 @@ private fun StatStrip(
     }
     val readTime = formatDurationLocalized(book.readMinutes * 60_000L)
     val totalTime = formatDurationLocalized((book.readMinutes + book.ttsMinutes) * 60_000L)
-    val timeCell: @Composable (Modifier, Boolean) -> Unit = { modifier, end ->
+    val timeCell: @Composable (Modifier, Boolean) -> Unit = { modifier, _ ->
         Column(
             modifier = modifier,
-            horizontalAlignment = if (end) Alignment.End else Alignment.Start,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
             Text(
                 text = totalTime,
@@ -2375,10 +2378,10 @@ private fun StatStrip(
             }
         } else {
             Row(
-                verticalAlignment = Alignment.Top,
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(IntrinsicSize.Min),
+                    .height(MiruSize.StatStripHeight),
             ) {
                 ratingCell(Modifier.weight(1f))
                 VerticalDivider(
@@ -3405,7 +3408,6 @@ private fun ChapterBrowser(
                 lastReadButton(Modifier.weight(1f))
             }
         }
-        Spacer(modifier = Modifier.height(MiruSpace.Xs))
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
             verticalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
@@ -3417,6 +3419,7 @@ private fun ChapterBrowser(
                     filter = ChapterFilter.All
                 },
                 label = stringResource(R.string.book_filter_all),
+                touchTarget = MiruSize.RowDense,
             )
             MiruFilterChip(
                 selected = filter == ChapterFilter.Read,
@@ -3425,6 +3428,7 @@ private fun ChapterBrowser(
                     filter = ChapterFilter.Read
                 },
                 label = stringResource(R.string.book_filter_read),
+                touchTarget = MiruSize.RowDense,
             )
             MiruFilterChip(
                 selected = filter == ChapterFilter.Unread,
@@ -3433,9 +3437,9 @@ private fun ChapterBrowser(
                     filter = ChapterFilter.Unread
                 },
                 label = stringResource(R.string.book_filter_unread),
+                touchTarget = MiruSize.RowDense,
             )
         }
-        Spacer(modifier = Modifier.height(MiruSpace.Xs))
         val scrollbarDragThumbTop = remember { mutableStateOf<Float?>(null) }
         Box(
             modifier = Modifier

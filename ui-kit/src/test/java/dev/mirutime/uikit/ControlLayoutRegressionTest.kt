@@ -18,7 +18,8 @@ class ControlLayoutRegressionTest {
             .substringBefore("// Right-edge fade")
         assertFalse("The old 40dp outer chip clips the minimum target", chip.contains(".height(40.dp)"))
         assertTrue(chip.contains("minimumInteractiveComponentSize()"))
-        assertTrue(chip.contains("LocalMinimumInteractiveComponentSize provides MiruSize.Touch"))
+        assertTrue(chip.contains("touchTarget: Dp = MiruSize.Touch"))
+        assertTrue(chip.contains("LocalMinimumInteractiveComponentSize provides touchTarget"))
         assertTrue(chip.contains("heightIn(min = MiruSize.Chip)"))
     }
 
