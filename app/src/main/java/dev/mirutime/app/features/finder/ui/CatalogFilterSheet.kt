@@ -11,12 +11,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -27,7 +24,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -41,7 +37,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
@@ -62,6 +57,8 @@ import dev.mirutime.app.features.finder.domain.pluginFilterDefaults
 import dev.mirutime.app.features.finder.domain.shouldShowSearchLanguageHint
 import dev.mirutime.app.features.finder.domain.toPluginFilterDraft
 import dev.mirutime.app.features.finder.domain.withPluginDraft
+import dev.mirutime.uikit.MiruSearchBar
+import dev.mirutime.uikit.MiruTextField
 
 // Pure decision table of the filter sheet, kept out of the composable so the
 // "no request on open/schema" contract is unit-testable.
@@ -169,35 +166,16 @@ fun CatalogFilterSheet(
             }
         },
     ) {
-        OutlinedTextField(
+        MiruSearchBar(
             value = draft.query,
             onValueChange = { draft = draft.copy(query = it) },
-            placeholder = {
-                Text(
-                    text = stringResource(R.string.finder_query_hint),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+            placeholder = stringResource(R.string.finder_query_hint),
+            onClear = { draft = draft.copy(query = "") },
+            // Search is an explicit apply of the current draft.
+            onSearch = {
+                onApply(currentFilters)
+                onClose()
             },
-            trailingIcon = {
-                if (draft.query.isNotEmpty()) {
-                    IconButton(onClick = { draft = draft.copy(query = "") }) {
-                        Icon(
-                            imageVector = Icons.Filled.Close,
-                            contentDescription = stringResource(R.string.finder_cd_clear_search),
-                        )
-                    }
-                }
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(
-                onSearch = {
-                    // Search is an explicit apply of the current draft.
-                    onApply(currentFilters)
-                    onClose()
-                },
-            ),
-            shape = MaterialTheme.shapes.small,
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -268,18 +246,13 @@ fun CatalogFilterSheet(
                     .fillMaxWidth()
                     .padding(top = MiruSpace.S),
             ) {
-                OutlinedTextField(
+                MiruTextField(
                     value = presetName,
                     onValueChange = { presetName = it.take(32) },
-                    placeholder = {
-                        Text(
-                            text = stringResource(R.string.finder_preset_name_hint),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    },
+                    placeholder = stringResource(R.string.finder_preset_name_hint),
                     singleLine = true,
-                    shape = MaterialTheme.shapes.small,
                     modifier = Modifier.weight(1f),
+                    plate = false,
                 )
                 TextButton(
                     onClick = {

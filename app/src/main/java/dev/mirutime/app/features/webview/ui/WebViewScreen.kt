@@ -24,7 +24,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,9 +35,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -77,7 +74,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -115,6 +111,7 @@ import dev.mirutime.app.features.webview.data.resolvePageTranslationFor
 import dev.mirutime.core.log.MiruLog
 import dev.mirutime.translator.TranslationManager
 import java.util.Locale
+import dev.mirutime.uikit.MiruTextField
 
 // The in-app browser route. Query values are encoded at the call site.
 // bookUrl/sourceId keep translation context when the user browses from a book
@@ -592,98 +589,46 @@ fun WebViewScreen(
                 .padding(horizontal = MiruSpace.M, vertical = MiruSpace.S),
             contentPadding = PaddingValues(MiruSpace.Xs),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+            MiruTextField(
+                value = address,
+                onValueChange = { address = it },
+                singleLine = true,
+                placeholder = stringResource(R.string.webview_address_hint),
+                leadingIcon = {
+                    Icon(
+                        imageVector = if (secure) Icons.Outlined.Lock else Icons.Outlined.Public,
+                        contentDescription = null,
+                        tint = if (secure) extra.accent else extra.muted,
+                        modifier = Modifier.size(MiruSize.IconCompact),
+                    )
+                },
+                showClear = addressFocused,
+                onClear = { address = TextFieldValue("", TextRange.Zero) },
+                clearContentDescription = stringResource(R.string.webview_clear_address),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Uri,
+                    imeAction = ImeAction.Go,
+                ),
+                keyboardActions = KeyboardActions(onGo = { openAddress(address.text) }),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(MiruSize.Touch)
-                    .clip(RoundedCornerShape(MiruRadius.Large))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-                    .border(
-                        width = 1.dp,
-                        color = if (addressFocused) {
-                            extra.accent
-                        } else {
-                            MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
-                        },
-                        shape = RoundedCornerShape(MiruRadius.Large),
-                    )
-                    .padding(start = MiruSpace.M),
-            ) {
-                Icon(
-                    imageVector = if (secure) Icons.Outlined.Lock else Icons.Outlined.Public,
-                    contentDescription = null,
-                    tint = if (secure) extra.accent else extra.muted,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(modifier = Modifier.width(MiruSpace.S))
-                Box(
-                    modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    if (address.text.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.webview_address_hint),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = extra.muted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    BasicTextField(
-                        value = address,
-                        onValueChange = { address = it },
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(
-                            color = MaterialTheme.colorScheme.onSurface,
-                        ),
-                        cursorBrush = SolidColor(extra.accent),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Uri,
-                            imeAction = ImeAction.Go,
-                        ),
-                        keyboardActions = KeyboardActions(onGo = { openAddress(address.text) }),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = MiruSpace.M)
-                            .onFocusChanged { state ->
-                                if (state.isFocused) {
-                                    if (!addressFocused) {
-                                        address = address.copy(
-                                            selection = TextRange(0, address.text.length),
-                                        )
-                                    }
-                                    addressFocused = true
-                                } else if (addressFocused) {
-                                    addressFocused = false
-                                    // Dropping focus discards the draft: the
-                                    // field always mirrors the live page.
-                                    address = TextFieldValue(liveUrl, TextRange(liveUrl.length))
-                                }
-                            },
-                    )
-                }
-                if (addressFocused && address.text.isNotEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .size(MiruSize.Touch)
-                            .clip(RoundedCornerShape(MiruRadius.Control))
-                            .clickable(role = Role.Button, onClick = {
-                                address = TextFieldValue("", TextRange.Zero)
-                            }),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Close,
-                            contentDescription = stringResource(R.string.webview_clear_address),
-                            tint = extra.muted,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                } else {
-                    Spacer(modifier = Modifier.width(MiruSpace.M))
-                }
-            }
+                    .onFocusChanged { state ->
+                        if (state.isFocused) {
+                            if (!addressFocused) {
+                                address = address.copy(
+                                    selection = TextRange(0, address.text.length),
+                                )
+                            }
+                            addressFocused = true
+                        } else if (addressFocused) {
+                            addressFocused = false
+                            // Dropping focus discards the draft: the field
+                            // always mirrors the live page.
+                            address = TextFieldValue(liveUrl, TextRange(liveUrl.length))
+                        }
+                    },
+                plate = false,
+            )
             Spacer(modifier = Modifier.height(MiruSpace.Xs))
             Row(
                 verticalAlignment = Alignment.CenterVertically,

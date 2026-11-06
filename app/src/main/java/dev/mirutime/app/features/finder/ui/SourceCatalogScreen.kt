@@ -22,9 +22,6 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
@@ -56,13 +53,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,8 +66,6 @@ import dev.mirutime.app.core.buildPluginErrorReport
 import dev.mirutime.app.core.PluginRequestException
 import dev.mirutime.uikit.CoverInset
 import dev.mirutime.uikit.LocalMiruExtraColors
-import dev.mirutime.uikit.MiruIconButton
-import dev.mirutime.uikit.MiruSearchField
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.app.design.components.BookCover
@@ -82,6 +74,7 @@ import dev.mirutime.app.design.components.toMiruBadge
 import dev.mirutime.uikit.MiruCard
 import dev.mirutime.uikit.MiruContentKind
 import dev.mirutime.uikit.MiruRoundIconButton
+import dev.mirutime.uikit.MiruSearchBar
 import dev.mirutime.app.features.book.data.MembershipResult
 import dev.mirutime.app.features.finder.data.CatalogCacheKey
 import dev.mirutime.app.features.finder.data.FinderDataProvider
@@ -505,9 +498,9 @@ fun SourceCatalogScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
                 ) {
-                    CatalogSearchBar(
-                        query = input,
-                        onQueryChange = { text ->
+                    MiruSearchBar(
+                        value = input,
+                        onValueChange = { text ->
                             if (text.isEmpty()) {
                                 // Clear button (and backspace-to-empty): apply now.
                                 input = ""
@@ -517,15 +510,24 @@ fun SourceCatalogScreen(
                                 debouncer.onInput(text, filters.query)
                             }
                         },
-                        activeFilters = if (isLocal) {
+                        onClear = {
+                            input = ""
+                            debouncer.applyNow("")
+                        },
+                        placeholder = stringResource(R.string.finder_search_hint),
+                        // IME Search is an explicit submit: apply now, drop timer.
+                        onSearch = { debouncer.applyNow(input) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    MiruRoundIconButton(
+                        icon = Icons.Filled.Tune,
+                        contentDescription = stringResource(R.string.finder_cd_filters),
+                        onClick = { sheetOpen = true },
+                        badgeCount = if (isLocal) {
                             filters.activeFilterCount
                         } else {
                             filters.pluginActiveFilterCount(schema)
                         },
-                        onFiltersClick = { sheetOpen = true },
-                        // IME Search is an explicit submit: apply now, drop timer.
-                        onSearch = { debouncer.applyNow(input) },
-                        modifier = Modifier.weight(1f),
                     )
                     // Local: refresh the live scan or open folder management.
                     if (isLocal) {
@@ -750,71 +752,6 @@ fun SourceCatalogScreen(
             onCatalogChanged = { reloadTick++ },
         )
     }
-}
-
-// The search bar is a REAL input field: typing updates the field at once and
-// applies the query after a 1.5 s idle window, X clears immediately, IME
-// Search applies the current text immediately, the Tune button (with the
-// active-filter badge) opens the filter sheet. The sheet carries its own query
-// field; Apply sends it immediately.
-@Composable
-internal fun CatalogSearchBar(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    activeFilters: Int,
-    onFiltersClick: () -> Unit,
-    // Catalog passes an immediate apply; the extensions search leaves the
-    // default (clear focus only).
-    onSearch: () -> Unit = {},
-    hint: String = stringResource(R.string.finder_search_hint),
-    modifier: Modifier = Modifier,
-) {
-    val extra = LocalMiruExtraColors.current
-    val focus = LocalFocusManager.current
-    MiruSearchField(
-        value = query,
-        onValueChange = onQueryChange,
-        placeholder = hint,
-        onClear = { onQueryChange("") },
-        clearContentDescription = stringResource(R.string.finder_cd_clear_search),
-        modifier = modifier,
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        keyboardActions = KeyboardActions(
-            onSearch = {
-                onSearch()
-                focus.clearFocus()
-            },
-        ),
-        trailing = {
-            Box(
-                modifier = Modifier.size(MiruSize.Touch),
-                contentAlignment = Alignment.Center,
-            ) {
-                MiruIconButton(
-                    icon = Icons.Filled.Tune,
-                    contentDescription = stringResource(R.string.finder_cd_filters),
-                    onClick = onFiltersClick,
-                    tint = if (activeFilters > 0) extra.accent else extra.muted,
-                )
-                if (activeFilters > 0) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 8.dp, end = 6.dp)
-                            .size(16.dp)
-                            .background(extra.accent, CircleShape),
-                    ) {
-                        Text(
-                            text = activeFilters.toString(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = extra.onAccent,
-                        )
-                    }
-                }
-            }
-        },
-    )
 }
 
 // Catalogue tile: 2:3 cover with an "In library" badge, 2-line title, one

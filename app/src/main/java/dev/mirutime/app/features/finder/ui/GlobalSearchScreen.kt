@@ -16,8 +16,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
@@ -26,7 +24,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -44,7 +41,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
@@ -53,7 +49,7 @@ import dev.mirutime.app.core.PluginRequestException
 import dev.mirutime.app.core.buildPluginErrorReport
 import dev.mirutime.app.core.globalBookKey
 import dev.mirutime.app.core.globalSourceKey
-import dev.mirutime.app.design.components.CatalogSearchField
+import dev.mirutime.uikit.MiruSearchBar
 import dev.mirutime.app.design.components.CatalogTile
 import dev.mirutime.app.design.components.PluginErrorState
 import dev.mirutime.app.design.components.toMiruBadge
@@ -323,7 +319,7 @@ fun GlobalSearchScreen(
     ) {
         item(key = "field") {
             MiruCard(contentPadding = PaddingValues(MiruSpace.S)) {
-                CatalogSearchField(
+                MiruSearchBar(
                     value = field,
                     onValueChange = { field = it },
                     placeholder = stringResource(R.string.finder_gs_hint),
@@ -333,6 +329,7 @@ fun GlobalSearchScreen(
                         results = emptyList()
                     },
                     onSearch = { submit(field) },
+                    plate = false,
                 )
             }
         }

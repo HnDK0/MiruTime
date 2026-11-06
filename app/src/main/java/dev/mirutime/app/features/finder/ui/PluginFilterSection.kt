@@ -22,9 +22,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -59,6 +57,7 @@ import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.SettingsRadioRow
 import dev.mirutime.uikit.SettingsValueRow
 import dev.mirutime.uikit.SheetSection
+import dev.mirutime.uikit.MiruTextField
 
 // One plugin-declared catalogue filter, rendered by its declared type. The
 // section title is the plugin's own label verbatim; the sheet never branches
@@ -303,24 +302,16 @@ private fun TextFilter(
 ) {
     val text = (value as? PluginFilterValue.TextInput)?.value.orEmpty()
     SheetSection(title = filter.label, preserveCase = true) {
-        OutlinedTextField(
+        MiruTextField(
             value = text,
             onValueChange = { onChange(PluginFilterValue.TextInput(it)) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = {}),
-            trailingIcon = {
-                if (text.isNotEmpty()) {
-                    IconButton(onClick = { onChange(PluginFilterValue.TextInput("")) }) {
-                        Icon(
-                            imageVector = Icons.Filled.Close,
-                            contentDescription = stringResource(R.string.finder_cd_clear_search),
-                        )
-                    }
-                }
-            },
-            shape = MaterialTheme.shapes.small,
+            showClear = true,
+            onClear = { onChange(PluginFilterValue.TextInput("")) },
             modifier = Modifier.fillMaxWidth(),
+            plate = false,
         )
         // Optional inline hints (NoveLA text_history): only while the field is
         // empty, so a suggestion never fights what the user is typing.
@@ -384,22 +375,17 @@ private fun TagInputFilter(
             }
             Spacer(modifier = Modifier.size(MiruSpace.S))
         }
-        OutlinedTextField(
+        MiruTextField(
             value = input,
             onValueChange = { input = it },
-            placeholder = {
-                Text(
-                    text = stringResource(R.string.finder_tag_hint),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            },
+            placeholder = stringResource(R.string.finder_tag_hint),
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(
                 onDone = { if (clean.isNotEmpty()) add(clean) },
             ),
-            shape = MaterialTheme.shapes.small,
             modifier = Modifier.fillMaxWidth(),
+            plate = false,
         )
         if (suggestions.isNotEmpty() || customAllowed) {
             FlowRow(

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.rounded.ToggleOff
 import androidx.compose.material.icons.rounded.ToggleOn
 import androidx.compose.material.icons.rounded.Translate
@@ -41,7 +42,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -69,6 +69,8 @@ import dev.mirutime.uikit.MiruActionRow
 import dev.mirutime.uikit.R as UiKitR
 import dev.mirutime.uikit.MiruCard
 import dev.mirutime.uikit.MiruRowDivider
+import dev.mirutime.uikit.MiruRoundIconButton
+import dev.mirutime.uikit.MiruSearchBar
 import dev.mirutime.uikit.MiruSectionCard
 import dev.mirutime.app.di.InstallReport
 import dev.mirutime.app.design.components.PluginAvatar
@@ -83,6 +85,9 @@ import dev.mirutime.app.features.finder.domain.applyFilters
 import dev.mirutime.app.features.settings.ui.PluginTranslationSheet
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import dev.mirutime.uikit.MiruTextField
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 
 // Manage extensions, a separate
 // screen opened from Finder. Top to bottom:
@@ -257,15 +262,17 @@ fun ManageExtensionsScreen(
                 contentPadding = PaddingValues(0.dp),
             ) {
                 Column(modifier = Modifier.padding(MiruSpace.L)) {
-                    OutlinedTextField(
+                    MiruTextField(
                         value = repoText,
                         onValueChange = { repoText = it },
                         // Long repository URLs wrap instead of hiding the tail.
+                        singleLine = false,
                         minLines = 1,
                         maxLines = 2,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                         textStyle = MaterialTheme.typography.bodySmall,
-                        shape = MaterialTheme.shapes.small,
                         modifier = Modifier.fillMaxWidth(),
+                        plate = false,
                     )
                     Spacer(modifier = Modifier.height(MiruSpace.M))
                     Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
@@ -402,13 +409,24 @@ fun ManageExtensionsScreen(
             }
         }
         stickyHeader(key = "filter-bar") {
-            CatalogSearchBar(
-                query = filters.query,
-                onQueryChange = { filters = filters.copy(query = it) },
-                activeFilters = filters.activeFilterCount,
-                onFiltersClick = { filterOpen = true },
-                hint = stringResource(R.string.finder_ext_query_hint),
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                modifier = Modifier.padding(vertical = MiruSpace.Xs),
+            ) {
+                MiruSearchBar(
+                    value = filters.query,
+                    onValueChange = { filters = filters.copy(query = it) },
+                    placeholder = stringResource(R.string.finder_ext_query_hint),
+                    modifier = Modifier.weight(1f),
+                )
+                MiruRoundIconButton(
+                    icon = Icons.Filled.Tune,
+                    contentDescription = stringResource(R.string.finder_cd_filters),
+                    onClick = { filterOpen = true },
+                    badgeCount = filters.activeFilterCount,
+                )
+            }
         }
         if (selectionMode) {
             item(key = "selection") {

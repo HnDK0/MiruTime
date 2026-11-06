@@ -14,7 +14,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,6 +43,7 @@ import dev.mirutime.uikit.MiruSpace
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import dev.mirutime.uikit.MiruTextField
 
 // Add books by link. One link or a whole list (newline/comma separated): the
 // sheet preflights the entire list, blocks every add when a link is malformed
@@ -145,19 +145,14 @@ fun AddByLinkSheet(
             }
         },
     ) {
-        OutlinedTextField(
+        MiruTextField(
             value = input,
             onValueChange = { input = it },
-            placeholder = {
-                Text(
-                    text = stringResource(R.string.finder_link_hint),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            },
+            placeholder = stringResource(R.string.finder_link_hint),
+            singleLine = false,
             minLines = 3,
             maxLines = 6,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            shape = MaterialTheme.shapes.small,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(

@@ -64,7 +64,6 @@ import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RemoveDone
 import androidx.compose.material.icons.filled.Rule
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Button
@@ -142,7 +141,7 @@ import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruCompactButton
 import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruIconButton
-import dev.mirutime.uikit.MiruSearchField
+import dev.mirutime.uikit.MiruSearchBar
 import dev.mirutime.uikit.MiruSplitProgress
 import dev.mirutime.uikit.MiruSourceChip
 import dev.mirutime.uikit.MiruTabPill
@@ -3329,17 +3328,17 @@ private fun ChapterBrowser(
         }
     }
     Column {
-        MiruSearchField(
+        MiruSearchBar(
             value = query,
             onValueChange = { query = it },
             placeholder = stringResource(R.string.book_ch_search_hint),
             onClear = { query = "" },
-            clearContentDescription = stringResource(R.string.finder_cd_clear_search),
             modifier = Modifier
                 .fillMaxWidth()
                 .bringIntoViewRequester(searchBringIntoView),
             focusRequester = searchFocusRequester,
             onFocusChanged = onSearchFocusChanged,
+            plate = false,
         )
         Spacer(modifier = Modifier.height(MiruSpace.S))
         // Three compact plates. They are secondary tools, not page-level

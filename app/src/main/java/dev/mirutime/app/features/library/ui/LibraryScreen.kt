@@ -34,7 +34,6 @@ import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -81,7 +80,7 @@ import dev.mirutime.uikit.withImageShadow
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.app.design.components.BookCover
 import dev.mirutime.app.design.components.CardStylePicker
-import dev.mirutime.app.design.components.CatalogSearchField
+import dev.mirutime.uikit.MiruSearchBar
 import dev.mirutime.uikit.CardProgressBar
 import dev.mirutime.uikit.ChipRail
 import dev.mirutime.uikit.MiruFilterChip
@@ -120,12 +119,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import dev.mirutime.uikit.MiruSearchDebounceMillis
 
 private enum class LayoutMode { Grid, List }
 
 private enum class BulkAction { Delete, Move, Read, Unread }
 
-private const val SearchDebounceMs = 300L
 // Returning from a book/bulk action refreshes only the pages the user had
 // actually scrolled through, capped so a deep list never refetches all rows.
 private const val MaxReloadPages = 5
@@ -396,7 +395,7 @@ fun LibraryScreen(
         if (trimmed.isEmpty()) {
             appliedQuery = ""
         } else {
-            delay(SearchDebounceMs)
+            delay(MiruSearchDebounceMillis)
             appliedQuery = trimmed
         }
         MiruLog.event("library", "search", "queryLen" to trimmed.length)
@@ -634,7 +633,7 @@ fun LibraryScreen(
                     horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
                 ) {
                     val focusManager = LocalFocusManager.current
-                    CatalogSearchField(
+                    MiruSearchBar(
                         value = query,
                         onValueChange = { query = it },
                         placeholder = stringResource(R.string.lib_search_hint),

@@ -533,7 +533,6 @@
     <string name="finder_add_link_stub">Adding by link is coming soon (fixtures only)</string>
     <string name="finder_catalog_desc">Catalogue</string>
     <string name="finder_search_hint">Search or filter</string>
-    <string name="finder_cd_clear_search">Clear search</string>
     <string name="finder_cd_filters">Filters</string>
     <string name="finder_caption_in_library_fmt">%1$s · In library</string>
     <string name="finder_badge_in_library">In library</string>

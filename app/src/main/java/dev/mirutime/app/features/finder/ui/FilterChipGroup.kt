@@ -7,12 +7,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,6 +24,8 @@ import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruSpace
 import kotlinx.coroutines.delay
+import dev.mirutime.uikit.MiruSearchBar
+import dev.mirutime.uikit.MiruSearchDebounceMillis
 
 // Multi-select chip group for long option lists.
 //   <= SearchThreshold options: plain chips, collapsed to 3 rows with
@@ -76,7 +73,7 @@ fun FilterChipGroup(
     var expanded by remember { mutableStateOf(false) }
     LaunchedEffect(query) {
         // Clearing is instant, typing waits for a pause.
-        if (query.isNotEmpty()) delay(200)
+        if (query.isNotEmpty()) delay(MiruSearchDebounceMillis)
         debounced = query
     }
 
@@ -96,33 +93,15 @@ fun FilterChipGroup(
     }
 
     if (searchable) {
-        OutlinedTextField(
+        MiruSearchBar(
             value = query,
             onValueChange = { query = it },
-            placeholder = {
-                Text(
-                    text = stringResource(R.string.finder_options_search_hint),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            },
-            leadingIcon = {
-                Icon(imageVector = Icons.Filled.Search, contentDescription = null)
-            },
-            trailingIcon = {
-                if (query.isNotEmpty()) {
-                    IconButton(onClick = { query = "" }) {
-                        Icon(
-                            imageVector = Icons.Filled.Close,
-                            contentDescription = stringResource(R.string.finder_cd_clear_search),
-                        )
-                    }
-                }
-            },
-            singleLine = true,
-            shape = MaterialTheme.shapes.small,
+            placeholder = stringResource(R.string.finder_options_search_hint),
+            onClear = { query = "" },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = MiruSpace.S),
+            plate = false,
         )
     }
 

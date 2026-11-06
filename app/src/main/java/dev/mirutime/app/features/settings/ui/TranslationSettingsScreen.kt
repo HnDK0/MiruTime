@@ -14,7 +14,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -45,6 +44,7 @@ import dev.mirutime.uikit.SheetHeaderAction
 import dev.mirutime.uikit.SheetSection
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.translator.ProviderId
+import dev.mirutime.uikit.MiruTextField
 
 private val GeminiModels = listOf(
     "gemini-3.1-flash-lite",
@@ -167,6 +167,7 @@ fun TranslationSettingsScreen(
                         singleLine = false,
                         minLines = 2,
                         maxLines = 5,
+                        revealable = true,
                     )
                 }
             }
@@ -184,6 +185,7 @@ fun TranslationSettingsScreen(
                         singleLine = false,
                         minLines = 2,
                         maxLines = 5,
+                        revealable = true,
                     )
                     MiruRowDivider()
                     SettingsTextField(
@@ -585,14 +587,14 @@ fun PromptManagerSheet(onClose: () -> Unit) {
             )
         },
     ) {
-        OutlinedTextField(
+        MiruTextField(
             value = text,
             onValueChange = { text = it },
-            label = { Text(stringResource(R.string.st_tr_prompt_label)) },
-            placeholder = { Text(stringResource(R.string.st_tr_prompt_placeholder)) },
+            label = stringResource(R.string.st_tr_prompt_label),
+            placeholder = stringResource(R.string.st_tr_prompt_placeholder),
+            singleLine = false,
             minLines = 4,
             maxLines = 10,
-            shape = MaterialTheme.shapes.small,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
@@ -629,12 +631,11 @@ fun PromptManagerSheet(onClose: () -> Unit) {
                     }
                 }
             }
-            OutlinedTextField(
+            MiruTextField(
                 value = presetName,
                 onValueChange = { presetName = it.take(32) },
-                label = { Text(stringResource(R.string.st_tr_preset_name)) },
+                label = stringResource(R.string.st_tr_preset_name),
                 singleLine = true,
-                shape = MaterialTheme.shapes.small,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = MiruSpace.S),

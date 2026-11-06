@@ -41,7 +41,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import dev.mirutime.app.R
 import dev.mirutime.app.design.components.BookCover
-import dev.mirutime.app.design.components.CatalogSearchField
+import dev.mirutime.uikit.MiruSearchBar
 import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.app.features.migration.domain.MigrationCandidateBook
 import dev.mirutime.app.features.migration.domain.MigrationSearchHit
@@ -280,11 +280,12 @@ fun MigrationBooksStep(
             },
         )
         MiruCard {
-            CatalogSearchField(
+            MiruSearchBar(
                 value = query,
                 onValueChange = onQueryChange,
                 placeholder = stringResource(R.string.migration_filter_books),
                 onClear = { onQueryChange("") },
+                plate = false,
             )
         }
         when {
@@ -362,12 +363,13 @@ fun MigrationSingleResultsStep(
             description = stringResource(R.string.migration_find_target_desc),
             contentPadding = PaddingValues(MiruSpace.S),
         ) {
-            CatalogSearchField(
+            MiruSearchBar(
                 value = state.query,
                 onValueChange = { state.query = it },
                 placeholder = stringResource(R.string.migration_search_query),
                 onClear = state::clearQuery,
                 onSearch = state::search,
+                plate = false,
             )
         }
         val target = state.target

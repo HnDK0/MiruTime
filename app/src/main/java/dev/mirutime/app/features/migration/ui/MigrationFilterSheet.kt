@@ -20,7 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import dev.mirutime.app.R
-import dev.mirutime.app.design.components.CatalogSearchField
+import dev.mirutime.uikit.MiruSearchBar
 import dev.mirutime.app.features.finder.domain.CatalogSource
 import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.app.features.migration.domain.MigrationSourceFilter
@@ -94,7 +94,7 @@ fun MigrationFilterSheet(
         // at/under 70%; content still scrolls.
         maxHeightFraction = 0.55f,
     ) {
-        CatalogSearchField(
+        MiruSearchBar(
             value = query,
             onValueChange = { query = it },
             placeholder = stringResource(R.string.migration_filter_search),

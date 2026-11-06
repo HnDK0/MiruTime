@@ -17,7 +17,6 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,6 +42,9 @@ import dev.mirutime.uikit.MiruActionRow
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
 import dev.mirutime.app.features.finder.domain.PluginExtension
+import dev.mirutime.uikit.MiruTextField
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 
 // Extensions tab: the repository card (URL + refresh +
 // Lua import), the installed plugins (enable switch, per-row Update, settings
@@ -69,13 +71,16 @@ fun LazyListScope.extensionsItems(
             contentPadding = PaddingValues(0.dp),
         ) {
             Column(modifier = Modifier.padding(MiruSpace.L)) {
-                OutlinedTextField(
+                MiruTextField(
                     value = url,
                     onValueChange = { url = it },
-                    singleLine = true,
+                    singleLine = false,
+                    minLines = 1,
+                    maxLines = 2,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                     textStyle = MaterialTheme.typography.bodySmall,
-                    shape = MaterialTheme.shapes.small,
                     modifier = Modifier.fillMaxWidth(),
+                    plate = false,
                 )
                 Spacer(modifier = Modifier.height(MiruSpace.M))
                 Button(

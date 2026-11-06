@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,6 +24,7 @@ import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.app.features.library.domain.Shelf
+import dev.mirutime.uikit.MiruTextField
 
 // Name entry for create + edit, built on the bottom-sheet standard: title +
 // description, roomy field, the skip-updates switch, and the sticky footer
@@ -63,44 +63,22 @@ fun ShelfEditSheet(
         doneEnabled = !blank && !duplicate && !unchanged,
         onDone = { onConfirm(trimmed, skipUpdates) },
     ) {
-        OutlinedTextField(
+        MiruTextField(
             value = name,
             onValueChange = {
                 name = it
                 if (it.isNotEmpty()) dirty = true
             },
-            placeholder = { Text(text = stringResource(R.string.shelf_name_hint)) },
+            placeholder = stringResource(R.string.shelf_name_hint),
             singleLine = true,
             isError = duplicate || showBlankError,
-            shape = MaterialTheme.shapes.small,
+            supportingText = when {
+                duplicate -> stringResource(R.string.shelf_dup_error)
+                showBlankError -> stringResource(R.string.shelf_blank_error)
+                else -> stringResource(R.string.shelf_blank_hint)
+            },
             modifier = Modifier.fillMaxWidth(),
         )
-        when {
-            duplicate -> {
-                Text(
-                    text = stringResource(R.string.shelf_dup_error),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            }
-            showBlankError -> {
-                Text(
-                    text = stringResource(R.string.shelf_blank_error),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            }
-            else -> {
-                Text(
-                    text = stringResource(R.string.shelf_blank_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = LocalMiruExtraColors.current.muted,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            }
-        }
         Spacer(modifier = Modifier.height(16.dp))
         SkipUpdatesRow(
             checked = skipUpdates,

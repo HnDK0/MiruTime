@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -34,6 +33,7 @@ import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.SettingsValueRow
 import dev.mirutime.uikit.SheetSection
 import dev.mirutime.app.features.finder.domain.PluginSetting
+import dev.mirutime.uikit.MiruTextField
 
 // Per-plugin settings sheet. Only two groups now:
 // 1) the app-owned base URL;
@@ -73,20 +73,14 @@ fun PluginSettingsSheet(
         },
     ) {
         SheetSection(title = stringResource(R.string.finder_plugin_base_url)) {
-            OutlinedTextField(
+            MiruTextField(
                 value = url,
                 onValueChange = { url = it },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                textStyle = MaterialTheme.typography.bodyMedium,
-                shape = MaterialTheme.shapes.small,
+                supportingText = stringResource(R.string.finder_plugin_base_url_hint),
                 modifier = Modifier.fillMaxWidth(),
-            )
-            Text(
-                text = stringResource(R.string.finder_plugin_base_url_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = extra.muted,
-                modifier = Modifier.padding(top = MiruSpace.Xs),
+                plate = false,
             )
         }
         if (settings.isNotEmpty()) {

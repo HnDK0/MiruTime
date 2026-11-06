@@ -21,16 +21,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowRightAlt
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -76,6 +73,8 @@ import dev.mirutime.app.features.settings.data.PluginTranslation
 import dev.mirutime.app.features.settings.data.SettingsLanguages
 import dev.mirutime.app.features.settings.data.TranslationConfig
 import dev.mirutime.app.features.settings.data.TranslationPair
+import dev.mirutime.uikit.MiruSearchBar
+import dev.mirutime.uikit.MiruTextField
 
 // Novel-specific prompts (TRANSLATION_NOVEL_PROMPTS): a searchable list of
 // every novel that has its own LLM prompt. Prompts are CREATED from the book's
@@ -94,21 +93,13 @@ fun NovelPromptsScreen(contentPadding: PaddingValues) {
     SettingsPage(contentPadding) {
         item(key = "search") {
             MiruCard(contentPadding = PaddingValues(MiruSpace.S)) {
-                OutlinedTextField(
+                MiruSearchBar(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = { Text(stringResource(R.string.st_np_search)) },
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    trailingIcon = {
-                        if (query.isNotEmpty()) {
-                            IconButton(onClick = { query = "" }) {
-                                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.st_clear))
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    shape = MaterialTheme.shapes.small,
+                    placeholder = stringResource(R.string.st_np_search),
+                    onClear = { query = "" },
                     modifier = Modifier.fillMaxWidth(),
+                    plate = false,
                 )
             }
         }
@@ -179,13 +170,13 @@ fun NovelPromptsScreen(contentPadding: PaddingValues) {
                 editing = null
             },
         ) {
-            OutlinedTextField(
+            MiruTextField(
                 value = text,
                 onValueChange = { text = it },
-                label = { Text(stringResource(R.string.st_tr_prompt_label)) },
+                label = stringResource(R.string.st_tr_prompt_label),
+                singleLine = false,
                 minLines = 4,
                 maxLines = 10,
-                shape = MaterialTheme.shapes.small,
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(
@@ -591,20 +582,11 @@ private fun LanguagePickerSheet(
         description = "",
         onClose = onClose,
     ) {
-        OutlinedTextField(
+        MiruSearchBar(
             value = query,
             onValueChange = { query = it },
-            placeholder = { Text(stringResource(R.string.st_pt_lang_search)) },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            trailingIcon = {
-                if (query.isNotEmpty()) {
-                    IconButton(onClick = { query = "" }) {
-                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.st_clear))
-                    }
-                }
-            },
-            singleLine = true,
-            shape = MaterialTheme.shapes.small,
+            placeholder = stringResource(R.string.st_pt_lang_search),
+            onClear = { query = "" },
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(MiruSpace.S))

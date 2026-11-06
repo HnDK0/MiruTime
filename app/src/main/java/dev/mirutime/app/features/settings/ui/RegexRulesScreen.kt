@@ -12,15 +12,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -60,6 +55,8 @@ import dev.mirutime.core.text.RegexRuleTarget
 import dev.mirutime.core.text.applyRules
 import dev.mirutime.core.text.applyRulesFor
 import dev.mirutime.core.text.regexError
+import dev.mirutime.uikit.MiruSearchBar
+import dev.mirutime.uikit.MiruTextField
 
 private const val SampleText = "Chapter 1 [ad] continues  here"
 
@@ -143,21 +140,13 @@ fun RegexRulesScreen(
         }
         item(key = "add") {
             MiruCard(modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
+                MiruSearchBar(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = { Text(stringResource(R.string.st_rx_search)) },
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    trailingIcon = {
-                        if (query.isNotEmpty()) {
-                            IconButton(onClick = { query = "" }) {
-                                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.st_clear))
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    shape = MaterialTheme.shapes.small,
+                    placeholder = stringResource(R.string.st_rx_search),
+                    onClear = { query = "" },
                     modifier = Modifier.fillMaxWidth(),
+                    plate = false,
                 )
                 Spacer(modifier = Modifier.height(MiruSpace.M))
                 Button(
@@ -207,12 +196,13 @@ fun RegexRulesScreen(
                 title = stringResource(R.string.st_rx_preview),
                 description = stringResource(R.string.st_rx_preview_desc),
             ) {
-                OutlinedTextField(
+                MiruTextField(
                     value = sample,
                     onValueChange = { sample = it },
-                    label = { Text(stringResource(R.string.st_rx_sample)) },
-                    shape = MaterialTheme.shapes.small,
+                    label = stringResource(R.string.st_rx_sample),
+                    singleLine = false,
                     modifier = Modifier.fillMaxWidth(),
+                    plate = false,
                 )
                 Text(
                     text = stringResource(R.string.st_rx_result),
@@ -406,38 +396,40 @@ private fun RuleEditSheet(
             onSave(RegexRule(rule?.id ?: 0L, pattern, replacement, description.trim(), enabled, wholeWords, scope))
         },
     ) {
-        OutlinedTextField(
+        MiruTextField(
             value = pattern,
             onValueChange = { pattern = it },
-            label = { Text(stringResource(R.string.st_rx_pattern)) },
-            placeholder = { Text(stringResource(R.string.st_rx_pattern_hint)) },
+            label = stringResource(R.string.st_rx_pattern),
+            placeholder = stringResource(R.string.st_rx_pattern_hint),
             isError = error != null,
-            supportingText = error?.let { { Text(it) } },
+            supportingText = error,
+            singleLine = false,
             textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-            shape = MaterialTheme.shapes.small,
             modifier = Modifier.fillMaxWidth(),
+            plate = false,
         )
-        OutlinedTextField(
+        MiruTextField(
             value = replacement,
             onValueChange = { replacement = it },
-            label = { Text(stringResource(R.string.st_rx_replacement)) },
-            placeholder = { Text(stringResource(R.string.st_rx_replacement_hint)) },
+            label = stringResource(R.string.st_rx_replacement),
+            placeholder = stringResource(R.string.st_rx_replacement_hint),
+            singleLine = false,
             textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-            shape = MaterialTheme.shapes.small,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = MiruSpace.S),
+            plate = false,
         )
-        OutlinedTextField(
+        MiruTextField(
             value = description,
             onValueChange = { description = it },
-            label = { Text(stringResource(R.string.st_rx_description)) },
-            placeholder = { Text(stringResource(R.string.st_rx_description_hint)) },
+            label = stringResource(R.string.st_rx_description),
+            placeholder = stringResource(R.string.st_rx_description_hint),
             singleLine = true,
-            shape = MaterialTheme.shapes.small,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = MiruSpace.S),
+            plate = false,
         )
         Text(
             text = stringResource(R.string.st_rx_scope),

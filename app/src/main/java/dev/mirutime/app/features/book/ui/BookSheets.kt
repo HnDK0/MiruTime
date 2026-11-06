@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -40,6 +39,7 @@ import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.settings.data.TranslationConfig
 import dev.mirutime.app.features.settings.ui.TranslationConfigContent
 import dev.mirutime.app.features.settings.ui.isTranslationSaveEnabled
+import dev.mirutime.uikit.MiruTextField
 
 // === All book-page bottom sheets (one AppBottomSheet language) ===========
 
@@ -196,22 +196,20 @@ fun SelectChaptersSheet(
         },
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
+            MiruTextField(
                 value = fromText,
                 onValueChange = { text -> fromText = text.filter { it.isDigit() } },
-                label = { Text(stringResource(R.string.book_select_from)) },
+                label = stringResource(R.string.book_select_from),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                shape = MaterialTheme.shapes.small,
                 modifier = Modifier.weight(1f),
             )
-            OutlinedTextField(
+            MiruTextField(
                 value = toText,
                 onValueChange = { text -> toText = text.filter { it.isDigit() } },
-                label = { Text(stringResource(R.string.book_select_to)) },
+                label = stringResource(R.string.book_select_to),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                shape = MaterialTheme.shapes.small,
                 modifier = Modifier.weight(1f),
             )
         }

@@ -30,7 +30,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -77,6 +76,7 @@ import dev.mirutime.app.design.importBackground
 import dev.mirutime.app.design.rememberBackgroundBitmap
 import dev.mirutime.uikit.title
 import kotlinx.coroutines.launch
+import dev.mirutime.uikit.MiruTextField
 
 // Rail 1: every palette theme (Miru originals + NoveLA mirrors). Rail 2: the
 // ready-made backgrounds listed from the app's GitHub folder (BackgroundPresets.kt);
@@ -727,26 +727,19 @@ private fun AddBackgroundSheet(
         doneBusy = busy,
         onDone = { startImport(link) },
     ) {
-        OutlinedTextField(
+        MiruTextField(
             value = link,
             onValueChange = {
                 link = it
                 error = null
             },
-            placeholder = { Text(text = stringResource(UiKitR.string.theme_custom_link_hint)) },
+            placeholder = stringResource(UiKitR.string.theme_custom_link_hint),
             singleLine = true,
             enabled = !busy,
-            shape = MaterialTheme.shapes.small,
+            isError = error != null,
+            supportingText = error?.let { stringResource(it.messageRes()) },
             modifier = Modifier.fillMaxWidth(),
         )
-        error?.let { reason ->
-            Spacer(modifier = Modifier.height(MiruSpace.Xs))
-            Text(
-                text = stringResource(reason.messageRes()),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
         Spacer(modifier = Modifier.height(12.dp))
         // Sheet action buttons ride the one size grid: 36dp.
         OutlinedButton(
