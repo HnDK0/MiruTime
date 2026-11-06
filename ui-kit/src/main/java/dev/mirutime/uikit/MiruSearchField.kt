@@ -28,6 +28,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,14 +50,20 @@ fun MiruSearchField(
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     leadingIcon: (@Composable () -> Unit)? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
+    focusRequester: FocusRequester? = null,
+    onFocusChanged: ((Boolean) -> Unit)? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
     val extra = LocalMiruExtraColors.current
+    val fieldModifier = modifier
+        .fillMaxWidth()
+        .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
+        .let { if (onFocusChanged != null) it.onFocusChanged { it.isFocused.let(onFocusChanged) } else it }
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = modifier.fillMaxWidth(),
+        modifier = fieldModifier,
         enabled = enabled,
         singleLine = singleLine,
         keyboardOptions = keyboardOptions,

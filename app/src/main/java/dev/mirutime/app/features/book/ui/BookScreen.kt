@@ -34,6 +34,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -90,6 +92,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -98,6 +101,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.delay
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -2294,7 +2298,7 @@ private fun StatStrip(
                 MiruSplitProgress(
                     read = book.readCount,
                     total = book.totalChapters,
-                    modifier = Modifier.width(MiruSize.SplitProgress),
+                    modifier = Modifier.width(MiruSize.SplitProgress * LocalDensity.current.fontScale),
                     contentDescription = stringResource(
                         R.string.card_ratio_fmt,
                         book.readCount,
@@ -2367,13 +2371,14 @@ private fun StatStrip(
         }
     }
 
-    MiruCard(contentPadding = PaddingValues(MiruSpace.M)) {
+    val dividerColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+    MiruCard(contentPadding = PaddingValues(horizontal = MiruSpace.M, vertical = MiruSpace.S)) {
         if (largeText) {
             Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
                 ratingCell(Modifier.fillMaxWidth())
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                HorizontalDivider(color = dividerColor)
                 progressCell(Modifier.fillMaxWidth())
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                HorizontalDivider(color = dividerColor)
                 timeCell(Modifier.fillMaxWidth(), false)
             }
         } else {
@@ -2381,17 +2386,21 @@ private fun StatStrip(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(MiruSize.StatStripHeight),
+                    .heightIn(min = MiruSize.StatStripHeight),
             ) {
                 ratingCell(Modifier.weight(1f))
                 VerticalDivider(
-                    modifier = Modifier.padding(vertical = MiruSpace.Xs),
-                    color = extra.accent.copy(alpha = 0.30f),
+                    modifier = Modifier
+                        .height(MiruSize.StatStripHeight)
+                        .padding(vertical = MiruSpace.Xs),
+                    color = dividerColor,
                 )
                 progressCell(Modifier.weight(1f))
                 VerticalDivider(
-                    modifier = Modifier.padding(vertical = MiruSpace.Xs),
-                    color = extra.accent.copy(alpha = 0.30f),
+                    modifier = Modifier
+                        .height(MiruSize.StatStripHeight)
+                        .padding(vertical = MiruSpace.Xs),
+                    color = dividerColor,
                 )
                 timeCell(Modifier.weight(1f), true)
             }
@@ -3311,6 +3320,16 @@ private fun ChapterBrowser(
         }
     }
 
+    val searchFocusRequester = remember { FocusRequester() }
+    val searchBringIntoView = remember { BringIntoViewRequester() }
+    var searchFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(searchFocused) {
+        if (!searchFocused) return@LaunchedEffect
+        repeat(7) {
+            searchBringIntoView.bringIntoView()
+            delay(80)
+        }
+    }
     Column {
         MiruSearchField(
             value = query,
@@ -3318,7 +3337,11 @@ private fun ChapterBrowser(
             placeholder = stringResource(R.string.book_ch_search_hint),
             onClear = { query = "" },
             clearContentDescription = stringResource(R.string.finder_cd_clear_search),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .bringIntoViewRequester(searchBringIntoView),
+            focusRequester = searchFocusRequester,
+            onFocusChanged = { searchFocused = it },
         )
         Spacer(modifier = Modifier.height(MiruSpace.S))
         // Three compact plates. They are secondary tools, not page-level

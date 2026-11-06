@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -47,11 +46,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import dev.mirutime.uikit.MiruDockAction
 import dev.mirutime.uikit.MiruIconButton
+import dev.mirutime.uikit.MiruPlateHeader
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSlider
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.MiruSplitProgress
+import dev.mirutime.uikit.miruCardElevation
+import dev.mirutime.uikit.miruCardSurface
+import dev.mirutime.uikit.miruPlateBorder
 import dev.mirutime.feature.reader.R
 import dev.mirutime.feature.tts.R as TtsR
 import dev.mirutime.feature.tts.TtsSleepTimerState
@@ -112,58 +115,29 @@ internal fun ReaderChrome(
                     }
                 },
         )
-        Surface(
-            modifier = Modifier
-                .zIndex(1f)
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(horizontal = 12.dp)
-                .fillMaxWidth(),
-            shape = RoundedCornerShape(MiruRadius.Plate),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-            tonalElevation = 3.dp,
-            shadowElevation = 8.dp,
-        ) {
-            Column {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .heightIn(min = MiruSize.Row)
-                        .padding(horizontal = 8.dp),
-                ) {
-                    ReaderIconButton(
-                        icon = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.header_back),
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        onClick = onBack,
-                    )
-                    Column(Modifier.weight(1f)) {
-                        // NoveLA order: book above, chapter below.
-                        if (bookTitle.isNotBlank()) {
-                            Text(
-                                text = bookTitle,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        Text(
-                            text = title,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    ReaderIconButton(
-                        icon = Icons.Outlined.Public,
-                        contentDescription = stringResource(R.string.rd_open_web),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        enabled = canOpenWebView,
-                        onClick = onOpenWebView,
-                    )
-                }
+        MiruPlateHeader(
+            title = title,
+            subtitle = bookTitle,
+            subtitleFirst = true,
+            titleMaxLines = 1,
+            navigation = {
+                ReaderIconButton(
+                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.header_back),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    onClick = onBack,
+                )
+            },
+            actions = {
+                ReaderIconButton(
+                    icon = Icons.Outlined.Public,
+                    contentDescription = stringResource(R.string.rd_open_web),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    enabled = canOpenWebView,
+                    onClick = onOpenWebView,
+                )
+            },
+            progress = {
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -177,20 +151,25 @@ internal fun ReaderChrome(
                             .background(MaterialTheme.colorScheme.primary),
                     )
                 }
-            }
-        }
+            },
+            modifier = Modifier
+                .zIndex(1f)
+                .align(Alignment.TopCenter)
+                .fillMaxWidth(),
+        )
 
         Surface(
             modifier = Modifier
                 .zIndex(1f)
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 18.dp)
+                .padding(horizontal = 12.dp, vertical = 8.dp)
                 .fillMaxWidth(),
             shape = RoundedCornerShape(MiruRadius.Sheet),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
-            tonalElevation = 3.dp,
-            shadowElevation = 10.dp,
+            color = miruCardSurface().let { if (it.alpha < 1f) it.copy(alpha = 0.96f) else it },
+            border = miruPlateBorder(),
+            tonalElevation = 0.dp,
+            shadowElevation = miruCardElevation(),
         ) {
             Column(Modifier.padding(12.dp)) {
                 if (ttsMiniPlayer != null) {
@@ -290,8 +269,9 @@ private fun MangaPageScrubber(
 ) {
     val label = stringResource(R.string.rd_manga_page_fmt, page + 1, pageCount)
     Surface(
-        shape = RoundedCornerShape(percent = 50),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.9f),
+        shape = RoundedCornerShape(MiruRadius.Plate),
+        color = miruCardSurface(),
+        border = miruPlateBorder(),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(

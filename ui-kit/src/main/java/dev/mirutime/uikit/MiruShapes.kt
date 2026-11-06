@@ -61,7 +61,7 @@ object MiruSize {
     val RowDense = 40.dp     // dense list rows (chapters) with compact meta
     val IconSlot = 20.dp     // non-interactive glyph slot next to a row title
     val NarrowContent = 340.dp // stack paired actions below this content width
-    val StatStripHeight = 72.dp // fixed row so centered cells and dividers agree
+    val StatStripHeight = 56.dp // compact stat row; heightIn lets it grow at large text
     val ScreenPad = MiruSpace.L
     val Gap = MiruSpace.L    // between stacked cards
     val SectionGap = MiruSpace.Xl
