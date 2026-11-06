@@ -68,6 +68,8 @@ import dev.mirutime.data.library.buildLibraryDatabase
 import dev.mirutime.data.library.libraryDatabaseBuilder
 import dev.mirutime.data.library.migration.BookMigrationCoordinator
 import dev.mirutime.imageloader.ImageCacheConfig
+import dev.mirutime.imageloader.ImageMemoryTrimPolicy
+import dev.mirutime.imageloader.MemoryTrim
 import dev.mirutime.imageloader.buildImageLoader
 import java.io.File
 import kotlin.coroutines.cancellation.CancellationException
@@ -526,12 +528,42 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
         }
     }
 
+    // Trim target for memory-pressure callbacks. Captured here instead of
+    // asking SingletonImageLoader: get() would build the loader (disk cache,
+    // plugin graph) inside the callback. Null until Coil's first request.
+    @Volatile
+    private var trimImageLoader: ImageLoader? = null
+
     // One Coil instance for the whole app, with the cache bounds in one place.
     // Every image goes through the plugin graph (fetchImage), so the WebView
     // cookies and per-host headers apply; the graph is resolved on the first
     // request, never during the first frame.
     override fun newImageLoader(context: Context): ImageLoader =
         buildImageLoader(context) { url, headers -> pluginGraph.fetchImage("", url, headers) }
+            .also { trimImageLoader = it }
+
+    // System memory pressure: shrink the image cache, never touch plugin
+    // sessions (they own the reader/download pipeline).
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        val cache = trimImageLoader?.memoryCache ?: return
+        val before = cache.size
+        when (val action = ImageMemoryTrimPolicy.forLevel(before, level)) {
+            MemoryTrim.None -> return
+            MemoryTrim.Clear -> cache.clear()
+            is MemoryTrim.Trim -> cache.trimToSize(action.bytes)
+        }
+        MiruLog.event("app", "trim-memory", "level" to level, "before" to before)
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        val cache = trimImageLoader?.memoryCache ?: return
+        val before = cache.size
+        if (before <= 0L) return
+        cache.clear()
+        MiruLog.event("app", "low-memory", "before" to before)
+    }
 
     // One owner for the shared loader's caches: a live Coil disk cache must be
     // cleared through its own API, never by deleting files under it.
