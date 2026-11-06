@@ -24,7 +24,6 @@
     <string name="header_updates_desc">New chapters and auto-update</string>
     <string name="header_history">History</string>
     <string name="header_history_desc">What you read most recently</string>
-    <string name="header_book_desc">Details, chapters and actions</string>
 
 
     <!-- Extra screens sheet -->
@@ -137,9 +136,10 @@
     <!-- Book screen -->
     <string name="book_plugin">plugin</string>
     <string name="book_by_author_fmt">by %1$s</string>
-    <string name="book_origin_fmt">Origin: %1$s</string>
     <string name="book_came_from_search">Global search arrives with the Finder screen</string>
     <string name="book_title_copied">Title copied</string>
+    <string name="book_title_show_full">Show full</string>
+    <string name="book_title_collapse">Collapse</string>
     <string name="book_move_shelf">Move to shelf</string>
     <string name="book_move_shelf_empty">No shelves available.</string>
     <string name="book_move_shelf_desc">Book is on “%1$s”. Pick another shelf — the change sticks for this visit.</string>
@@ -147,6 +147,8 @@
     <string name="book_stat_ongoing">Ongoing</string>
     <string name="book_stat_completed">Completed</string>
     <string name="book_stat_none">—</string>
+    <string name="book_stat_read_fmt">read %1$s</string>
+    <string name="book_stat_tts_value_fmt">TTS %1$s</string>
     <string name="book_stat_unknown">…</string>
     <string name="book_loading">Loading book…</string>
     <string name="book_chapters_loading">Loading chapters…</string>
@@ -156,11 +158,6 @@
     <string name="book_chapters_refresh_failed_desc">The source did not return the chapter list. Retry to ask it again.</string>
     <string name="book_no_chapters">No chapters</string>
     <string name="book_stat_rating">rating</string>
-    <string name="book_stat_chapters">chapters</string>
-    <string name="book_stat_read_pct_fmt">%1$d%% read</string>
-    <string name="book_stat_time_labels_fmt">read · %1$s TTS</string>
-    <string name="book_stat_time">reading time</string>
-    <string name="book_downloading_progress_fmt">Downloading… %1$d%%</string>
     <string name="book_download_unavailable">Download engine is unavailable</string>
     <string name="book_download_deleted_fmt">Removed downloads for %1$d chapters</string>
     <string name="book_dl_queued_fmt">Queued chapters: %1$d</string>
@@ -201,22 +198,12 @@
     <string name="book_library_pending">Updating library…</string>
     <string name="book_cd_download_all">Download all</string>
     <string name="book_download_needs_library">Add the book to your library first — downloads live there</string>
-    <string name="book_downloading_toast">Download started</string>
-    <string name="book_download_done_fmt">%1$d chapters downloaded</string>
-    <string name="book_section_about">About this story</string>
-    <string name="book_section_about_desc">Official synopsis from the source</string>
     <string name="book_read_more">Read more</string>
     <string name="book_read_less">Read less</string>
     <!-- Characters stays dropped; Reader Notes is a fixture section at the
          bottom of the page (strings below), real review parsing still
          unconfirmed. -->
-    <string name="book_section_page">Open source page</string>
-    <string name="book_section_page_desc">Continue in the browser, or log in to the source</string>
-    <string name="book_open_page">Open page</string>
-    <string name="book_open_login">Log in to source</string>
-    <string name="book_login_stub">Source login is a WebView flow — stub for now</string>
-    <string name="book_section_tools">Book-specific tools</string>
-    <string name="book_section_tools_desc">Per-novel actions; global settings are untouched</string>
+    <string name="book_section_tools">Book tools</string>
     <string name="tool_translator">Per-novel translator</string>
     <string name="tool_translator_desc">Translate this novel without touching the global mode</string>
     <string name="tool_translator_mode">Mode</string>
@@ -238,24 +225,19 @@
     <string name="tool_epub_unavailable">EPUB export is unavailable here</string>
     <string name="tool_regex">Regex cleanup rules</string>
     <string name="tool_regex_desc">Scrub junk lines before they reach the reader</string>
-    <string name="book_order_caps">READING ORDER</string>
-    <string name="book_order_newest">Newest first</string>
-    <string name="book_order_oldest">Oldest first</string>
+    <string name="book_order_newest">Newest</string>
+    <string name="book_order_oldest">Oldest</string>
     <string name="book_order_cd">Reading order</string>
     <string name="book_chapters_header_fmt">Chapters (%1$d)</string>
-    <string name="book_section_chapters_desc">Search by title, bulk download, selection</string>
-    <string name="book_ch_search_hint">Search chapters…</string>
+    <string name="book_ch_search_hint">Search chapters (number or title)…</string>
+    <string name="book_ch_empty_no_match">No chapters match</string>
     <string name="book_cd_ch_search">Search chapters</string>
     <string name="book_cd_ch_scrollbar">Chapter list scrollbar</string>
-    <string name="book_download_next">Download next 100</string>
-    <string name="book_download_next_toast_fmt">Next %1$d chapters queued (stub)</string>
     <string name="book_btn_download">Download 100</string>
     <string name="book_btn_select">Select</string>
     <string name="book_btn_last_read">Last read</string>
-    <string name="book_ch_last_read_badge">LAST READ</string>
     <string name="book_ch_last_chapter_badge">LAST CHAPTER</string>
     <string name="book_ch_read_badge">✓ READ</string>
-    <string name="book_ch_read_cd">Read</string>
     <string name="book_select_chapters">Select chapters</string>
     <string name="book_select_title">Select chapters</string>
     <string name="book_select_desc">Pick a range and what to do with it</string>
@@ -291,11 +273,9 @@
     <string name="book_chapters_marked_unread_fmt">%1$d chapters marked unread</string>
     <string name="book_chapters_translations_deleted_fmt">%1$d translations deleted</string>
     <string name="book_ch_translation_loading">Translating chapter</string>
-    <string name="book_ch_translation_pending">Translation pending</string>
     <string name="book_ch_retry_translation">Retry translation</string>
     <!-- Reader notes (reviews) — fixture-only while plugin review parsing
          remains unconfirmed. -->
-    <string name="book_section_reviews">Reader notes</string>
     <string name="book_section_reviews_desc">Reviews from the source</string>
     <string name="book_reviews_empty">No reviews yet</string>
     <string name="book_reviews_auto_note">In FULL translation mode reviews are translated automatically.</string>
@@ -458,15 +438,10 @@
     <string name="toast_imported_one">1 local book added to your library</string>
     <string name="toast_import_failed">Couldn\'t import the selected files</string>
     <string name="book_toast_hint_caps">Long-press the title to copy it</string>
-    <string name="book_ch_cd_read">Read</string>
     <string name="book_ch_cd_downloaded">Downloaded</string>
     <string name="book_ch_cd_translated">Translated</string>
-    <string name="book_ch_cd_downloading">Downloading</string>
-    <string name="book_ch_cd_offline">On device</string>
-    <string name="book_reader_stub">The reader arrives with the reader track (stub)</string>
     <string name="book_genres_more_fmt">+%1$d</string>
     <string name="book_genres_less">Less</string>
-    <string name="book_chapters_summary_fmt">%1$d read · %2$d downloaded</string>
 
     <!-- Dashboard -->
     <string name="dash_today">Today</string>
@@ -1686,21 +1661,27 @@
     <string name="video_dl_notification_title">Downloading video</string>
     <string name="video_dl_notification_text_fmt">%1$d episodes in progress</string>
     <string name="book_action_download">Download…</string>
+    <string name="dl_action_stop">Stop</string>
+    <string name="book_dl_stop_title">Stop downloads?</string>
+    <string name="book_dl_stop_desc">All unfinished chapters in this book will be cancelled and partial files deleted.</string>
+    <string name="book_dl_stop_confirm">Stop</string>
+    <string name="dl_downloading_fmt">Downloading %1$d%%</string>
     <string name="book_action_source">Site / Login</string>
     <string name="book_action_options_fmt">Options (%1$d)</string>
     <string name="book_synopsis">Synopsis</string>
     <string name="book_stat_downloaded_fmt">%1$d downloaded</string>
-    <string name="book_stat_in_book">in book</string>
-    <string name="book_stat_tts_fmt">TTS %1$s</string>
     <string name="book_tool_on">On</string>
     <string name="book_tool_off">Off</string>
     <string name="book_tool_rules_fmt">%1$d rules</string>
     <string name="book_tool_chapters_fmt">%1$d chapters</string>
-    <string name="book_notes_tab_fmt">Reader notes (%1$d)</string>
+    <string name="book_notes_tab_cd_fmt">Reader notes (%1$d)</string>
     <string name="book_filter_all">All</string>
     <string name="book_filter_read">Read</string>
     <string name="book_filter_unread">Unread</string>
-    <string name="book_btn_last_read_fmt">Last read (Ch. %1$d)</string>
+    <string name="book_btn_last_read_fmt">Last read · %1$d</string>
+    <string name="book_ch_current_badge">CURRENT</string>
+    <string name="book_ch_expand_title">Show full title</string>
+    <string name="book_stat_read_pct_dec_fmt">%1$s%% read</string>
     <string name="book_download_next_fmt">Next %1$d</string>
     <string name="book_download_all_unread">All unread</string>
     <string name="book_source_panel_desc_fmt">%1$s · access</string>
@@ -1712,5 +1693,6 @@
     <string name="book_download_panel_desc">Next chapters from your position</string>
     <string name="book_tool_migrate_needs_library">Needs library</string>
     <string name="book_tool_source">Source</string>
+    <string name="book_tools_scope">This title only</string>
     <string name="book_tool_epub_no_chapters">No downloaded chapters</string>
 </resources>

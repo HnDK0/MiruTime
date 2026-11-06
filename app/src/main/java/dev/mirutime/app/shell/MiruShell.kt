@@ -405,7 +405,7 @@ fun MiruShell(
                 Box(
                     modifier = Modifier
                         .matchParentSize()
-                        .background(miruTopVeilBrush(opaque = onMigration)),
+                        .background(miruTopVeilBrush(opaque = onMigration || bookTitle != null)),
                 )
                 AppHeader(
                     title = webViewHeaderTitle ?: bookTitle ?: sourceName ?: settingsHeader?.let { stringResource(it.first) } ?: if (onGlobalSearch) {
@@ -425,8 +425,7 @@ fun MiruShell(
                     description = if (onWebView) {
                         webViewHost.ifBlank { webViewDisplayUrl }
                     } else if (bookTitle != null) {
-                        bookUrl?.let { BookPageSnapshotStore.subtitleFor(it) }
-                            ?: stringResource(R.string.header_book_desc)
+                        bookUrl?.let { BookPageSnapshotStore.summaryFor(it) }.orEmpty()
                     } else if (settingsHeader != null) {
                         stringResource(settingsHeader.second)
                     } else if (sourceName != null) {

@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -14,6 +15,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -38,19 +40,24 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.BookmarkAdded
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Login
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
@@ -66,6 +73,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -81,6 +89,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -105,7 +114,9 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
@@ -116,8 +127,11 @@ import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.app.design.components.BookCover
+import dev.mirutime.uikit.CardProgressBar
 import dev.mirutime.uikit.MiruCard
+import dev.mirutime.uikit.MiruCardType
 import dev.mirutime.uikit.MiruTag
+import dev.mirutime.uikit.isLargeText
 import dev.mirutime.uikit.MiruActionRow
 import dev.mirutime.uikit.MiruButton
 import dev.mirutime.uikit.MiruButtonStyle
@@ -130,8 +144,6 @@ import dev.mirutime.uikit.MiruTabPill
 import dev.mirutime.uikit.MiruToolTile
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
-import dev.mirutime.uikit.StatCell
-import dev.mirutime.uikit.StatPanel
 import dev.mirutime.uikit.SkeletonBar
 import dev.mirutime.app.core.chapterRowKey
 import dev.mirutime.core.log.MiruLog
@@ -325,7 +337,11 @@ fun BookScreen(
     // provider cache answers immediately, so no skeleton/source refresh.
     var loadedOnce by rememberSaveable(bookUrl) { mutableStateOf(false) }
     SideEffect {
-        book?.let { BookPageSnapshotStore.put(bookUrl, it) }
+        book?.let { current ->
+            if (BookPageSnapshotStore.get(bookUrl) != current) {
+                BookPageSnapshotStore.put(bookUrl, current)
+            }
+        }
     }
     var shelves by remember { mutableStateOf<List<Shelf>>(emptyList()) }
     var shelvesLoading by remember { mutableStateOf(true) }
@@ -859,10 +875,12 @@ fun BookScreen(
 
     // The controller turns a chapter Ready only after the cache save attempt;
     // refresh the DB-backed flags shortly after so the list tells the truth.
-    val readyTranslationCount = book?.chapters?.count { chapter ->
-        val chapterUrl = chapter.url ?: chapterKey(bookUrl, chapter.index)
-        translationStates[chapterUrl]?.status == ChapterTranslationStatus.Ready
-    } ?: 0
+    val readyTranslationCount = remember(book?.chapters, translationStates) {
+        book?.chapters?.count { chapter ->
+            val chapterUrl = chapter.url ?: chapterKey(bookUrl, chapter.index)
+            translationStates[chapterUrl]?.status == ChapterTranslationStatus.Ready
+        } ?: 0
+    }
     LaunchedEffect(readyTranslationCount) {
         if (readyTranslationCount <= seenReadyTranslations) return@LaunchedEffect
         seenReadyTranslations = readyTranslationCount
@@ -930,8 +948,28 @@ fun BookScreen(
         DownloadState.from(it.state) == downloadQueueState
     }?.error
     val downloadBookId = downloadTasks.firstOrNull()?.bookId
+    var resolvedDownloadBookId by remember(bookUrl) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(bookUrl, downloadEngine) {
+        resolvedDownloadBookId = downloadEngine?.bookId(bookUrl)
+    }
+    val downloadRunState = when {
+        isVideoBook -> null
+        downloadTasks.any { it.state == DownloadState.RUNNING.wire } -> DownloadState.RUNNING
+        downloadTasks.any { it.state == DownloadState.QUEUED.wire } -> DownloadState.QUEUED
+        else -> null
+    }
+    val videoDownloadActive = isVideoBook && videoDownloadsByIndex.values.any {
+        it.state == VideoDownloadState.Queued || it.state == VideoDownloadState.Downloading
+    }
+    val downloadActive = downloadRunState != null || videoDownloadActive
+    val downloadQueued = downloadRunState == DownloadState.QUEUED
+    var stopDownloadsConfirm by remember(bookUrl) { mutableStateOf(false) }
 
     val current = book
+    // One count per chapter-list change, shared by the actions and tools blocks.
+    val downloadedCount = remember(current?.chapters, isVideoBook, videoCompletedCount) {
+        current?.let { downloadedChapterCount(it, isVideoBook, videoCompletedCount) } ?: 0
+    }
     // A failed destructive chapter action stays visible with a retry: a toast
     // cannot offer retry, so a swallowed failure made the button look dead.
     // Selection is cleared by onDone only on a real success.
@@ -994,6 +1032,25 @@ fun BookScreen(
                 VideoDownloadAction.Pause -> manager.pause(item.bookUrl, item.chapterUrl)
                 VideoDownloadAction.Resume -> manager.resume(item.bookUrl, item.chapterUrl)
                 VideoDownloadAction.Cancel -> manager.cancel(item.bookUrl, item.chapterUrl)
+            }
+        }
+    }
+
+    fun stopDownloadsNow() {
+        if (isVideoBook) {
+            videoDownloadsByIndex.values
+                .filter {
+                    it.state == VideoDownloadState.Queued ||
+                        it.state == VideoDownloadState.Downloading ||
+                        it.state == VideoDownloadState.Paused
+                }
+                .forEach { item ->
+                    applyVideoDownloadAction(item.chapterIndex, VideoDownloadAction.Cancel)
+                }
+        } else {
+            val id = resolvedDownloadBookId ?: downloadBookId
+            if (id != null) {
+                ioScope.launch { downloadEngine?.cancelNow(id) }
             }
         }
     }
@@ -1160,12 +1217,12 @@ fun BookScreen(
     LazyColumn(
         state = if (current == null) loadingListState else pageListState,
         modifier = Modifier.fillMaxSize(),
-        // ONE gap between every block of the page (MiruSize.Gap = 16dp):
-        // blocks never carry their own top/bottom margins.
-        verticalArrangement = Arrangement.spacedBy(MiruSize.Gap),
+        // The book page is denser than the global 16dp rhythm: one 12dp gap
+        // between blocks, 12dp side padding.
+        verticalArrangement = Arrangement.spacedBy(MiruSpace.M),
         contentPadding = PaddingValues(
-            start = MiruSize.ScreenPad,
-            end = MiruSize.ScreenPad,
+            start = MiruSpace.M,
+            end = MiruSpace.M,
             top = contentPadding.calculateTopPadding() + MiruSpace.Xs,
             bottom = contentPadding.calculateBottomPadding() + BottomClearance,
         ),
@@ -1274,10 +1331,14 @@ fun BookScreen(
                     } else {
                         downloadEngine != null && current.inLibrary
                     },
+                    downloadRunning = downloadActive,
+                    downloadQueued = downloadQueued,
+                    downloadPercent = downloadProgress,
+                    onStopDownload = { stopDownloadsConfirm = true },
                     showSource = !current.bookUrl.startsWith("local") &&
                         current.sourceUrl.isNotBlank(),
                     toolCount = 2 +
-                        (if (exporter != null && downloadedChapterCount(current, isVideoBook, videoCompletedCount) > 0) 1 else 0) +
+                        (if (exporter != null && downloadedCount > 0) 1 else 0) +
                         (if (migration != null && current.inLibrary &&
                             !current.bookUrl.startsWith("local")
                         ) {
@@ -1308,6 +1369,7 @@ fun BookScreen(
                     DownloadQueueNotice(
                         state = downloadQueueState,
                         error = downloadQueueError,
+                        progress = downloadProgress,
                         sourceUrl = current.sourceUrl,
                         onOpenSource = { onOpenWebView(current.sourceUrl, current.source) },
                         onRetry = { downloadEngine?.retry(downloadBookId) },
@@ -1326,18 +1388,13 @@ fun BookScreen(
             }
             if (toolsExpanded) {
                 item {
-                    val downloaded = downloadedChapterCount(
-                        current,
-                        isVideoBook,
-                        videoCompletedCount,
-                    )
                     ToolsSection(
                         translatorOn = AppSettings.novelTranslation[current.bookUrl]?.enabled == true,
                         regexCount = AppSettings.novelRegexRules[current.bookUrl]
                             .orEmpty()
                             .count { it.enabled },
-                        epubChapters = downloaded,
-                        epubEnabled = exporter != null && !epubExporting && downloaded > 0,
+                        epubChapters = downloadedCount,
+                        epubEnabled = exporter != null && !epubExporting && downloadedCount > 0,
                         epubBusy = epubExporting,
                         migrateEnabled = migration != null && current.inLibrary &&
                             !current.bookUrl.startsWith("local"),
@@ -1397,6 +1454,10 @@ fun BookScreen(
                             isVideoBook = isVideoBook,
                             videoDownloads = videoDownloadsByIndex,
                             onVideoDownloadAction = ::applyVideoDownloadAction,
+                            downloadRunning = downloadActive,
+                            downloadQueued = downloadQueued,
+                            downloadPercent = downloadProgress,
+                            onStopDownload = { stopDownloadsConfirm = true },
                             onOpenChapter = { index ->
                                 if (current.contentType == ContentType.Video) {
                                     onOpenVideo(current.bookUrl, index)
@@ -1596,10 +1657,22 @@ fun BookScreen(
         fun launchDownload(indexes: Set<Int>?, nextCount: Int? = null) {
             if (downloadAllBusy) return
             if (isVideoBook) {
-                val unread = current.chapters.filter { !it.isRead }
-                val target = indexes ?: (
-                    if (nextCount != null) unread.take(nextCount) else unread
-                    ).map { it.index }.toSet()
+                val pending = current.chapters.asSequence()
+                    .filter { !it.isRead }
+                    .filter { chapter ->
+                        val state = videoDownloadsByIndex[chapter.index]?.state
+                        state != VideoDownloadState.Completed &&
+                            state != VideoDownloadState.Queued &&
+                            state != VideoDownloadState.Downloading &&
+                            state != VideoDownloadState.Paused
+                    }
+                    .map { it.index }
+                    .toSet()
+                val target = when {
+                    indexes != null -> indexes.intersect(pending)
+                    nextCount != null -> pending.toList().take(nextCount).toSet()
+                    else -> pending
+                }
                 if (target.isEmpty()) {
                     bookToast(context, resources.getString(R.string.book_dl_nothing_new))
                     return
@@ -1874,6 +1947,15 @@ fun BookScreen(
                 },
             )
         }
+        if (stopDownloadsConfirm) {
+            StopDownloadsSheet(
+                onClose = { stopDownloadsConfirm = false },
+                onConfirm = {
+                    stopDownloadsConfirm = false
+                    stopDownloadsNow()
+                },
+            )
+        }
     }
 }
 
@@ -1907,7 +1989,7 @@ private fun BookSkeleton() {
     val loadingLabel = stringResource(R.string.book_loading)
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(MiruSize.Gap),
+        verticalArrangement = Arrangement.spacedBy(MiruSpace.M),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -1925,10 +2007,10 @@ private fun BookSkeleton() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        SkeletonBar(modifier = Modifier.fillMaxWidth(), height = 276.dp, corner = MiruRadius.Card)
-        SkeletonBar(modifier = Modifier.fillMaxWidth(), height = 66.dp, corner = MiruRadius.Card)
-        SkeletonBar(modifier = Modifier.fillMaxWidth(), height = 104.dp, corner = MiruRadius.Card)
-        SkeletonBar(modifier = Modifier.fillMaxWidth(), height = 160.dp, corner = MiruRadius.Card)
+        SkeletonBar(modifier = Modifier.fillMaxWidth(), height = 176.dp, corner = MiruRadius.Card)
+        SkeletonBar(modifier = Modifier.fillMaxWidth(), height = 64.dp, corner = MiruRadius.Card)
+        SkeletonBar(modifier = Modifier.fillMaxWidth(), height = 92.dp, corner = MiruRadius.Card)
+        SkeletonBar(modifier = Modifier.fillMaxWidth(), height = 190.dp, corner = MiruRadius.Card)
     }
 }
 
@@ -1940,9 +2022,9 @@ private fun ChaptersSkeleton() {
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(MiruSpace.S),
     ) {
-        SkeletonBar(modifier = Modifier.fillMaxWidth(), height = 56.dp, corner = MiruRadius.Card)
+        SkeletonBar(modifier = Modifier.fillMaxWidth(), height = 44.dp, corner = MiruRadius.Card)
         repeat(4) {
-            SkeletonBar(modifier = Modifier.fillMaxWidth(), height = 44.dp, corner = MiruRadius.Card)
+            SkeletonBar(modifier = Modifier.fillMaxWidth(), height = 40.dp, corner = MiruRadius.Card)
         }
     }
 }
@@ -1969,7 +2051,10 @@ private fun AnnounceCard(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val resources = LocalResources.current
-    val largeText = LocalDensity.current.fontScale > 1.3f
+    val largeText = isLargeText()
+    val fontScale = LocalDensity.current.fontScale
+    var titleExpanded by rememberSaveable(title, fontScale) { mutableStateOf(false) }
+    var titleOverflow by remember(title, fontScale) { mutableStateOf(false) }
     val shelf = if (shelvesLoading) {
         stringResource(R.string.book_stat_unknown)
     } else {
@@ -1993,6 +2078,8 @@ private fun AnnounceCard(
                 modifier = Modifier
                     .width(MiruSize.DetailCoverWidth)
                     .height(MiruSize.DetailCoverHeight),
+                badge = book.originLanguage?.takeIf { it.isNotBlank() } ?: book.source,
+                badgeAlignment = Alignment.BottomCenter,
                 corner = MiruRadius.Cover,
                 onRetry = onCoverRetry,
             )
@@ -2000,14 +2087,17 @@ private fun AnnounceCard(
                 MiruSourceChip(
                     text = "${book.source} · $pluginLabel",
                     onClick = onOpenSource,
+                    contentAlignment = Alignment.TopStart,
                 )
-                Spacer(modifier = Modifier.height(MiruSpace.Xs))
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 3,
+                    maxLines = if (titleExpanded) Int.MAX_VALUE else 2,
                     overflow = TextOverflow.Ellipsis,
+                    onTextLayout = { layout ->
+                        if (!titleExpanded && layout.hasVisualOverflow) titleOverflow = true
+                    },
                     modifier = Modifier.combinedClickable(
                         role = Role.Button,
                         onClick = { onOpenSearch() },
@@ -2020,27 +2110,37 @@ private fun AnnounceCard(
                         },
                     ),
                 )
+                if (titleOverflow || titleExpanded) {
+                    Text(
+                        text = stringResource(
+                            if (titleExpanded) {
+                                R.string.book_title_collapse
+                            } else {
+                                R.string.book_title_show_full
+                            },
+                        ),
+                        style = MiruCardType.Meta,
+                        color = extra.accent,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(MiruRadius.Split))
+                            .clickable(
+                                role = Role.Button,
+                                onClick = { titleExpanded = !titleExpanded },
+                            )
+                            .padding(vertical = MiruSpace.Xxs),
+                    )
+                }
                 Spacer(modifier = Modifier.height(MiruSpace.Xs))
                 val author = book.author.trim()
                 if (author.isNotEmpty() && !author.equals("Unknown", ignoreCase = true)) {
                     Text(
                         text = stringResource(R.string.book_by_author_fmt, author),
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                book.originLanguage?.takeIf { it.isNotBlank() }?.let { language ->
-                    Text(
-                        text = stringResource(R.string.book_origin_fmt, language),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = extra.muted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Spacer(modifier = Modifier.height(MiruSpace.Xs))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
@@ -2053,53 +2153,11 @@ private fun AnnounceCard(
                     )
                     Text(
                         text = status,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MiruCardType.Meta,
                         color = extra.muted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                }
-                Spacer(modifier = Modifier.height(MiruSpace.S))
-                val shelfButton: @Composable (Modifier) -> Unit = { modifier ->
-                    MiruCompactButton(
-                        icon = Icons.Filled.DriveFileMove,
-                        label = shelf,
-                        enabled = book.inLibrary,
-                        onClick = onShelfClick,
-                        modifier = modifier,
-                    )
-                }
-                val libraryButton: @Composable (Modifier) -> Unit = { modifier ->
-                    MiruCompactButton(
-                        icon = if (book.inLibrary) {
-                            Icons.Filled.BookmarkAdded
-                        } else {
-                            Icons.Filled.BookmarkBorder
-                        },
-                        label = stringResource(
-                            if (book.inLibrary) {
-                                R.string.book_cd_in_library
-                            } else {
-                                R.string.book_cd_add_library
-                            },
-                        ),
-                        selected = book.inLibrary,
-                        busy = membershipPending,
-                        busyDescription = stringResource(R.string.book_library_pending),
-                        onClick = onToggleLibrary,
-                        modifier = modifier,
-                    )
-                }
-                if (largeText) {
-                    Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                        shelfButton(Modifier.fillMaxWidth())
-                        libraryButton(Modifier.fillMaxWidth())
-                    }
-                } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                        shelfButton(Modifier.weight(1f))
-                        libraryButton(Modifier.weight(1f))
-                    }
                 }
             }
         }
@@ -2111,6 +2169,61 @@ private fun AnnounceCard(
                 items(book.genres) { genre -> MiruTag(label = genre) }
             }
         }
+        Spacer(modifier = Modifier.height(MiruSpace.M))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+        Spacer(modifier = Modifier.height(MiruSpace.S))
+        val shelfButton: @Composable (Modifier) -> Unit = { modifier ->
+            MiruCompactButton(
+                icon = Icons.Filled.DriveFileMove,
+                label = shelf,
+                enabled = book.inLibrary,
+                onClick = onShelfClick,
+                modifier = modifier,
+                trailing = {
+                    Icon(
+                        imageVector = Icons.Filled.ArrowDropDown,
+                        contentDescription = null,
+                        tint = extra.accent,
+                        modifier = Modifier.size(MiruSize.IconSmall),
+                    )
+                },
+            )
+        }
+        val libraryButton: @Composable (Modifier) -> Unit = { modifier ->
+            MiruCompactButton(
+                icon = if (book.inLibrary) {
+                    Icons.Filled.BookmarkAdded
+                } else {
+                    Icons.Filled.BookmarkBorder
+                },
+                label = stringResource(
+                    if (book.inLibrary) {
+                        R.string.book_cd_in_library
+                    } else {
+                        R.string.book_cd_add_library
+                    },
+                ),
+                selected = book.inLibrary,
+                busy = membershipPending,
+                busyDescription = stringResource(R.string.book_library_pending),
+                onClick = onToggleLibrary,
+                modifier = modifier,
+            )
+        }
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            if (largeText || maxWidth < MiruSize.NarrowContent) {
+                Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                    shelfButton(Modifier.fillMaxWidth())
+                    libraryButton(Modifier.fillMaxWidth())
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                    shelfButton(Modifier.weight(1f))
+                    libraryButton(Modifier.weight(1f))
+                }
+            }
+        }
+
     }
 }
 
@@ -2126,64 +2239,161 @@ private fun StatStrip(
     chaptersLoading: Boolean,
     downloadedOverride: Int? = null,
 ) {
+    val extra = LocalMiruExtraColors.current
     val ttsLabel = formatDurationLocalized(book.ttsMinutes * 60_000L)
     val chaptersKnown = bookChaptersCountKnown(chaptersLoading, book.totalChapters)
-    val downloaded = downloadedOverride
-        ?: remember(book.chapters) { book.chapters.count { it.downloaded } }
-    StatPanel(
-        cells = buildList {
-            if (book.rating > 0f) {
-                add(
-                    StatCell(
-                        value = formatRating(book.rating),
-                        label = stringResource(R.string.book_stat_rating),
-                        icon = Icons.Filled.Star,
-                        weight = 1f,
-                    ),
+    val novelDownloaded = remember(book.chapters) { book.chapters.count { it.downloaded } }
+    val downloaded = downloadedOverride ?: novelDownloaded
+    val largeText = isLargeText()
+    val percentLabel = stringResource(
+        R.string.book_stat_read_pct_dec_fmt,
+        formatPercent(book.readCount, book.totalChapters),
+    )
+
+    val ratingValue = if (book.rating > 0f) {
+        formatRating(book.rating)
+    } else {
+        stringResource(R.string.book_stat_none)
+    }
+    val ratingCell: @Composable (Modifier) -> Unit = { modifier ->
+        Column(modifier) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xxs),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Star,
+                    contentDescription = null,
+                    tint = extra.accent,
+                    modifier = Modifier.size(MiruSize.IconSmall),
+                )
+                Text(
+                    text = ratingValue,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
                 )
             }
-            add(
-                StatCell(
-                    value = if (chaptersKnown) {
-                        stringResource(
-                            R.string.card_ratio_fmt,
-                            book.readCount,
-                            book.totalChapters,
-                        )
-                    } else {
-                        stringResource(R.string.book_stat_unknown)
-                    },
-                    label = if (chaptersKnown) {
-                        stringResource(
-                            R.string.book_stat_read_pct_fmt,
-                            (book.progressFraction * 100).roundToInt(),
-                        )
-                    } else {
-                        stringResource(R.string.book_stat_none)
-                    },
-                    weight = 2.2f,
-                    progress = if (chaptersKnown) book.progressFraction else null,
-                    secondary = if (chaptersKnown) {
-                        stringResource(R.string.book_stat_downloaded_fmt, downloaded)
-                    } else {
-                        null
-                    },
-                ),
+            Text(
+                text = stringResource(R.string.book_stat_rating),
+                style = MiruCardType.Meta,
+                color = extra.muted,
+                maxLines = 1,
             )
-            add(
-                StatCell(
-                    value = formatDurationLocalized((book.readMinutes + book.ttsMinutes) * 60_000L),
-                    label = stringResource(R.string.book_stat_in_book),
-                    weight = 1.7f,
-                    secondary = if (book.ttsMinutes > 0) {
-                        stringResource(R.string.book_stat_tts_fmt, ttsLabel)
-                    } else {
-                        null
-                    },
-                ),
+        }
+    }
+    val progressCell: @Composable (Modifier) -> Unit = { modifier ->
+        Column(modifier) {
+            if (chaptersKnown) {
+                Text(
+                    text = stringResource(
+                        R.string.card_ratio_fmt,
+                        book.readCount,
+                        book.totalChapters,
+                    ),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                )
+                Spacer(modifier = Modifier.height(MiruSpace.Xxs))
+                CardProgressBar(
+                    fraction = book.progressFraction,
+                    height = 4.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(MiruSpace.Xxs))
+                Text(
+                    text = percentLabel,
+                    style = MiruCardType.Meta,
+                    color = extra.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = stringResource(R.string.book_stat_downloaded_fmt, downloaded),
+                    style = MiruCardType.Meta,
+                    color = extra.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                Text(
+                    text = stringResource(R.string.book_stat_none),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                )
+                Text(
+                    text = stringResource(R.string.book_stat_none),
+                    style = MiruCardType.Meta,
+                    color = extra.muted,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+    val readTime = formatDurationLocalized(book.readMinutes * 60_000L)
+    val totalTime = formatDurationLocalized((book.readMinutes + book.ttsMinutes) * 60_000L)
+    val timeCell: @Composable (Modifier, Boolean) -> Unit = { modifier, end ->
+        Column(
+            modifier = modifier,
+            horizontalAlignment = if (end) Alignment.End else Alignment.Start,
+        ) {
+            Text(
+                text = totalTime,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
             )
-        },
-    )
+            Text(
+                text = stringResource(R.string.book_stat_read_fmt, readTime),
+                style = MiruCardType.Meta,
+                color = extra.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (book.ttsMinutes > 0) {
+                Text(
+                    text = stringResource(R.string.book_stat_tts_value_fmt, ttsLabel),
+                    style = MiruCardType.Meta,
+                    color = extra.accent,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+
+    MiruCard(contentPadding = PaddingValues(MiruSpace.M)) {
+        if (largeText) {
+            Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                ratingCell(Modifier.fillMaxWidth())
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                progressCell(Modifier.fillMaxWidth())
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                timeCell(Modifier.fillMaxWidth(), false)
+            }
+        } else {
+            Row(
+                verticalAlignment = Alignment.Top,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Min),
+            ) {
+                ratingCell(Modifier.weight(1f))
+                VerticalDivider(
+                    modifier = Modifier.padding(vertical = MiruSpace.Xs),
+                    color = extra.accent.copy(alpha = 0.30f),
+                )
+                progressCell(Modifier.weight(1f))
+                VerticalDivider(
+                    modifier = Modifier.padding(vertical = MiruSpace.Xs),
+                    color = extra.accent.copy(alpha = 0.30f),
+                )
+                timeCell(Modifier.weight(1f), true)
+            }
+        }
+    }
 }
 
 // Continue / Start / Read again as the page's loudest action: one
@@ -2202,6 +2412,10 @@ private fun ActionRow(
     // A failed refresh with no stored rows is not a genuine empty list.
     chaptersFailed: Boolean = false,
     downloadEnabled: Boolean,
+    downloadRunning: Boolean = false,
+    downloadQueued: Boolean = false,
+    downloadPercent: Float? = null,
+    onStopDownload: () -> Unit = {},
     showSource: Boolean,
     toolCount: Int,
     toolsExpanded: Boolean,
@@ -2266,16 +2480,50 @@ private fun ActionRow(
             )
         }
         Spacer(modifier = Modifier.height(MiruSpace.S))
-        val largeText = LocalDensity.current.fontScale > 1.3f
+        val largeText = isLargeText()
         val downloadCaption = !book.inLibrary
         val download: @Composable (Modifier) -> Unit = { modifier ->
-            MiruCompactButton(
-                icon = Icons.Filled.Download,
-                label = stringResource(R.string.book_action_download),
-                enabled = downloadEnabled,
-                onClick = onOpenDownloadPanel,
-                modifier = modifier,
-            )
+            if (downloadRunning) {
+                val fraction = downloadPercent?.coerceIn(0f, 1f)
+                Row(
+                    modifier = modifier,
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
+                ) {
+                    MiruCompactButton(
+                        icon = Icons.Filled.Download,
+                        label = if (downloadQueued) {
+                            stringResource(R.string.book_ch_dl_queued)
+                        } else if (fraction != null) {
+                            stringResource(
+                                R.string.dl_downloading_fmt,
+                                (fraction * 100).roundToInt(),
+                            )
+                        } else {
+                            stringResource(R.string.book_action_download)
+                        },
+                        progress = if (downloadQueued) null else fraction,
+                        enabled = false,
+                        onClick = {},
+                        modifier = Modifier.weight(1f),
+                    )
+                    MiruIconButton(
+                        icon = Icons.Filled.Stop,
+                        contentDescription = stringResource(R.string.dl_action_stop),
+                        tint = MaterialTheme.colorScheme.error,
+                        onClick = onStopDownload,
+                        modifier = Modifier.size(MiruSize.Control),
+                    )
+                }
+            } else {
+                MiruCompactButton(
+                    icon = Icons.Filled.Download,
+                    label = stringResource(R.string.book_action_download),
+                    enabled = downloadEnabled,
+                    onClick = onOpenDownloadPanel,
+                    modifier = modifier,
+                )
+            }
         }
         val source: @Composable (Modifier) -> Unit = { modifier ->
             MiruCompactButton(
@@ -2327,6 +2575,7 @@ private fun ActionRow(
 private fun DownloadQueueNotice(
     state: DownloadState,
     error: String?,
+    progress: Float? = null,
     sourceUrl: String,
     onOpenSource: () -> Unit,
     onRetry: () -> Unit,
@@ -2357,6 +2606,15 @@ private fun DownloadQueueNotice(
         ),
         contentPadding = PaddingValues(horizontal = MiruSpace.S, vertical = MiruSpace.Xs),
     ) {
+        if (progress != null) {
+            CardProgressBar(
+                fraction = progress,
+                height = 4.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = MiruSpace.S, vertical = MiruSpace.Xs),
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xs)) {
             if (state == DownloadState.NEEDS_SOURCE_ACTION && sourceUrl.isNotBlank()) {
                 TextButton(onClick = onOpenSource) {
@@ -2444,19 +2702,20 @@ private fun ChapterDeleteErrorNotice(
 private fun AboutSection(description: String) {
     if (description.isBlank()) return
     var expanded by remember(description) { mutableStateOf(false) }
+    val synopsisTitle = stringResource(R.string.book_synopsis)
     MiruCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = stringResource(R.string.book_synopsis),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
+                text = remember(synopsisTitle) { synopsisTitle.uppercase(Locale.ROOT) },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
             Text(
                 text = stringResource(
                     if (expanded) R.string.book_read_less else R.string.book_read_more,
                 ),
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelSmall,
                 color = LocalMiruExtraColors.current.accent,
                 modifier = Modifier
                     .clip(RoundedCornerShape(MiruRadius.Cover))
@@ -2467,7 +2726,7 @@ private fun AboutSection(description: String) {
         Spacer(modifier = Modifier.height(MiruSpace.Xs))
         Text(
             text = description,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = if (expanded) Int.MAX_VALUE else 2,
             overflow = TextOverflow.Ellipsis,
@@ -2576,7 +2835,7 @@ private fun ToolsSection(
     onRegex: () -> Unit,
     onMigrate: () -> Unit,
 ) {
-    val largeText = LocalDensity.current.fontScale > 1.3f
+    val largeText = isLargeText()
     val translatorTile: @Composable (Modifier) -> Unit = { modifier ->
         MiruToolTile(
             glyph = "文A",
@@ -2632,11 +2891,22 @@ private fun ToolsSection(
             modifier = modifier,
         )
     }
-    MiruSectionCard(
-        title = stringResource(R.string.book_section_tools),
-        description = stringResource(R.string.book_section_tools_desc),
-        contentPadding = PaddingValues(MiruSpace.M),
-    ) {
+    val toolsTitle = stringResource(R.string.book_section_tools)
+    MiruCard(contentPadding = PaddingValues(MiruSpace.M)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = remember(toolsTitle) { toolsTitle.uppercase(Locale.ROOT) },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = stringResource(R.string.book_tools_scope),
+                style = MiruCardType.Meta,
+                color = LocalMiruExtraColors.current.muted,
+            )
+        }
+        Spacer(modifier = Modifier.height(MiruSpace.S))
         if (largeText) {
             Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
                 translatorTile(Modifier.fillMaxWidth())
@@ -2782,21 +3052,24 @@ private fun ChaptersSection(
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val refreshLabel = stringResource(R.string.book_chapters_refreshing)
-    val tabs: @Composable () -> Unit = {
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-            verticalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
-        ) {
-            MiruTabPill(
-                label = stringResource(R.string.book_chapters_header_fmt, book.totalChapters),
-                selected = tab == 0,
-                onClick = { tab = 0 },
-            )
-            MiruTabPill(
-                label = stringResource(R.string.book_notes_tab_fmt, notesCount),
-                selected = tab == 1,
-                onClick = { tab = 1 },
-            )
+    val largeText = isLargeText()
+    val tabs: @Composable (Boolean) -> Unit = { wrap ->
+        if (wrap) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                verticalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
+            ) {
+                BookChapterTabs(book.totalChapters, notesCount, tab, onTab = { tab = it })
+            }
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+            ) {
+                BookChapterTabs(book.totalChapters, notesCount, tab, onTab = { tab = it })
+            }
         }
     }
     val actions: @Composable () -> Unit = {
@@ -2832,14 +3105,45 @@ private fun ChaptersSection(
         }
     }
     MiruCard(contentPadding = PaddingValues(MiruSpace.M)) {
-        tabs()
-        if (tab == 0) {
-            Spacer(modifier = Modifier.height(MiruSpace.Xs))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                actions()
+        if (largeText) {
+            if (notesCount > 0) {
+                tabs(true)
+            } else {
+                Text(
+                    text = stringResource(R.string.book_chapters_header_fmt, book.totalChapters),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            if (tab == 0) {
+                Spacer(modifier = Modifier.height(MiruSpace.Xs))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    actions()
+                }
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.weight(1f)) {
+                    if (notesCount > 0) {
+                        tabs(false)
+                    } else {
+                        Text(
+                            text = stringResource(
+                                R.string.book_chapters_header_fmt,
+                                book.totalChapters,
+                            ),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+                if (tab == 0) {
+                    Spacer(modifier = Modifier.width(MiruSpace.S))
+                    actions()
+                }
             }
         }
         Spacer(modifier = Modifier.height(MiruSpace.M))
@@ -2848,20 +3152,43 @@ private fun ChaptersSection(
 }
 
 @Composable
+private fun BookChapterTabs(
+    totalChapters: Int,
+    notesCount: Int,
+    selectedTab: Int,
+    onTab: (Int) -> Unit,
+) {
+    MiruTabPill(
+        label = stringResource(R.string.book_chapters_header_fmt, totalChapters),
+        selected = selectedTab == 0,
+        onClick = { onTab(0) },
+    )
+    if (notesCount > 0) {
+        MiruTabPill(
+            label = notesCount.toString(),
+            selected = selectedTab == 1,
+            onClick = { onTab(1) },
+            icon = Icons.Filled.Star,
+            iconContentDescription = stringResource(R.string.book_notes_tab_cd_fmt, notesCount),
+        )
+    }
+}
+
+@Composable
 private fun ChapterOrderToggle(newestFirst: Boolean, onClick: () -> Unit) {
     val accent = LocalMiruExtraColors.current.accent
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xxs),
         modifier = Modifier
-            .clip(RoundedCornerShape(MiruRadius.Cover))
+            .clip(RoundedCornerShape(MiruRadius.Control))
             .clickable(
                 role = Role.Button,
                 onClickLabel = stringResource(R.string.book_order_cd),
                 onClick = onClick,
             )
             .defaultMinSize(minHeight = MiruSize.Touch)
-            .padding(horizontal = MiruSpace.M),
+            .padding(horizontal = MiruSpace.S),
     ) {
         Icon(
             imageVector = if (newestFirst) {
@@ -2871,13 +3198,13 @@ private fun ChapterOrderToggle(newestFirst: Boolean, onClick: () -> Unit) {
             },
             contentDescription = null,
             tint = accent,
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(MiruSize.IconSmall),
         )
         Text(
             text = stringResource(
                 if (newestFirst) R.string.book_order_newest else R.string.book_order_oldest,
             ),
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelMedium,
             color = accent,
             maxLines = 1,
         )
@@ -2902,6 +3229,10 @@ private fun ChapterBrowser(
     downloadAvailable: Boolean,
     onOpenChapter: (Int) -> Unit,
     onDownloadNext100: () -> Unit,
+    downloadRunning: Boolean,
+    downloadQueued: Boolean,
+    downloadPercent: Float?,
+    onStopDownload: () -> Unit,
     onSelectChapters: () -> Unit,
     onTranslate: (Set<Int>, () -> Unit) -> Unit,
     onMarkRead: (Set<Int>, Boolean, () -> Unit) -> Unit,
@@ -2927,11 +3258,13 @@ private fun ChapterBrowser(
     }
 
     val visible = remember(book, query, newestFirst, translatedTitles, filter) {
+        val needle = query.trim()
         val matched = book.chapters.filter {
             filter.matches(it.isRead) && (
-                query.isBlank() ||
-                    it.title.contains(query, ignoreCase = true) ||
-                    translatedTitles[it.index]?.contains(query, ignoreCase = true) == true
+                needle.isBlank() ||
+                    it.title.contains(needle, ignoreCase = true) ||
+                    it.index.toString() == needle ||
+                    translatedTitles[it.index]?.contains(needle, ignoreCase = true) == true
                 )
         }
         matched.inReadingOrder(newestFirst)
@@ -2939,21 +3272,29 @@ private fun ChapterBrowser(
 
     // Truthful availability for destructive actions: only enabled when at
     // least one selected chapter actually has a translation / download.
-    val selectedTranslated = remember(book, selection, translationStates) {
-        book.chapters.count { chapter ->
-            chapter.index in selection && (
-                chapter.translated ||
-                    translationStates[chapter.url ?: chapterKey(book.bookUrl, chapter.index)]
-                        ?.status == ChapterTranslationStatus.Ready
-                )
+    val selectedTranslated = if (selection.isEmpty()) {
+        0
+    } else {
+        remember(book, selection, translationStates) {
+            book.chapters.count { chapter ->
+                chapter.index in selection && (
+                    chapter.translated ||
+                        translationStates[chapter.url ?: chapterKey(book.bookUrl, chapter.index)]
+                            ?.status == ChapterTranslationStatus.Ready
+                    )
+            }
         }
     }
-    val selectedDownloaded = remember(book, selection, isVideoBook, videoDownloads) {
-        book.chapters.count { chapter ->
-            chapter.index in selection && if (isVideoBook) {
-                videoDownloads[chapter.index]?.state == VideoDownloadState.Completed
-            } else {
-                chapter.downloaded
+    val selectedDownloaded = if (selection.isEmpty()) {
+        0
+    } else {
+        remember(book, selection, isVideoBook, videoDownloads) {
+            book.chapters.count { chapter ->
+                chapter.index in selection && if (isVideoBook) {
+                    videoDownloads[chapter.index]?.state == VideoDownloadState.Completed
+                } else {
+                    chapter.downloaded
+                }
             }
         }
     }
@@ -2979,13 +3320,52 @@ private fun ChapterBrowser(
         Spacer(modifier = Modifier.height(MiruSpace.S))
         // Three compact plates. They are secondary tools, not page-level
         // actions; at large text they stack so no label is clipped.
-        val largeText = LocalDensity.current.fontScale > 1.3f
+        val largeText = isLargeText()
         val downloadButton: @Composable (Modifier) -> Unit = { modifier ->
-            MiruCompactButton(
-                label = stringResource(R.string.book_btn_download),
-                onClick = onDownloadNext100,
-                modifier = modifier,
-            )
+            if (downloadRunning) {
+                val fraction = downloadPercent?.coerceIn(0f, 1f)
+                Row(
+                    modifier = modifier,
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
+                ) {
+                    MiruCompactButton(
+                        label = if (downloadQueued) {
+                            stringResource(R.string.book_ch_dl_queued)
+                        } else if (fraction != null) {
+                            stringResource(
+                                R.string.dl_downloading_fmt,
+                                (fraction * 100).roundToInt(),
+                            )
+                        } else {
+                            stringResource(R.string.book_action_download)
+                        },
+                        progress = if (downloadQueued) null else fraction,
+                        enabled = false,
+                        onClick = {},
+                        modifier = Modifier.weight(1f),
+                    )
+                    MiruIconButton(
+                        icon = Icons.Filled.Stop,
+                        contentDescription = stringResource(R.string.dl_action_stop),
+                        tint = MaterialTheme.colorScheme.error,
+                        onClick = onStopDownload,
+                        modifier = Modifier.size(MiruSize.Control),
+                    )
+                }
+            } else {
+                MiruCompactButton(
+                    label = stringResource(
+                        if (largeText) {
+                            R.string.book_action_download
+                        } else {
+                            R.string.book_btn_download
+                        },
+                    ),
+                    onClick = onDownloadNext100,
+                    modifier = modifier,
+                )
+            }
         }
         val selectButton: @Composable (Modifier) -> Unit = { modifier ->
             MiruCompactButton(
@@ -3012,11 +3392,12 @@ private fun ChapterBrowser(
             )
         }
         if (largeText) {
-            Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                downloadButton(Modifier.fillMaxWidth())
-                selectButton(Modifier.fillMaxWidth())
-                lastReadButton(Modifier.fillMaxWidth())
+            Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                downloadButton(Modifier.weight(1f))
+                selectButton(Modifier.weight(1f))
             }
+            Spacer(modifier = Modifier.height(MiruSpace.S))
+            lastReadButton(Modifier.fillMaxWidth())
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
                 downloadButton(Modifier.weight(1f))
@@ -3024,7 +3405,7 @@ private fun ChapterBrowser(
                 lastReadButton(Modifier.weight(1f))
             }
         }
-        Spacer(modifier = Modifier.height(MiruSpace.S))
+        Spacer(modifier = Modifier.height(MiruSpace.Xs))
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
             verticalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
@@ -3054,31 +3435,7 @@ private fun ChapterBrowser(
                 label = stringResource(R.string.book_filter_unread),
             )
         }
-        if (selectionActive) {
-            Spacer(modifier = Modifier.height(MiruSpace.S))
-            SelectionBar(
-                selectionCount = selection.size,
-                allSelected = visible.isNotEmpty() && visible.all { it.index in selection },
-                translationConfigured = translationConfigured,
-                downloadAvailable = downloadAvailable,
-                translatedCount = selectedTranslated,
-                downloadedCount = selectedDownloaded,
-                busy = bulkBusy,
-                onSelectAll = { selection = selection + visible.map { it.index } },
-                onTranslate = { onTranslate(selection) { selection = emptySet() } },
-                onMarkRead = { read -> onMarkRead(selection, read) { selection = emptySet() } },
-                onDeleteTranslations = {
-                    onDeleteTranslations(selection) { selection = emptySet() }
-                },
-                onDownloadSelected = { onDownloadSelected(selection) },
-                onDeleteDownloads = {
-                    onDeleteDownloads(selection) { selection = emptySet() }
-                },
-                onClear = { selection = emptySet() },
-                onClose = { selection = emptySet() },
-            )
-        }
-        Spacer(modifier = Modifier.height(MiruSpace.S))
+        Spacer(modifier = Modifier.height(MiruSpace.Xs))
         val scrollbarDragThumbTop = remember { mutableStateOf<Float?>(null) }
         Box(
             modifier = Modifier
@@ -3087,6 +3444,20 @@ private fun ChapterBrowser(
                     scrollbarDragThumbTop.value = it
                 },
         ) {
+            if (visible.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 120.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.book_ch_empty_no_match),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -3127,6 +3498,31 @@ private fun ChapterBrowser(
                     modifier = Modifier.matchParentSize(),
                 )
             }
+            }
+        }
+        if (selectionActive) {
+            Spacer(modifier = Modifier.height(MiruSpace.S))
+            SelectionBar(
+                selectionCount = selection.size,
+                allSelected = visible.isNotEmpty() && visible.all { it.index in selection },
+                translationConfigured = translationConfigured,
+                downloadAvailable = downloadAvailable,
+                translatedCount = selectedTranslated,
+                downloadedCount = selectedDownloaded,
+                busy = bulkBusy,
+                onSelectAll = { selection = selection + visible.map { it.index } },
+                onTranslate = { onTranslate(selection) { selection = emptySet() } },
+                onMarkRead = { read -> onMarkRead(selection, read) { selection = emptySet() } },
+                onDeleteTranslations = {
+                    onDeleteTranslations(selection) { selection = emptySet() }
+                },
+                onDownloadSelected = { onDownloadSelected(selection) },
+                onDeleteDownloads = {
+                    onDeleteDownloads(selection) { selection = emptySet() }
+                },
+                onClear = { selection = emptySet() },
+                onClose = { selection = emptySet() },
+            )
         }
     }
 }
@@ -3327,244 +3723,253 @@ private fun ChapterRow(
         DownloadState.from(chapter.downloadState)
     }
     val progress = if (isVideoBook) videoProgress else chapter.downloadProgress
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-        modifier = modifier
-            .heightIn(min = MiruSize.Touch)
-            .combinedClickable(
-                role = Role.Button,
-                onClick = onClick,
-                onLongClick = onLongClick,
+    var expanded by rememberSaveable(chapter.index) { mutableStateOf(false) }
+    var canExpand by remember(chapter.index) { mutableStateOf(false) }
+    val queueLabel = if (queuedState != null && !downloaded) {
+        when (queuedState) {
+            DownloadState.QUEUED -> stringResource(R.string.book_ch_dl_queued)
+            DownloadState.RUNNING -> stringResource(
+                R.string.book_ch_dl_running_fmt,
+                (progress * 100).roundToInt(),
             )
-            .background(
-                when {
-                    selected -> MaterialTheme.colorScheme.primaryContainer
-                    isLastRead -> extra.accent.copy(alpha = 0.12f)
-                    else -> Color.Transparent
-                },
+            DownloadState.PAUSED -> stringResource(
+                R.string.book_ch_dl_paused_fmt,
+                (progress * 100).roundToInt(),
             )
-            .clip(RoundedCornerShape(MiruRadius.Chip))
-            // Trailing Pause/Resume/Cancel/retry/status glyphs end at the same
-            // 8dp gutter as the scrollbar rail. The rail's 48dp lane reaches
-            // into the row but only claims the visible 8dp track on touch-down,
-            // so a tap on any icon still belongs to that icon. No vertical
-            // padding is added, so the rail and rows share top/bottom edges.
-            .padding(start = MiruSpace.S, end = ChapterRowEndGutter + MiruSpace.Xxs),
+            DownloadState.FAILED -> stringResource(R.string.book_ch_dl_failed)
+            DownloadState.NEEDS_SOURCE_ACTION -> stringResource(R.string.book_ch_dl_source_action)
+            DownloadState.WAITING_NETWORK -> stringResource(R.string.book_ch_dl_waiting_network)
+            else -> null
+        }
+    } else {
+        null
+    }
+    val meta = buildList {
+        if (!isLastRead && chapter.isLast) add(stringResource(R.string.book_ch_last_chapter_badge))
+        if (!isLastRead && chapter.isRead) add(stringResource(R.string.book_ch_read_badge))
+        if (queueLabel != null) add(queueLabel)
+        if (sizeLabel != null) add(sizeLabel)
+    }
+    val metaColor = if (queuedState == DownloadState.FAILED ||
+        queuedState == DownloadState.NEEDS_SOURCE_ACTION
     ) {
-        if (selectionActive) {
-            Icon(
-                imageVector = if (selected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
-                contentDescription = null,
-                tint = if (selected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    extra.muted
-                },
-                modifier = Modifier.size(18.dp),
-            )
-        } else {
-            Text(
-                text = chapter.index.toString(),
-                style = MaterialTheme.typography.bodySmall,
-                color = extra.muted,
-                maxLines = 1,
-                modifier = Modifier.widthIn(min = 40.dp),
-            )
-        }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                // Read chapters recede by ink and carry an explicit badge; a
-                // dimmed title alone is too easy to miss.
-                color = if (chapter.isRead) {
-                    extra.muted
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (queuedState != null && !downloaded) {
-                Text(
-                    text = when (queuedState) {
-                        DownloadState.QUEUED -> stringResource(R.string.book_ch_dl_queued)
-                        DownloadState.RUNNING -> stringResource(
-                            R.string.book_ch_dl_running_fmt,
-                            (progress * 100).roundToInt(),
-                        )
-                        DownloadState.PAUSED -> stringResource(
-                            R.string.book_ch_dl_paused_fmt,
-                            (progress * 100).roundToInt(),
-                        )
-                        DownloadState.FAILED -> stringResource(R.string.book_ch_dl_failed)
-                        DownloadState.NEEDS_SOURCE_ACTION ->
-                            stringResource(R.string.book_ch_dl_source_action)
-                        DownloadState.WAITING_NETWORK ->
-                            stringResource(R.string.book_ch_dl_waiting_network)
-                        else -> null
-                    } ?: "",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (queuedState == DownloadState.FAILED ||
-                        queuedState == DownloadState.NEEDS_SOURCE_ACTION
-                    ) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        extra.muted
-                    },
-                    maxLines = 1,
-                )
-            }
-            if (isLastRead || chapter.isLast || chapter.isRead || sizeLabel != null) {
-                // FlowRow: RU badges at 200% font wrap instead of clipping.
-                // Each label may take two lines; a single line would cut
-                // "ПОСЛЕДНЯЯ ПРОЧИТАННАЯ" at the column edge with no ellipsis.
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-                    verticalArrangement = Arrangement.spacedBy(MiruSpace.Xxs),
-                    itemVerticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (isLastRead) {
-                        Text(
-                            text = stringResource(R.string.book_ch_last_read_badge),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = extra.accent,
-                            maxLines = ChapterBadgeMaxLines,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    // "Last read"/"Last chapter" already tell the story; a
-                    // second READ badge would just duplicate them.
-                    if (shouldShowReadBadge(chapter.isRead, isLastRead, chapter.isLast)) {
-                        val readDescription = stringResource(R.string.book_ch_read_cd)
-                        Text(
-                            text = stringResource(R.string.book_ch_read_badge),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = extra.accent,
-                            maxLines = ChapterBadgeMaxLines,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.semantics {
-                                contentDescription = readDescription
-                            },
-                        )
-                    }
-                    if (chapter.isLast) {
-                        Text(
-                            text = stringResource(R.string.book_ch_last_chapter_badge),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = extra.muted,
-                            maxLines = ChapterBadgeMaxLines,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    // Size is quiet text, not a third trailing icon; long
-                    // titles never affect it because the title is one line.
-                    if (sizeLabel != null) {
-                        val sizeDescription = stringResource(R.string.book_ch_size_cd, sizeLabel)
-                        Text(
-                            text = sizeLabel,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = extra.muted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.semantics {
-                                contentDescription = sizeDescription
-                            },
-                        )
-                    }
-                }
-            }
-        }
-        // Two trailing slots at most: translation state (spinner while
-        // loading, retry on failure, accent glyph when Ready) + downloaded.
-        // Video rows add the queue controls the current state can honour.
+        MaterialTheme.colorScheme.error
+    } else {
+        extra.muted
+    }
+
+    Column(modifier = modifier) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = MiruSize.RowDense)
+                .clip(RoundedCornerShape(MiruRadius.Control))
+                .background(
+                    when {
+                        selected -> MaterialTheme.colorScheme.primaryContainer
+                        isLastRead -> extra.accent.copy(alpha = 0.10f)
+                        else -> Color.Transparent
+                    },
+                )
+                .combinedClickable(
+                    role = Role.Button,
+                    onClick = onClick,
+                    onLongClick = onLongClick,
+                )
+                .padding(start = MiruSpace.S, end = ChapterRowEndGutter)
+                .padding(vertical = MiruSpace.Xxs),
         ) {
-            if (isVideoBook && !selectionActive) {
-                videoDownloadActions(videoState).forEach { action ->
-                    when (action) {
-                        VideoDownloadAction.Pause -> MiruIconButton(
-                            icon = Icons.Filled.Pause,
-                            contentDescription = stringResource(R.string.dl_action_pause),
-                            tint = extra.muted,
-                            iconSize = MiruSize.IconCompact,
-                            contentAlignment = Alignment.CenterEnd,
-                            onClick = { onVideoDownloadAction(action) },
-                        )
-                        VideoDownloadAction.Resume -> MiruIconButton(
-                            icon = Icons.Filled.PlayArrow,
-                            contentDescription = stringResource(R.string.dl_action_resume),
-                            tint = extra.accent,
-                            iconSize = MiruSize.IconCompact,
-                            contentAlignment = Alignment.CenterEnd,
-                            onClick = { onVideoDownloadAction(action) },
-                        )
-                        VideoDownloadAction.Cancel -> MiruIconButton(
-                            icon = Icons.Filled.Close,
-                            contentDescription = stringResource(R.string.dl_action_cancel),
-                            tint = MaterialTheme.colorScheme.error,
-                            iconSize = MiruSize.IconCompact,
-                            contentAlignment = Alignment.CenterEnd,
-                            onClick = { onVideoDownloadAction(action) },
-                        )
-                    }
-                }
-            }
-            if (translationStatus == ChapterTranslationStatus.Loading) {
-                CircularProgressIndicator(
-                    strokeWidth = 2.dp,
-                    color = extra.accent,
-                    modifier = Modifier
-                        .size(16.dp)
-                        .semantics { contentDescription = translationLoading },
-                )
-            } else if (
-                translationStatus == ChapterTranslationStatus.Failed ||
-                chapter.translationState.equals("FAILED", ignoreCase = true)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(18.dp)
-                        .clip(RoundedCornerShape(MiruRadius.Split))
-                        .clickable(role = Role.Button, onClick = onRetryTranslation),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Refresh,
-                        contentDescription = stringResource(R.string.book_ch_retry_translation),
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(14.dp),
-                    )
-                }
-            } else if (chapter.translated ||
-                translationStatus == ChapterTranslationStatus.Ready
-            ) {
+            if (selectionActive) {
                 Icon(
-                    imageVector = Icons.Filled.Translate,
-                    contentDescription = stringResource(R.string.book_ch_cd_translated),
-                    tint = extra.accent,
-                    modifier = Modifier.size(14.dp),
-                )
-            }
-            if (queuedState == DownloadState.RUNNING) {
-                CircularProgressIndicator(
-                    progress = { progress.coerceIn(0f, 1f) },
-                    strokeWidth = 2.dp,
-                    color = extra.accent,
+                    imageVector = if (selected) {
+                        Icons.Filled.CheckCircle
+                    } else {
+                        Icons.Filled.RadioButtonUnchecked
+                    },
+                    contentDescription = null,
+                    tint = if (selected) MaterialTheme.colorScheme.primary else extra.muted,
                     modifier = Modifier.size(16.dp),
                 )
-            } else if (downloaded) {
-                Icon(
-                    imageVector = Icons.Filled.Download,
-                    contentDescription = stringResource(R.string.book_ch_cd_downloaded),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(14.dp),
+            } else {
+                Text(
+                    text = chapter.index.toString(),
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                    ),
+                    color = extra.muted,
+                    maxLines = 1,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.widthIn(min = 30.dp),
                 )
             }
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .alpha(
+                        if (chapter.isRead && !isLastRead && !selected) 0.72f else 1f,
+                    ),
+            ) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (chapter.isRead) {
+                            extra.muted
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        maxLines = if (expanded) Int.MAX_VALUE else 2,
+                        overflow = TextOverflow.Ellipsis,
+                        onTextLayout = { layout ->
+                            if (!canExpand && layout.hasVisualOverflow) canExpand = true
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (canExpand) {
+                        Box(
+                            modifier = Modifier
+                                .size(MiruSize.Control)
+                                .clip(RoundedCornerShape(MiruRadius.Split))
+                                .clickable(
+                                    role = Role.Button,
+                                    onClickLabel = stringResource(R.string.book_ch_expand_title),
+                                    onClick = { expanded = !expanded },
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = if (expanded) {
+                                    Icons.Filled.ExpandLess
+                                } else {
+                                    Icons.Filled.ExpandMore
+                                },
+                                contentDescription = stringResource(R.string.book_ch_expand_title),
+                                tint = extra.muted,
+                                modifier = Modifier.size(MiruSize.IconSmall),
+                            )
+                        }
+                    }
+                }
+                if (meta.isNotEmpty()) {
+                    Text(
+                        text = meta.joinToString(" · "),
+                        style = MiruCardType.Meta,
+                        color = metaColor,
+                        maxLines = if (isLargeText()) 2 else 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (isLastRead && !selectionActive) {
+                    Text(
+                        text = stringResource(R.string.book_ch_current_badge),
+                        style = MiruCardType.Meta,
+                        color = extra.accent,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(MiruRadius.Split))
+                            .background(extra.accent.copy(alpha = 0.16f))
+                            .padding(horizontal = MiruSpace.Xxs, vertical = 1.dp),
+                    )
+                }
+                if (isVideoBook && !selectionActive) {
+                    videoDownloadActions(videoState).forEach { action ->
+                        when (action) {
+                            VideoDownloadAction.Pause -> MiruIconButton(
+                                icon = Icons.Filled.Pause,
+                                contentDescription = stringResource(R.string.dl_action_pause),
+                                tint = extra.muted,
+                                iconSize = MiruSize.IconCompact,
+                                contentAlignment = Alignment.CenterEnd,
+                                onClick = { onVideoDownloadAction(action) },
+                            )
+                            VideoDownloadAction.Resume -> MiruIconButton(
+                                icon = Icons.Filled.PlayArrow,
+                                contentDescription = stringResource(R.string.dl_action_resume),
+                                tint = extra.accent,
+                                iconSize = MiruSize.IconCompact,
+                                contentAlignment = Alignment.CenterEnd,
+                                onClick = { onVideoDownloadAction(action) },
+                            )
+                            VideoDownloadAction.Cancel -> MiruIconButton(
+                                icon = Icons.Filled.Close,
+                                contentDescription = stringResource(R.string.dl_action_cancel),
+                                tint = MaterialTheme.colorScheme.error,
+                                iconSize = MiruSize.IconCompact,
+                                contentAlignment = Alignment.CenterEnd,
+                                onClick = { onVideoDownloadAction(action) },
+                            )
+                        }
+                    }
+                }
+                if (translationStatus == ChapterTranslationStatus.Loading) {
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        color = extra.accent,
+                        modifier = Modifier
+                            .size(14.dp)
+                            .semantics { contentDescription = translationLoading },
+                    )
+                } else if (
+                    translationStatus == ChapterTranslationStatus.Failed ||
+                    chapter.translationState.equals("FAILED", ignoreCase = true)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(MiruSize.Control)
+                            .clip(RoundedCornerShape(MiruRadius.Split))
+                            .clickable(role = Role.Button, onClick = onRetryTranslation),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Refresh,
+                            contentDescription = stringResource(R.string.book_ch_retry_translation),
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                } else if (chapter.translated ||
+                    translationStatus == ChapterTranslationStatus.Ready
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Translate,
+                        contentDescription = stringResource(R.string.book_ch_cd_translated),
+                        tint = extra.accent,
+                        modifier = Modifier.size(13.dp),
+                    )
+                }
+                if (queuedState == DownloadState.RUNNING) {
+                    CircularProgressIndicator(
+                        progress = { progress.coerceIn(0f, 1f) },
+                        strokeWidth = 2.dp,
+                        color = extra.accent,
+                        modifier = Modifier.size(14.dp),
+                    )
+                } else if (downloaded) {
+                    Box(
+                        modifier = Modifier.size(MiruSize.IconSlot),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Download,
+                            contentDescription = stringResource(R.string.book_ch_cd_downloaded),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            }
         }
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
+        )
     }
 }
 
@@ -3582,11 +3987,45 @@ private fun ReaderNotesSection(
     val extra = LocalMiruExtraColors.current
     Column {
         if (reviews.isEmpty()) {
-            Text(
-                text = stringResource(R.string.book_reviews_empty),
-                style = MaterialTheme.typography.bodyMedium,
-                color = extra.muted,
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = MiruSpace.L),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(MiruRadius.Control))
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.outline,
+                            RoundedCornerShape(MiruRadius.Control),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.ChatBubbleOutline,
+                        contentDescription = null,
+                        tint = extra.muted,
+                        modifier = Modifier.size(MiruSize.IconCompact),
+                    )
+                }
+                Spacer(modifier = Modifier.height(MiruSpace.S))
+                Text(
+                    text = stringResource(R.string.book_reviews_empty),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(modifier = Modifier.height(MiruSpace.Xxs))
+                Text(
+                    text = stringResource(R.string.book_section_reviews_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = extra.muted,
+                    textAlign = TextAlign.Center,
+                )
+            }
         } else {
             reviews.forEachIndexed { index, review ->
                 if (index > 0) {
@@ -3676,6 +4115,17 @@ private fun ReviewItem(review: BookReview, onTranslate: () -> Unit) {
 private fun formatRating(value: Float): String =
     String.format(Locale.US, "%.1f", value).trimEnd('0').trimEnd('.')
 
+// Honest sub-percent progress: 5/1432 must read 0.35%, not 0%.
+internal fun formatPercent(read: Int, total: Int): String {
+    if (read <= 0 || total <= 0) return "0"
+    val value = read * 100.0 / total
+    return when {
+        value < 1.0 -> String.format(Locale.US, "%.2f", value)
+        value < 10.0 -> String.format(Locale.US, "%.1f", value)
+        else -> String.format(Locale.US, "%.0f", value)
+    }
+}
+
 // Compact chapter size for the row's secondary line: B under 1 KiB, one
 // decimal below 10 KB/MB, whole numbers above. 0/unknown returns an empty
 // string and the caller never renders it.
@@ -3697,18 +4147,6 @@ internal fun formatChapterSize(bytes: Long): String {
         }
     }
 }
-
-// The READ badge is redundant next to the "last read"/"last chapter" badges:
-// it only adds information on a plain, already-read chapter.
-internal fun shouldShowReadBadge(
-    isRead: Boolean,
-    isLastRead: Boolean,
-    isLast: Boolean,
-): Boolean = isRead && !isLastRead && !isLast
-
-// Two lines let the long RU labels ("ПОСЛЕДНЯЯ ПРОЧИТАННАЯ") wrap at 200%
-// font scale instead of clipping; the ellipsis is only a last-resort guard.
-internal const val ChapterBadgeMaxLines = 2
 
 // A failed destructive action: message + the exact action to rerun. Kept in
 // screen state (not a toast) until retry succeeds or the user dismisses it.

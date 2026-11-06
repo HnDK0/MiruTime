@@ -110,9 +110,15 @@ fun MiruFilterChip(
         ink = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
         border = Color.Transparent
     } else if (selected) {
-        backing = extra.accent
-        ink = contrastInkFor(extra.accent, false, listOf(extra.onAccent))
-        border = Color.Transparent
+        if (LocalMiruOnImage.current) {
+            backing = extra.accent.copy(alpha = 0.18f)
+            ink = extra.accent
+            border = extra.accent.copy(alpha = 0.35f)
+        } else {
+            backing = extra.accent
+            ink = contrastInkFor(extra.accent, false, listOf(extra.onAccent))
+            border = Color.Transparent
+        }
     } else {
         backing = miruCardSurface()
         ink = MaterialTheme.colorScheme.onSurface
@@ -134,7 +140,7 @@ fun MiruFilterChip(
                     .clip(shape)
                     .background(backing)
                     .border(MiruSize.Stroke, border, shape)
-                    .padding(horizontal = MiruSpace.M),
+                    .padding(horizontal = MiruSpace.S),
                 contentAlignment = Alignment.Center,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -149,7 +155,7 @@ fun MiruFilterChip(
                     }
                     Text(
                         text = label,
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelSmall,
                         color = ink,
                         maxLines = 1,
                     )

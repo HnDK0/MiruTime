@@ -21,5 +21,12 @@ internal object BookPageSnapshotStore {
         }
     }
 
-    fun subtitleFor(bookUrl: String): String? = entries[bookUrl]?.subtitle
+    // Header fallback before the page resolves: never show the boilerplate
+    // "Details, chapters and actions" when a real author or source is known.
+    fun summaryFor(bookUrl: String): String? {
+        val book = entries[bookUrl] ?: return null
+        return book.subtitle
+            ?: book.author.trim().takeIf { it.isNotEmpty() && !it.equals("Unknown", true) }
+            ?: book.source.trim().takeIf { it.isNotEmpty() }
+    }
 }

@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -33,7 +35,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 
 /**
- * Compact secondary action: a 36dp visual plate on a 48dp touch slot. The one
+ * Compact secondary action: a 32dp visual plate on a 48dp touch slot. The one
  * owner of the "small quiet button" used by chapter toolbars, book actions and
  * selection strips. `progress` is a determinate queue ring, `busy` an
  * indeterminate one; neither changes `enabled`.
@@ -54,9 +56,10 @@ fun MiruCompactButton(
     selected: Boolean = false,
     muted: Boolean = false,
     ink: Color? = null,
+    trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val extra = LocalMiruExtraColors.current
-    val shape = RoundedCornerShape(MiruRadius.Chip)
+    val shape = RoundedCornerShape(MiruRadius.Control)
     val textInk = when {
         ink != null -> ink
         muted -> extra.muted
@@ -67,6 +70,7 @@ fun MiruCompactButton(
         modifier = modifier
             .heightIn(min = MiruSize.Touch)
             .defaultMinSize(minWidth = MiruSize.Touch)
+            .alpha(if (enabled) 1f else 0.55f)
             .clip(shape)
             .semantics(mergeDescendants = true) {
                 when {
@@ -86,9 +90,15 @@ fun MiruCompactButton(
                 .fillMaxWidth()
                 .height(MiruSize.ButtonCompact)
                 .clip(shape)
-                .background(miruCardSurface())
-                .border(MiruSize.Stroke, MaterialTheme.colorScheme.outline, shape)
-                .padding(horizontal = MiruSpace.M),
+                .background(
+                    if (selected) extra.accent.copy(alpha = 0.12f) else miruCardSurface(),
+                )
+                .border(
+                    MiruSize.Stroke,
+                    if (selected) extra.accent.copy(alpha = 0.40f) else MaterialTheme.colorScheme.outline,
+                    shape,
+                )
+                .padding(horizontal = MiruSpace.S),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
         ) {
@@ -122,7 +132,12 @@ fun MiruCompactButton(
                 color = textInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = if (trailing != null) Modifier.weight(1f, fill = false) else Modifier,
             )
+            if (trailing != null) {
+                Spacer(modifier = Modifier.width(MiruSpace.Xs))
+                trailing()
+            }
         }
     }
 }

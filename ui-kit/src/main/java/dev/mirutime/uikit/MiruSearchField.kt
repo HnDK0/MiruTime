@@ -2,6 +2,7 @@ package dev.mirutime.uikit
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -25,7 +27,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 
 /** String convenience adapter; IME policy and all query state belong to its caller. */
@@ -78,7 +82,20 @@ fun MiruSearchField(
                 leadingIcon = leadingIcon,
                 trailing = {
                     if (value.isNotEmpty()) {
-                        MiruIconButton(Icons.Filled.Close, clearContentDescription, onClear, enabled = enabled)
+                        Box(
+                            modifier = Modifier
+                                .size(MiruSize.Control)
+                                .clip(CircleShape)
+                                .clickable(enabled = enabled, role = Role.Button, onClick = onClear),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = clearContentDescription,
+                                tint = extra.muted,
+                                modifier = Modifier.size(MiruSize.IconCompact),
+                            )
+                        }
                     }
                     trailing?.invoke(this)
                 },
@@ -105,7 +122,7 @@ fun MiruSearchDecoration(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = MiruSize.Row)
+            .heightIn(min = MiruSize.Control)
             .background(miruCardSurface(), shape)
             .border(
                 if (focused) MiruSpace.Xxs else MiruSize.Stroke,
@@ -114,7 +131,7 @@ fun MiruSearchDecoration(
             ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(MiruSize.Touch), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(MiruSize.Control), contentAlignment = Alignment.Center) {
             if (leadingIcon != null) {
                 leadingIcon()
             } else {
@@ -122,7 +139,7 @@ fun MiruSearchDecoration(
             }
         }
         Box(
-            modifier = Modifier.weight(1f).padding(vertical = MiruSpace.S),
+            modifier = Modifier.weight(1f).padding(vertical = MiruSpace.Xs),
             contentAlignment = Alignment.CenterStart,
         ) {
             if (showPlaceholder) placeholder?.invoke()

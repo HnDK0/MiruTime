@@ -2,12 +2,17 @@ package dev.mirutime.uikit
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -16,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -32,6 +38,8 @@ fun MiruTabPill(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
+    icon: ImageVector? = null,
+    iconContentDescription: String? = null,
 ) {
     val onImage = LocalMiruOnImage.current
     val accent = LocalMiruExtraColors.current
@@ -40,6 +48,13 @@ fun MiruTabPill(
     // dark themes get a denser pill so the active shelf keeps its accent.
     val selectedPillAlpha =
         if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) 0.24f else 0.12f
+    val ink = if (selected) {
+        if (onImage) accent.accent else MaterialTheme.colorScheme.primary
+    } else if (onImage) {
+        zone.pillInk
+    } else {
+        accent.muted
+    }
     Box(
         modifier = modifier
             .heightIn(min = MiruSize.Touch)
@@ -51,12 +66,12 @@ fun MiruTabPill(
     ) {
         Box(
             modifier = Modifier
-                .height(32.dp)
-                .clip(RoundedCornerShape(MiruRadius.Chip))
+                .heightIn(min = 32.dp)
+                .clip(RoundedCornerShape(MiruRadius.Control))
                 .background(
                     if (selected) {
                         if (onImage) {
-                            accent.accent
+                            accent.accent.copy(alpha = 0.18f)
                         } else {
                             MaterialTheme.colorScheme.primary.copy(alpha = selectedPillAlpha)
                         }
@@ -66,28 +81,38 @@ fun MiruTabPill(
                         Color.Transparent
                     },
                 )
-                .padding(horizontal = MiruSpace.L),
+                .then(
+                    if (selected && onImage) {
+                        Modifier.border(1.dp, accent.accent.copy(alpha = 0.35f), RoundedCornerShape(MiruRadius.Control))
+                    } else {
+                        Modifier
+                    },
+                )
+                .padding(horizontal = MiruSpace.M),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text = label,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.labelLarge.copy(
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                ),
-                color = if (selected) {
-                    if (onImage) {
-                        contrastInkFor(accent.accent, false, listOf(accent.onAccent))
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    }
-                } else if (onImage) {
-                    zone.pillInk
-                } else {
-                    accent.muted
-                },
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xxs),
+            ) {
+                if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = iconContentDescription,
+                        tint = ink,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+                Text(
+                    text = label,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    ),
+                    color = ink,
+                )
+            }
         }
     }
 }

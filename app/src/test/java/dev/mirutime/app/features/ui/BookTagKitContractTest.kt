@@ -26,9 +26,9 @@ class BookTagKitContractTest {
     }
 
     @Test
-    fun `interactive tag keeps a 48dp touch slot`() {
+    fun `interactive tag keeps a dense-layout touch slot`() {
         val tag = source("ui-kit/src/main/java/dev/mirutime/uikit/MiruTag.kt")
         assertTrue(tag.contains("heightIn(min = if (onClick != null)"))
-        assertTrue(tag.contains("MiruSize.Touch else 32.dp"))
+        assertTrue(tag.contains("MiruSize.RowDense else MiruSize.Chip"))
     }
 }

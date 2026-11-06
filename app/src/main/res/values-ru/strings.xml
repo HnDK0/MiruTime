@@ -20,15 +20,12 @@
     <string name="header_updates_desc">Новые главы и автообновление</string>
     <string name="header_history">История</string>
     <string name="header_history_desc">Что вы читали недавно</string>
-    <string name="header_book_desc">Детали, главы и действия</string>
 
     <string name="book_btn_download">Скачать 100</string>
     <string name="book_btn_select">Выбрать</string>
     <string name="book_btn_last_read">Последняя</string>
-    <string name="book_ch_last_read_badge">ПОСЛЕДНЯЯ ПРОЧИТАННАЯ</string>
     <string name="book_ch_last_chapter_badge">ПОСЛЕДНЯЯ ГЛАВА</string>
     <string name="book_ch_read_badge">✓ ПРОЧИТАНО</string>
-    <string name="book_ch_read_cd">Прочитано</string>
 
     <!-- Extra screens sheet -->
     <string name="more_managers_title">Менеджеры</string>
@@ -145,14 +142,13 @@
     <string name="tool_epub_failed_fmt">Не удалось сохранить EPUB: %1$s</string>
     <string name="tool_epub_no_chapters">Нет глав для экспорта</string>
     <string name="tool_epub_unavailable">Экспорт EPUB здесь недоступен</string>
-    <string name="book_download_next_toast_fmt">Следующие %1$d глав в очереди (заглушка)</string>
     <string name="book_review_translate_stub">Перевод выполняется переводчиком (заглушка)</string>
-    <string name="book_reader_stub">Читалка появится вместе с треком чтения (заглушка)</string>
     <string name="book_plugin">плагин</string>
     <string name="book_by_author_fmt">автор: %1$s</string>
-    <string name="book_origin_fmt">Источник: %1$s</string>
     <string name="book_came_from_search">Глобальный поиск появится на экране поиска</string>
     <string name="book_title_copied">Название скопировано</string>
+    <string name="book_title_show_full">Показать полностью</string>
+    <string name="book_title_collapse">Свернуть</string>
     <string name="book_move_shelf">Переместить на полку</string>
     <string name="book_move_shelf_empty">Полки недоступны.</string>
     <string name="book_move_shelf_desc">Книга на полке «%1$s». Выберите другую — изменение сохранится до конца сеанса.</string>
@@ -160,6 +156,8 @@
     <string name="book_stat_ongoing">Выходит</string>
     <string name="book_stat_completed">Завершено</string>
     <string name="book_stat_none">—</string>
+    <string name="book_stat_read_fmt">прочитано %1$s</string>
+    <string name="book_stat_tts_value_fmt">TTS %1$s</string>
     <string name="book_stat_unknown">…</string>
     <string name="book_loading">Загрузка книги…</string>
     <string name="book_chapters_loading">Загрузка глав…</string>
@@ -169,11 +167,6 @@
     <string name="book_chapters_refresh_failed_desc">Источник не вернул список глав. Повторите запрос.</string>
     <string name="book_no_chapters">Нет глав</string>
     <string name="book_stat_rating">оценка</string>
-    <string name="book_stat_chapters">главы</string>
-    <string name="book_stat_read_pct_fmt">прочитано %1$d%%</string>
-    <string name="book_stat_time_labels_fmt">чтение · TTS %1$s</string>
-    <string name="book_stat_time">время чтения</string>
-    <string name="book_downloading_progress_fmt">Загрузка… %1$d%%</string>
     <string name="book_download_unavailable">Движок загрузок недоступен</string>
     <string name="book_download_deleted_fmt">Удалены загрузки глав: %1$d</string>
     <string name="book_dl_queued_fmt">В очередь добавлено глав: %1$d</string>
@@ -214,19 +207,9 @@
     <string name="book_library_pending">Обновление библиотеки…</string>
     <string name="book_cd_download_all">Скачать все</string>
     <string name="book_download_needs_library">Сначала добавьте книгу в библиотеку — загрузки хранятся там</string>
-    <string name="book_downloading_toast">Загрузка начата</string>
-    <string name="book_download_done_fmt">Скачано глав: %1$d</string>
-    <string name="book_section_about">Об этой истории</string>
-    <string name="book_section_about_desc">Официальное описание от источника</string>
     <string name="book_read_more">Читать далее</string>
     <string name="book_read_less">Свернуть</string>
-    <string name="book_section_page">Открыть страницу источника</string>
-    <string name="book_section_page_desc">Продолжите в браузере или войдите на источник</string>
-    <string name="book_open_page">Открыть страницу</string>
-    <string name="book_open_login">Войти на источник</string>
-    <string name="book_login_stub">Вход на источник — это сценарий WebView, пока заглушка</string>
     <string name="book_section_tools">Инструменты книги</string>
-    <string name="book_section_tools_desc">Действия для этой новеллы; глобальные настройки не меняются</string>
     <string name="tool_translator">Переводчик для книги</string>
     <string name="tool_translator_desc">Переводите новеллу, не меняя глобальный режим</string>
     <string name="tool_translator_mode">Режим</string>
@@ -241,16 +224,14 @@
     <string name="tool_epub_export">Экспортировать</string>
     <string name="tool_regex">Правила очистки регулярками</string>
     <string name="tool_regex_desc">Убирать мусорные строки до показа в читалке</string>
-    <string name="book_order_caps">ПОРЯДОК ЧТЕНИЯ</string>
-    <string name="book_order_newest">Сначала новые</string>
-    <string name="book_order_oldest">Сначала старые</string>
+    <string name="book_order_newest">Новые</string>
+    <string name="book_order_oldest">Старые</string>
     <string name="book_order_cd">Порядок чтения</string>
     <string name="book_chapters_header_fmt">Главы (%1$d)</string>
-    <string name="book_section_chapters_desc">Поиск по названию, массовая загрузка, выбор</string>
-    <string name="book_ch_search_hint">Поиск глав…</string>
+    <string name="book_ch_search_hint">Поиск глав (номер или название)…</string>
+    <string name="book_ch_empty_no_match">Ничего не найдено</string>
     <string name="book_cd_ch_search">Поиск глав</string>
     <string name="book_cd_ch_scrollbar">Прокрутка списка глав</string>
-    <string name="book_download_next">Скачать следующие 100</string>
     <string name="book_select_chapters">Выбрать главы</string>
     <string name="book_select_title">Выбрать главы</string>
     <string name="book_select_desc">Укажите диапазон и действие</string>
@@ -286,9 +267,7 @@
     <string name="book_chapters_marked_unread_fmt">Отмечено непрочитанными глав: %1$d</string>
     <string name="book_chapters_translations_deleted_fmt">Удалено переводов: %1$d</string>
     <string name="book_ch_translation_loading">Перевод главы</string>
-    <string name="book_ch_translation_pending">Перевод в очереди</string>
     <string name="book_ch_retry_translation">Повторить перевод</string>
-    <string name="book_section_reviews">Заметки читателей</string>
     <string name="book_section_reviews_desc">Отзывы с источника</string>
     <string name="book_reviews_empty">Отзывов пока нет</string>
     <string name="book_reviews_auto_note">В полном режиме перевода отзывы переводятся автоматически.</string>
@@ -296,14 +275,10 @@
     <string name="book_review_translated">Переведено</string>
     <string name="book_review_rating_cd_fmt">Оценка %1$s из 5</string>
     <string name="book_toast_hint_caps">Долгое нажатие на название копирует его</string>
-    <string name="book_ch_cd_read">Прочитано</string>
     <string name="book_ch_cd_downloaded">Скачано</string>
     <string name="book_ch_cd_translated">Переведено</string>
-    <string name="book_ch_cd_downloading">Скачивается</string>
-    <string name="book_ch_cd_offline">На устройстве</string>
     <string name="book_genres_more_fmt">+%1$d</string>
     <string name="book_genres_less">Свернуть</string>
-    <string name="book_chapters_summary_fmt">прочитано %1$d · скачано %2$d</string>
 
     <!-- Library -->
     <string name="lib_search_hint">Название, автор, источник…</string>
@@ -1707,21 +1682,27 @@
     <string name="video_dl_notification_title">Скачивание видео</string>
     <string name="video_dl_notification_text_fmt">В процессе: %1$d</string>
     <string name="book_action_download">Скачать…</string>
+    <string name="dl_action_stop">Стоп</string>
+    <string name="book_dl_stop_title">Остановить загрузку?</string>
+    <string name="book_dl_stop_desc">Все незавершённые главы этой книги будут отменены, частичные файлы удалены.</string>
+    <string name="book_dl_stop_confirm">Остановить</string>
+    <string name="dl_downloading_fmt">Загрузка %1$d%%</string>
     <string name="book_action_source">Сайт / Вход</string>
     <string name="book_action_options_fmt">Опции (%1$d)</string>
     <string name="book_synopsis">Описание</string>
     <string name="book_stat_downloaded_fmt">Скачано: %1$d</string>
-    <string name="book_stat_in_book">в книге</string>
-    <string name="book_stat_tts_fmt">TTS %1$s</string>
     <string name="book_tool_on">Вкл</string>
     <string name="book_tool_off">Выкл</string>
     <string name="book_tool_rules_fmt">Правил: %1$d</string>
     <string name="book_tool_chapters_fmt">Глав: %1$d</string>
-    <string name="book_notes_tab_fmt">Заметки (%1$d)</string>
+    <string name="book_notes_tab_cd_fmt">Заметки (%1$d)</string>
     <string name="book_filter_all">Все</string>
     <string name="book_filter_read">Прочитанные</string>
     <string name="book_filter_unread">Непрочитанные</string>
-    <string name="book_btn_last_read_fmt">Последняя (гл. %1$d)</string>
+    <string name="book_btn_last_read_fmt">Последняя · %1$d</string>
+    <string name="book_ch_current_badge">ТЕКУЩАЯ</string>
+    <string name="book_ch_expand_title">Показать полностью</string>
+    <string name="book_stat_read_pct_dec_fmt">%1$s%% прочитано</string>
     <string name="book_download_next_fmt">Следующие %1$d</string>
     <string name="book_download_all_unread">Все непрочитанные</string>
     <string name="book_source_panel_desc_fmt">%1$s · доступ</string>
@@ -1733,5 +1714,6 @@
     <string name="book_download_panel_desc">Следующие главы от текущей позиции</string>
     <string name="book_tool_migrate_needs_library">Нужна библиотека</string>
     <string name="book_tool_source">Источник</string>
+    <string name="book_tools_scope">Только для этого тайтла</string>
     <string name="book_tool_epub_no_chapters">Нет скачанных глав</string>
 </resources>

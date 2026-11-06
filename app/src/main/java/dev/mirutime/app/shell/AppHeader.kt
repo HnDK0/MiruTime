@@ -26,7 +26,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.Image
 import androidx.compose.ui.draw.clip
@@ -38,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruRadius
+import dev.mirutime.uikit.isLargeText
 import dev.mirutime.uikit.miruCardElevation
 import dev.mirutime.uikit.miruCardSurface
 import dev.mirutime.uikit.miruPlateBorder
@@ -110,16 +110,18 @@ fun AppHeader(
                         text = title,
                         style = MaterialTheme.typography.titleMedium,
                         color = ink,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        text = description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = soft,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    if (description.isNotBlank()) {
+                        Text(
+                            text = description,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = soft,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             },
             navigationIcon = navigation,
@@ -138,7 +140,7 @@ fun AppHeader(
     }
     // At 200% the subtitle must wrap and the plate must grow; TopAppBar's
     // fixed height would clip it. The row keeps the same nav/actions.
-    val largeText = LocalDensity.current.fontScale >= 1.5f
+    val largeText = isLargeText()
     val largeBar: @Composable () -> Unit = {
         Row(
             modifier = Modifier
@@ -157,16 +159,18 @@ fun AppHeader(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
                     color = ink,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = soft,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (description.isNotBlank()) {
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = soft,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             actions()
         }
@@ -176,7 +180,13 @@ fun AppHeader(
             .windowInsetsPadding(WindowInsets.statusBars)
             .padding(horizontal = 12.dp, vertical = 6.dp),
         shape = RoundedCornerShape(MiruRadius.Plate),
-        color = if (opaque) MaterialTheme.colorScheme.surface else miruCardSurface(),
+        // The plate floats over scrolling content: 0.96 keeps the glass tint
+        // without letting the list ghost through the title.
+        color = if (opaque) {
+            MaterialTheme.colorScheme.surface
+        } else {
+            miruCardSurface().let { if (it.alpha < 1f) it.copy(alpha = 0.96f) else it }
+        },
         shadowElevation = miruCardElevation(),
         border = miruPlateBorder(),
         tonalElevation = 0.dp,

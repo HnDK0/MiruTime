@@ -359,7 +359,7 @@ val LocalMiruCardSurface = compositionLocalOf<Color?> { null }
 // the photo theme is verified against this plate composited over BOTH black
 // and white (plateBackdrops), so whatever the picture does behind it, the
 // ink on it holds its floor. Classic themes return the plain opaque surface.
-const val PlateAlpha = 0.84f
+const val PlateAlpha = 0.90f
 private const val FrostFloor = 0.86f
 
 @Composable

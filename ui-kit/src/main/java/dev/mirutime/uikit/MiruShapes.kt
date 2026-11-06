@@ -45,23 +45,27 @@ object MiruSpace {
 val CoverInset = 4.dp
 
 // === Size grid ===
-// Rule: visual size and touch size are separate. Anything tappable has a
-// 48dp hit area; the visible shape may be smaller (40 / 36) but never the
-// hit box. Text never goes below 12sp (labels 11sp, caps only).
+// Rule: visual size and touch size are separate. Primary actions keep a
+// 48dp hit area; dense list rows keep 40dp. The visible shape may be smaller
+// (40 / 32). Text: body 12sp, labels 11sp, meta 10sp.
 object MiruSize {
     val Touch = 48.dp
-    val Control = 40.dp      // round icon buttons (visual), 12dp radius
-    val Chip = 28.dp         // filter chips (visual; at least 48dp touch)
+    val Control = 40.dp      // round icon buttons (visual), 6dp radius
+    val Chip = 24.dp         // filter chips (visual; at least 48dp touch)
     val SplitProgress = 56.dp // split-progress pill (chapters read / total)
+    val SplitProgressWide = 96.dp // stat-strip split: values fit without a slider look
     val SplitProgressHeight = 16.dp
-    val Button = 44.dp       // secondary buttons / plate pills
-    val ButtonCompact = 36.dp // compact plates (chapter toolbar, selection strip)
-    val ButtonPrimary = 52.dp // the one loud action of a screen
-    val Row = 56.dp          // single-line list rows (tools, settings)
+    val Button = 40.dp       // secondary buttons / plate pills
+    val ButtonCompact = 32.dp // compact plates (chapter toolbar, selection strip)
+    val ButtonPrimary = 48.dp // the one loud action of a screen
+    val Row = 48.dp          // single-line list rows (tools, settings)
+    val RowDense = 40.dp     // dense list rows (chapters) with compact meta
+    val IconSlot = 20.dp     // non-interactive glyph slot next to a row title
+    val NarrowContent = 340.dp // stack paired actions below this content width
     val ScreenPad = MiruSpace.L
     val Gap = MiruSpace.L    // between stacked cards
     val SectionGap = MiruSpace.Xl
-    val CardPad = MiruSpace.L
+    val CardPad = MiruSpace.M
     // Book detail cover (2:3). Bigger than a library thumb, the page's hero.
     val DetailCoverWidth = 104.dp
     val DetailCoverHeight = 152.dp

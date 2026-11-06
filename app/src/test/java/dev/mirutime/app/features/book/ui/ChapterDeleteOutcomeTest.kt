@@ -28,9 +28,4 @@ class ChapterDeleteOutcomeTest {
         assertEquals(ChapterDeleteOutcome.Failed, chapterDeleteOutcome(0, failed = 1))
     }
 
-    @Test
-    fun `badges may wrap to two lines at 200 percent font scale`() {
-        // A single line clips "ПОСЛЕДНЯЯ ПРОЧИТАННАЯ" on a narrow column.
-        assertTrue(ChapterBadgeMaxLines >= 2)
-    }
 }

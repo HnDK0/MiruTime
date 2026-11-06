@@ -291,6 +291,24 @@ private fun RangeActionChip(
 // against the bottom edge). Close reads "Cancel" because this is a decision,
 // not a browsing sheet; the filled Done button goes error-red.
 @Composable
+fun StopDownloadsSheet(
+    onClose: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AppBottomSheet(
+        title = stringResource(R.string.book_dl_stop_title),
+        description = stringResource(R.string.book_dl_stop_desc),
+        onClose = onClose,
+        closeLabel = stringResource(R.string.book_sel_cancel),
+        doneLabel = stringResource(R.string.book_dl_stop_confirm),
+        doneDanger = true,
+        onDone = onConfirm,
+    ) {
+        // The description carries the destructive consequence.
+    }
+}
+
+@Composable
 fun DeleteTranslationsSheet(
     count: Int,
     onClose: () -> Unit,

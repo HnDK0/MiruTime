@@ -1000,8 +1000,8 @@ private fun FloatingIconAction(
     }
 }
 
-/** Compact visual size; the 32dp hit box over the 28dp circle stays tight. */
-private val FloatingCompactTouch = MiruSize.Chip + MiruSpace.Xs
+/** Compact visual size; the hit box never drops below the 48dp touch floor. */
+private val FloatingCompactTouch = maxOf(MiruSize.Touch, MiruSize.Chip + MiruSpace.Xs)
 
 @Composable
 private fun FloatingCompactAction(

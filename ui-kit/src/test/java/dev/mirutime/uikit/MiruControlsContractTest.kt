@@ -15,11 +15,14 @@ class MiruControlsContractTest {
 
     @Test
     fun `button and icon roles keep visual and minimum target sizes separate`() {
-        assertEquals(52.dp, MiruButtonStyle.Primary.minVisualHeight())
-        assertEquals(52.dp, MiruButtonStyle.InversePrimary.minVisualHeight())
+        assertEquals(48.dp, MiruButtonStyle.Primary.minVisualHeight())
+        assertEquals(48.dp, MiruButtonStyle.InversePrimary.minVisualHeight())
         listOf(MiruButtonStyle.Secondary, MiruButtonStyle.Destructive, MiruButtonStyle.Text).forEach {
-            assertEquals(44.dp, it.minVisualHeight())
+            assertEquals(40.dp, it.minVisualHeight())
         }
+        assertEquals(40.dp, MiruSize.RowDense)
+        assertEquals(20.dp, MiruSize.IconSlot)
+        assertEquals(24.dp, MiruSize.Chip)
         assertEquals(48.dp, MiruSize.Touch)
         assertEquals(40.dp, MiruSize.Control)
         assertEquals(22.dp, MiruSize.Icon)
@@ -28,9 +31,9 @@ class MiruControlsContractTest {
     }
 
     @Test
-    fun `compact plate keeps a 36dp face on a 48dp slot and never derives enabled from busy`() {
+    fun `compact plate keeps a 32dp face on a 48dp slot and never derives enabled from busy`() {
         val compact = source("MiruCompactButton")
-        assertEquals(36.dp, MiruSize.ButtonCompact)
+        assertEquals(32.dp, MiruSize.ButtonCompact)
         assertEquals(48.dp, MiruSize.Touch)
         assertTrue(compact.contains("heightIn(min = MiruSize.Touch)"))
         assertTrue(compact.contains("height(MiruSize.ButtonCompact)"))

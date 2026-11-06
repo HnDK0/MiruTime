@@ -43,16 +43,16 @@ import kotlinx.coroutines.launch
 internal val ChapterScrollbarLaneWidth = MiruSize.Touch
 internal val ChapterScrollbarVisualWidth = MiruSpace.S
 
-// The rail hugs the right edge: the 8dp line fills the same 8dp gutter the
-// chapter rows leave after their trailing status icons. Any horizontal inset
-// would paint the line over those icons.
-internal val ChapterScrollbarEdgeInset = 0.dp
+// The rail is inset from the right edge so the row's trailing glyphs keep a
+// full 16dp gutter: icons end at canvas-16, the rail starts there too and
+// fills canvas-8..canvas-8.
+internal val ChapterScrollbarEdgeInset = MiruSpace.S
 
-// Row end gutter: trailing status icons stop 8dp before the right edge, so the
-// visible 8dp rail sits just outside them instead of on top of them. The 48dp
-// scrollbar lane still extends left of that gutter for drags, but it never
-// steals a tap from an icon: only the 8dp track claims touch-down.
-internal val ChapterRowEndGutter = MiruSpace.S
+// Row end gutter: trailing status icons stop 16dp before the right edge; the
+// rail is inset 8dp and occupies the remaining 8dp, so icons and line never
+// overlap. The 48dp lane still extends left for drags but only the track
+// claims touch-down.
+internal val ChapterRowEndGutter = MiruSpace.L
 
 // Which part of the right edge a touch belongs to. TRACK is the visible 8dp
 // line (tap/drag/press); LANE is the rest of the 48dp finger zone (vertical

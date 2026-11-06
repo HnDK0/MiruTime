@@ -33,7 +33,7 @@ import androidx.compose.ui.unit.sp
 import java.util.Locale
 
 // THE plate. Every block of text on a screen sits on one of these. On the
-// photo it is the 92% tinted plate (all inks are verified against it); on
+// photo it is the 84% tinted plate (all inks are verified against it); on
 // classic themes it is the plain opaque surface. Never put bare text on the
 // photo — that is how contrast got lost before.
 @Composable

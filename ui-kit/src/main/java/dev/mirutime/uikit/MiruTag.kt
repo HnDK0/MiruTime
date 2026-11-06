@@ -28,11 +28,11 @@ fun MiruTag(
     onClick: (() -> Unit)? = null,
 ) {
     val extra = LocalMiruExtraColors.current
-    val shape = RoundedCornerShape(MiruRadius.Chip)
+    val shape = RoundedCornerShape(MiruRadius.Control)
     val ink = if (emphasized) extra.accent else MaterialTheme.colorScheme.onSurface
     Box(
         modifier = modifier
-            .heightIn(min = if (onClick != null) MiruSize.Touch else 32.dp)
+            .heightIn(min = if (onClick != null) MiruSize.RowDense else MiruSize.Chip)
             .let { base ->
                 if (onClick != null) {
                     base.clip(shape).clickable(role = Role.Button, onClick = onClick)
@@ -44,7 +44,7 @@ fun MiruTag(
     ) {
         Box(
             modifier = Modifier
-                .height(24.dp)
+                .heightIn(min = 24.dp)
                 .clip(shape)
                 .then(
                     if (emphasized) {
@@ -53,12 +53,12 @@ fun MiruTag(
                         Modifier.background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f))
                     },
                 )
-                .padding(horizontal = MiruSpace.M),
+                .padding(horizontal = MiruSpace.S),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelSmall,
                 color = ink,
                 maxLines = 1,
             )

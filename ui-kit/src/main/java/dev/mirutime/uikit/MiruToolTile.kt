@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -46,6 +47,7 @@ fun MiruToolTile(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 68.dp)
+            .alpha(if (enabled) 1f else 0.55f)
             .clip(shape)
             .background(extra.accent.copy(alpha = if (enabled) 0.06f else 0.03f))
             .border(
@@ -58,6 +60,7 @@ fun MiruToolTile(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Box(
@@ -84,7 +87,7 @@ fun MiruToolTile(
             if (badge != null) {
                 Text(
                     text = badge,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MiruCardType.Meta,
                     color = if (badgeHighlighted) extra.accent else extra.muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -105,16 +108,16 @@ fun MiruToolTile(
         Column(modifier = Modifier.padding(top = MiruSpace.Xs)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelSmall,
                 color = if (enabled) MaterialTheme.colorScheme.onSurface else extra.muted,
-                maxLines = 2,
+                maxLines = if (isLargeText()) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = subtitle,
-                style = MaterialTheme.typography.labelSmall,
+                style = MiruCardType.Meta,
                 color = extra.muted,
-                maxLines = 2,
+                maxLines = if (isLargeText()) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }

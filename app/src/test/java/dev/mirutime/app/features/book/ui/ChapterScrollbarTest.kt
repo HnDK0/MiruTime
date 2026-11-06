@@ -105,10 +105,10 @@ class ChapterScrollbarTest {
     }
 
     @Test
-    fun `row icons end at the 8dp gutter and the rail starts exactly there`() {
+    fun `row icons end at the 16dp gutter and the rail starts exactly there`() {
         val canvas = 480f
         val gutter = ChapterRowEndGutter.value
-        assertEquals(8f, gutter, 0.001f)
+        assertEquals(16f, gutter, 0.001f)
 
         val line = chapterScrollbarLine(
             canvasWidthPx = canvas,
@@ -118,7 +118,7 @@ class ChapterScrollbarTest {
         val iconRight = canvas - gutter
         // Icons stop at the rail's left edge: no glyph sits on top of the line.
         assertEquals(iconRight, line.left, 0.001f)
-        assertEquals(canvas, line.left + line.width, 0.001f)
+        assertEquals(canvas - ChapterScrollbarEdgeInset.value, line.left + line.width, 0.001f)
         assertEquals(8f, line.width, 0.001f)
 
         val lane = ChapterScrollbarLaneWidth.value
@@ -128,7 +128,7 @@ class ChapterScrollbarTest {
         // the lane is left to the row.
         assertEquals(
             ChapterScrollbarTouchZone.TRACK,
-            chapterScrollbarTouchZone(canvas - 1f, canvas, lane, visual, inset),
+            chapterScrollbarTouchZone(canvas - inset - 1f, canvas, lane, visual, inset),
         )
         assertEquals(
             ChapterScrollbarTouchZone.LANE,

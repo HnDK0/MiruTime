@@ -18,6 +18,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,27 +28,29 @@ import androidx.compose.ui.unit.dp
 import java.util.Locale
 
 // Source/plugin badge: a compact uppercase chip with a status dot and an
-// outbound glyph. The visual face is 22dp; the touch slot is the full 48dp.
+// outbound glyph. The visual face is 20dp; the dense touch slot is 40dp.
 @Composable
 fun MiruSourceChip(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    contentAlignment: Alignment = Alignment.Center,
 ) {
     val extra = LocalMiruExtraColors.current
     val shape = RoundedCornerShape(MiruRadius.Badge)
+    val label = remember(text) { text.uppercase(Locale.ROOT) }
     Box(
         modifier = modifier
-            .heightIn(min = MiruSize.Touch)
+            .heightIn(min = MiruSize.RowDense)
             .clip(shape)
             .clickable(role = Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center,
+        contentAlignment = contentAlignment,
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
             modifier = Modifier
-                .height(22.dp)
+                .heightIn(min = 20.dp)
                 .clip(shape)
                 .background(extra.accent.copy(alpha = 0.14f))
                 .border(1.dp, extra.accent.copy(alpha = 0.28f), shape)
@@ -60,7 +63,7 @@ fun MiruSourceChip(
                     .background(extra.accent),
             )
             Text(
-                text = text.uppercase(Locale.ROOT),
+                text = label,
                 style = MaterialTheme.typography.labelSmall,
                 color = extra.accent,
                 maxLines = 1,
