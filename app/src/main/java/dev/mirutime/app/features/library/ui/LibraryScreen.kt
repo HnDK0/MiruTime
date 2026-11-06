@@ -32,12 +32,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
@@ -82,6 +81,7 @@ import dev.mirutime.uikit.withImageShadow
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.app.design.components.BookCover
 import dev.mirutime.app.design.components.CardStylePicker
+import dev.mirutime.app.design.components.CatalogSearchField
 import dev.mirutime.uikit.CardProgressBar
 import dev.mirutime.uikit.ChipRail
 import dev.mirutime.uikit.MiruFilterChip
@@ -625,55 +625,23 @@ fun LibraryScreen(
                 }
             }
             item {
-                // Search in BOTH themes: the same field shape/sizes (one style
-                // branch — on the photo only the backing color/alpha differs via
-                // the frost); the filter button is its own sibling control.
+                // The exact Finder / Global Search field (one shared component):
+                // 40dp, filled, clear button. The filter button stays its own
+                // sibling control.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
                 ) {
-                    OnImageFrost(
+                    val focusManager = LocalFocusManager.current
+                    CatalogSearchField(
+                        value = query,
+                        onValueChange = { query = it },
+                        placeholder = stringResource(R.string.lib_search_hint),
+                        onClear = { query = "" },
+                        onSearch = { focusManager.clearFocus() },
                         modifier = Modifier.weight(1f),
-                        shape = MaterialTheme.shapes.small,
-                    ) {
-                        OutlinedTextField(
-                            value = query,
-                            onValueChange = { query = it },
-                            // Ink follows the frost on the photo (light on dark
-                            // backing); classic field colors stay verbatim.
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(
-                                color = MaterialTheme.colorScheme.onSurface,
-                            ),
-                            placeholder = {
-                                Text(
-                                    text = stringResource(R.string.lib_search_hint),
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        color = if (LocalMiruOnImage.current) {
-                                            MaterialTheme.colorScheme.onSurface
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                    ),
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Filled.Search,
-                                    contentDescription = null,
-                                    tint = if (LocalMiruOnImage.current) {
-                                        MaterialTheme.colorScheme.onSurface
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                            },
-                            singleLine = true,
-                            // ONE shape for every theme (moderate 12dp, no ovals).
-                            shape = MaterialTheme.shapes.small,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                    // Photo: own frost inside the shared button; classic: plain 48→36dp.
+                    )
                     MiruRoundIconButton(
                         icon = Icons.Filled.Tune,
                         contentDescription = stringResource(R.string.lib_cd_filters),

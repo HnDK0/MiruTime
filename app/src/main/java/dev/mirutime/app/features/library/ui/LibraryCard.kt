@@ -39,7 +39,8 @@ fun LibraryCard(
 ) {
     val catalog = compactInfo
     val kind = if (showTypeChip && !catalog) book.contentType.toMiruKind() else null
-    val read = if (catalog) null else book.progressChapter
+    // Card progress is the finished-chapter count, never the saved position.
+    val read = if (catalog) null else book.readChapters
     val total = if (catalog) null else book.totalChapters
     val effectiveMembership = membership
         ?: if (!badge.isNullOrBlank()) MiruMembershipBadge(sameSource = true, sourceCount = 1) else null
@@ -63,7 +64,7 @@ fun LibraryCard(
         totalChapters = total,
         newChapters = if (catalog) 0 else book.newChapters,
         progressDescription = if (read != null && total != null) {
-            stringResource(R.string.card_progress_cd_fmt, read, total)
+            stringResource(R.string.card_progress_cd_fmt, read.coerceIn(0, total), total)
         } else {
             ""
         },

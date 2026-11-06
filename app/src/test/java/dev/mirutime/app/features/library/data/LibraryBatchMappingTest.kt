@@ -44,10 +44,12 @@ class LibraryBatchMappingTest {
 
         assertEquals(120, mapped.size)
         assertEquals((1L % 6).toInt(), mapped.first().readChapters)
-        // Card progress is position-based: the saved last-read chapter wins,
-        // and falls back to the max read index only when no chapter was saved.
+        // The saved last-read chapter still drives Continue...
         assertEquals(7, mapped[2].progressChapter)
         assertEquals(4, mapped[3].progressChapter)
+        // ...while the card progress bar reads the finished-chapter count.
+        assertEquals(3, mapped[2].readChapters)
+        assertEquals(4, mapped[3].readChapters)
         assertEquals(listOf("tag-2"), mapped[1].genres)
         assertEquals(listOf("fallback"), mapped[2].genres)
         assertEquals("legacy-3", mapped[2].coverUrl)

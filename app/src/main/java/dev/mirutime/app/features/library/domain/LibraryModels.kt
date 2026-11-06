@@ -55,8 +55,8 @@ data class LibraryBook(
     val totalChapters: Int,
     val readChapters: Int,
     // 1-based chapter the saved reading position points at (0 = untouched).
-    // Cards show this as reading progress so they agree with Continue, which
-    // restores the saved chapter/offset rather than the finished-chapter count.
+    // Drives the Continue label and the resume card only; library cards show
+    // [readChapters] of [totalChapters] so the bar is a reading-progress bar.
     val progressChapter: Int = readChapters,
     val hasUpdate: Boolean,
     val shelfId: String,
