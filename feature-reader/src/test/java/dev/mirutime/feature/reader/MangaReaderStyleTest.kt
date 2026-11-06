@@ -14,7 +14,7 @@ class MangaReaderStyleTest {
         assertEquals(MangaReadingDirection.Ltr, s.direction)
         assertFalse(s.tapZoneInvert)
         assertTrue(s.showPageCounter)
-        assertEquals(MangaWebtoonPadding.Medium, s.webtoonPadding)
+        assertEquals(MangaWebtoonPadding.None, s.webtoonPadding)
         assertFalse(s.doubleTapMenu)
         assertEquals(1f, s.brightness, 0.001f)
         assertEquals(MangaColorFilter.None, s.colorFilter)
@@ -47,7 +47,7 @@ class MangaReaderStyleTest {
         assertEquals(MangaReadingDirection.Rtl, parseMangaReadingDirection("Rtl"))
         assertEquals(MangaColorFilter.None, parseMangaColorFilter("noir"))
         assertEquals(MangaColorFilter.Sepia, parseMangaColorFilter("sepia"))
-        assertEquals(MangaWebtoonPadding.Medium, parseMangaWebtoonPadding(null))
+        assertEquals(MangaWebtoonPadding.None, parseMangaWebtoonPadding(null))
         assertEquals(MangaWebtoonPadding.Large, parseMangaWebtoonPadding("large"))
     }
 

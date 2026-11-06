@@ -17,7 +17,7 @@ data class MangaReaderStyle(
     val direction: MangaReadingDirection = MangaReadingDirection.Ltr,
     val tapZoneInvert: Boolean = false,
     val showPageCounter: Boolean = true,
-    val webtoonPadding: MangaWebtoonPadding = MangaWebtoonPadding.Medium,
+    val webtoonPadding: MangaWebtoonPadding = MangaWebtoonPadding.None,
     // Double tap opens the menu instead of zooming; mutually exclusive with zoom.
     val doubleTapMenu: Boolean = false,
     val brightness: Float = 1f,
@@ -92,7 +92,7 @@ fun parseMangaColorFilter(raw: String?): MangaColorFilter =
 
 fun parseMangaWebtoonPadding(raw: String?): MangaWebtoonPadding =
     MangaWebtoonPadding.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
-        ?: MangaWebtoonPadding.Medium
+        ?: MangaWebtoonPadding.None
 
 fun parseMangaPagedNavigation(raw: String?): MangaPagedNavigation =
     MangaPagedNavigation.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
