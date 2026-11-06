@@ -14,10 +14,12 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import dev.mirutime.app.di.host.AndroidSystemInfo
+import dev.mirutime.core.log.MiruLog
 import java.io.File
 import org.json.JSONArray
 import org.json.JSONException
 import java.net.URL
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -113,7 +115,7 @@ fun saveBgLibrary(context: Context, items: List<String>) {
 private fun bgDir(context: Context) = File(context.filesDir, BG_DIR)
 
 // Stored name = hash of the ORIGINAL bytes (same picture -> same file).
-private fun bgFileName(digest: ByteArray): String =
+internal fun bgFileName(digest: ByteArray): String =
     digest.take(8).joinToString("") { "%02x".format(it) } + ".jpg"
 
 // Where importBackground stored a picture whose ORIGINAL bytes' SHA-256 is
@@ -138,31 +140,80 @@ internal fun fileDigest(file: File): ByteArray? = runCatching {
 private fun isLocalBg(source: String) =
     !source.startsWith("http", ignoreCase = true) && !source.startsWith("content:")
 
-// Copies a picked file / link into app storage and returns its local path, or
-// null when it cannot be read or is not an image. Same picture -> same path.
-suspend fun importBackground(context: Context, source: String): String? =
+enum class BackgroundImportFailure { InvalidScheme, Unreadable, TooLarge, NotAnImage, StoreFailed }
+
+sealed interface BackgroundImportResult {
+    data class Success(val path: String) : BackgroundImportResult
+    data class Failure(val reason: BackgroundImportFailure) : BackgroundImportResult
+}
+
+// User-pasted links arrive with stray whitespace, HTML entities or no scheme.
+// Only schemes the importer can actually read are accepted; everything else is
+// a visible validation error instead of a silent no-op.
+internal fun normalizeBackgroundUrl(raw: String): String? {
+    val cleaned = raw
+        .replace("\r", "")
+        .replace("\n", "")
+        .replace("&amp;", "&")
+        .trim()
+        .trim('<', '>')
+        .trim()
+    if (cleaned.isEmpty()) return null
+    val lower = cleaned.lowercase()
+    if (lower.startsWith("data:") || lower.startsWith("blob:")) return null
+    val withScheme = when {
+        lower.startsWith("http://") || lower.startsWith("https://") -> cleaned
+        lower.startsWith("content://") -> cleaned
+        lower.contains("://") -> return null
+        else -> "https://$cleaned"
+    }
+    val host = withScheme.substringAfter("://").substringBefore('/').substringBefore('?')
+    return withScheme.takeIf { host.isNotBlank() }
+}
+
+internal fun bytesDigest(bytes: ByteArray): ByteArray =
+    java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+
+private fun backgroundHost(source: String): String =
+    runCatching { java.net.URI(source).host }.getOrNull().orEmpty()
+
+private fun importFailure(source: String, reason: BackgroundImportFailure): BackgroundImportResult.Failure {
+    MiruLog.event("theme", "bg_import", "ok" to false, "reason" to reason.name, "host" to backgroundHost(source))
+    return BackgroundImportResult.Failure(reason)
+}
+
+// Copies a picked file / link into app storage. The stored name is the SHA-256
+// of the ORIGINAL bytes (same picture -> same file); a raw-bytes prefix would
+// collide for every JPEG/PNG. Failures carry a reason for the sheet.
+suspend fun importBackground(context: Context, source: String): BackgroundImportResult =
     withContext(Dispatchers.IO) {
         try {
-            val bytes = openBgStream(context.contentResolver, source)?.use { input ->
+            val normalized = normalizeBackgroundUrl(source)
+                ?: return@withContext importFailure(source, BackgroundImportFailure.InvalidScheme)
+            val bytes = openBgStream(context.contentResolver, normalized)?.use { input ->
                 val out = java.io.ByteArrayOutputStream()
                 val buf = ByteArray(64 * 1024)
                 while (true) {
                     val n = input.read(buf)
                     if (n < 0) break
                     out.write(buf, 0, n)
-                    if (out.size() > BG_MAX_BYTES) return@withContext null
+                    if (out.size() > BG_MAX_BYTES) {
+                        return@withContext importFailure(source, BackgroundImportFailure.TooLarge)
+                    }
                 }
                 out.toByteArray()
-            } ?: return@withContext null
+            } ?: return@withContext importFailure(source, BackgroundImportFailure.Unreadable)
 
-            val name = bgFileName(bytes)
+            val name = bgFileName(bytesDigest(bytes))
             val dir = bgDir(context).apply { mkdirs() }
             val target = File(dir, name)
-            if (target.exists()) return@withContext target.absolutePath
+            if (target.exists()) return@withContext BackgroundImportResult.Success(target.absolutePath)
 
             val probe = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, probe)
-            if (probe.outWidth <= 0 || probe.outHeight <= 0) return@withContext null
+            if (probe.outWidth <= 0 || probe.outHeight <= 0) {
+                return@withContext importFailure(source, BackgroundImportFailure.NotAnImage)
+            }
             var sample = 1
             while (probe.outWidth / sample > BG_STORE_SIDE || probe.outHeight / sample > BG_STORE_SIDE) {
                 sample *= 2
@@ -172,17 +223,20 @@ suspend fun importBackground(context: Context, source: String): String? =
                 0,
                 bytes.size,
                 BitmapFactory.Options().apply { inSampleSize = sample },
-            ) ?: return@withContext null
+            ) ?: return@withContext importFailure(source, BackgroundImportFailure.NotAnImage)
             val tmp = File(dir, "$name.tmp")
             tmp.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
             bmp.recycle()
             if (!tmp.renameTo(target)) {
                 tmp.delete()
-                return@withContext null
+                return@withContext importFailure(source, BackgroundImportFailure.StoreFailed)
             }
-            target.absolutePath
+            MiruLog.event("theme", "bg_import", "ok" to true, "host" to backgroundHost(source))
+            BackgroundImportResult.Success(target.absolutePath)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
-            null
+            importFailure(source, BackgroundImportFailure.StoreFailed)
         }
     }
 

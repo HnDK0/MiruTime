@@ -1,6 +1,5 @@
 package dev.mirutime.app.design.components
 
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -67,6 +66,9 @@ import dev.mirutime.app.design.dedupePresets
 import dev.mirutime.app.design.applyPreset
 import dev.mirutime.app.design.loadCachedPresetBackgrounds
 import dev.mirutime.app.design.presetFile
+import dev.mirutime.app.design.BackgroundImportFailure
+import dev.mirutime.app.design.BackgroundImportResult
+import dev.mirutime.app.design.normalizeBackgroundUrl
 import dev.mirutime.app.design.refreshPresetBackgrounds
 import dev.mirutime.app.design.rememberCachedPresetPreview
 import dev.mirutime.uikit.MiruTheme
@@ -691,18 +693,23 @@ private fun AddBackgroundSheet(
     val scope = rememberCoroutineScope()
     var link by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    val failed = stringResource(UiKitR.string.theme_custom_failed)
+    var error by remember { mutableStateOf<BackgroundImportFailure?>(null) }
 
-    fun startImport(source: String) {
+    fun startImport(raw: String) {
         if (busy) return
+        val source = normalizeBackgroundUrl(raw)
+        if (source == null) {
+            error = BackgroundImportFailure.InvalidScheme
+            return
+        }
+        error = null
         busy = true
         scope.launch {
-            val local = importBackground(context, source)
+            val result = importBackground(context, source)
             busy = false
-            if (local != null) {
-                onPick(local)
-            } else {
-                Toast.makeText(context, failed, Toast.LENGTH_SHORT).show()
+            when (result) {
+                is BackgroundImportResult.Success -> onPick(result.path)
+                is BackgroundImportResult.Failure -> error = result.reason
             }
         }
     }
@@ -717,17 +724,29 @@ private fun AddBackgroundSheet(
         onClose = onClose,
         doneLabel = stringResource(UiKitR.string.theme_custom_ok),
         doneEnabled = !busy && link.isNotBlank(),
-        onDone = { startImport(link.trim()) },
+        doneBusy = busy,
+        onDone = { startImport(link) },
     ) {
         OutlinedTextField(
             value = link,
-            onValueChange = { link = it },
+            onValueChange = {
+                link = it
+                error = null
+            },
             placeholder = { Text(text = stringResource(UiKitR.string.theme_custom_link_hint)) },
             singleLine = true,
             enabled = !busy,
             shape = MaterialTheme.shapes.small,
             modifier = Modifier.fillMaxWidth(),
         )
+        error?.let { reason ->
+            Spacer(modifier = Modifier.height(MiruSpace.Xs))
+            Text(
+                text = stringResource(reason.messageRes()),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         Spacer(modifier = Modifier.height(12.dp))
         // Sheet action buttons ride the one size grid: 36dp.
         OutlinedButton(
@@ -742,4 +761,12 @@ private fun AddBackgroundSheet(
         }
         Spacer(modifier = Modifier.height(4.dp))
     }
+}
+
+private fun BackgroundImportFailure.messageRes(): Int = when (this) {
+    BackgroundImportFailure.InvalidScheme -> UiKitR.string.theme_custom_err_link
+    BackgroundImportFailure.Unreadable -> UiKitR.string.theme_custom_err_fetch
+    BackgroundImportFailure.StoreFailed -> UiKitR.string.theme_custom_failed
+    BackgroundImportFailure.TooLarge -> UiKitR.string.theme_custom_err_size
+    BackgroundImportFailure.NotAnImage -> UiKitR.string.theme_custom_err_image
 }

@@ -67,6 +67,10 @@
     <string name="theme_custom_item_fmt">Фон %1$d</string>
     <string name="theme_preset_item_fmt">Пресет %1$d</string>
     <string name="theme_custom_failed">Не удалось использовать картинку. Проверьте файл или ссылку.</string>
+    <string name="theme_custom_err_link">Неподдерживаемая ссылка. Нужна ссылка http(s) на картинку или файл.</string>
+    <string name="theme_custom_err_fetch">Не удалось загрузить картинку. Проверьте ссылку и соединение.</string>
+    <string name="theme_custom_err_size">Картинка больше 25 МБ.</string>
+    <string name="theme_custom_err_image">По ссылке не картинка.</string>
     <string name="theme_bg_delete_title">Удалить фон?</string>
     <string name="theme_bg_delete_desc">Сохранённая картинка будет удалена из приложения. Если она сейчас активна, тема вернётся на «Бумагу».</string>
     <string name="theme_bg_delete">Удалить</string>

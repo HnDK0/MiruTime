@@ -67,6 +67,10 @@
     <string name="theme_custom_item_fmt">Background %1$d</string>
     <string name="theme_preset_item_fmt">Preset %1$d</string>
     <string name="theme_custom_failed">Could not use this picture. Check the file or link.</string>
+    <string name="theme_custom_err_link">Unsupported link. Use an http(s) image link or a file.</string>
+    <string name="theme_custom_err_fetch">Could not load the picture. Check the link and connection.</string>
+    <string name="theme_custom_err_size">The picture is larger than 25 MB.</string>
+    <string name="theme_custom_err_image">That link is not an image.</string>
     <string name="theme_bg_delete_title">Delete background?</string>
     <string name="theme_bg_delete_desc">The saved picture will be removed from the app. If it is active now, the theme switches back to Paper.</string>
     <string name="theme_bg_delete">Delete</string>
