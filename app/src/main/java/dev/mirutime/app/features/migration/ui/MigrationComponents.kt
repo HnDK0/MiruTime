@@ -90,7 +90,16 @@ import dev.mirutime.uikit.SettingsSwitchRow
 
 sealed interface MigrationSearchUi {
     data object Idle : MigrationSearchUi
-    data object Searching : MigrationSearchUi
+
+    // Partial results: every source answer lands here as it arrives, so the
+    // list grows while the rest of the sources are still searching.
+    data class Searching(
+        val hits: List<MigrationSearchHit> = emptyList(),
+        val done: Int = 0,
+        val total: Int = 0,
+        val failedSources: List<String> = emptyList(),
+    ) : MigrationSearchUi
+
     data class Ready(val result: MigrationSearchResult) : MigrationSearchUi
     data class Failed(val message: String) : MigrationSearchUi
 }
@@ -349,9 +358,22 @@ fun MigrationGroupedResults(
 ) {
     when (state) {
         MigrationSearchUi.Idle -> Unit
-        MigrationSearchUi.Searching -> MigrationLoadingRow(
-            stringResource(R.string.migration_searching),
-        )
+        is MigrationSearchUi.Searching -> {
+            MigrationLoadingRow(
+                stringResource(
+                    R.string.migration_search_progress_fmt,
+                    state.done,
+                    state.total,
+                ),
+            )
+            MigrationFlatHitGroups(
+                hits = state.hits,
+                selectedBookUrl = selectedBookUrl,
+                selectedChapterCount = selectedChapterCount,
+                onSelect = onSelect,
+            )
+            MigrationFlatPartialNotice(state.failedSources)
+        }
         is MigrationSearchUi.Failed -> MigrationErrorNotice(
             message = state.message.ifBlank {
                 stringResource(R.string.migration_unknown_error)
@@ -366,29 +388,48 @@ fun MigrationGroupedResults(
                     Text(stringResource(R.string.migration_retry))
                 }
             } else {
-                groups.forEach { group ->
-                    MigrationSectionLabel(group.sourceName)
-                    MigrationResultTiles(
-                        hits = group.hits,
-                        selectedBookUrl = selectedBookUrl,
-                        selectedChapterCount = selectedChapterCount,
-                        onSelect = onSelect,
-                    )
-                }
-            }
-            if (state.result.failedSources.isNotEmpty()) {
-                Text(
-                    text = stringResource(
-                        R.string.migration_search_partial_fmt,
-                        state.result.failedSources.joinToString(", "),
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = LocalMiruExtraColors.current.muted,
-                    modifier = Modifier.padding(top = MiruSpace.S),
+                MigrationFlatHitGroups(
+                    hits = state.result.hits,
+                    selectedBookUrl = selectedBookUrl,
+                    selectedChapterCount = selectedChapterCount,
+                    onSelect = onSelect,
                 )
             }
+            MigrationFlatPartialNotice(state.result.failedSources)
         }
     }
+}
+
+@Composable
+private fun MigrationFlatHitGroups(
+    hits: List<MigrationSearchHit>,
+    selectedBookUrl: String?,
+    selectedChapterCount: Int?,
+    onSelect: (MigrationSearchHit) -> Unit,
+) {
+    groupMigrationHits(hits).forEach { group ->
+        MigrationSectionLabel(group.sourceName)
+        MigrationResultTiles(
+            hits = group.hits,
+            selectedBookUrl = selectedBookUrl,
+            selectedChapterCount = selectedChapterCount,
+            onSelect = onSelect,
+        )
+    }
+}
+
+@Composable
+private fun MigrationFlatPartialNotice(failedSources: List<String>) {
+    if (failedSources.isEmpty()) return
+    Text(
+        text = stringResource(
+            R.string.migration_search_partial_fmt,
+            failedSources.joinToString(", "),
+        ),
+        style = MaterialTheme.typography.bodySmall,
+        color = LocalMiruExtraColors.current.muted,
+        modifier = Modifier.padding(top = MiruSpace.S),
+    )
 }
 
 // === Target + options ===

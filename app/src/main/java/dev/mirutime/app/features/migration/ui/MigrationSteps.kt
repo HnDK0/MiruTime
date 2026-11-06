@@ -44,6 +44,7 @@ import dev.mirutime.app.design.components.BookCover
 import dev.mirutime.app.design.components.CatalogSearchField
 import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.app.features.migration.domain.MigrationCandidateBook
+import dev.mirutime.app.features.migration.domain.MigrationSearchHit
 import dev.mirutime.app.features.migration.domain.MigrationLibrarySource
 import dev.mirutime.app.features.migration.domain.filterMigrationBooks
 import dev.mirutime.app.features.migration.domain.groupMigrationHits
@@ -424,10 +425,23 @@ private fun MigrationSingleSearchResults(
 ) {
     when (val search = state.searchUi) {
         MigrationSearchUi.Idle -> Unit
-        MigrationSearchUi.Searching -> MigrationStateCard(
-            title = stringResource(R.string.migration_searching),
-            loading = true,
-        )
+        is MigrationSearchUi.Searching -> {
+            MigrationStateCard(
+                title = stringResource(R.string.migration_searching),
+                description = stringResource(
+                    R.string.migration_search_progress_fmt,
+                    search.done,
+                    search.total,
+                ),
+                loading = true,
+            )
+            MigrationCardHitGroups(
+                hits = search.hits,
+                state = state,
+                onOpenCatalogue = onOpenCatalogue,
+            )
+            MigrationPartialNotice(search.failedSources)
+        }
         is MigrationSearchUi.Failed -> MigrationErrorCard(
             message = search.message.ifBlank {
                 stringResource(R.string.migration_unknown_error)
@@ -445,38 +459,55 @@ private fun MigrationSingleSearchResults(
                     onAction = state::search,
                 )
             } else {
-                groups.forEach { group ->
-                    MiruSectionCard(
-                        title = group.sourceName,
-                        description = stringResource(
-                            R.string.migration_results_count_fmt,
-                            group.hits.size,
-                        ),
-                        actionLabel = stringResource(R.string.finder_gs_open_catalogue),
-                        onAction = { onOpenCatalogue(group.sourceId, state.query) },
-                        contentPadding = PaddingValues(MiruSpace.S),
-                    ) {
-                        MigrationResultTiles(
-                            hits = group.hits,
-                            selectedBookUrl = state.target?.bookUrl,
-                            selectedChapterCount = state.target?.chapters?.size,
-                            onSelect = state::select,
-                        )
-                    }
-                }
-            }
-            if (search.result.failedSources.isNotEmpty()) {
-                Text(
-                    text = stringResource(
-                        R.string.migration_search_partial_fmt,
-                        search.result.failedSources.joinToString(", "),
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = LocalMiruExtraColors.current.muted,
+                MigrationCardHitGroups(
+                    hits = search.result.hits,
+                    state = state,
+                    onOpenCatalogue = onOpenCatalogue,
                 )
             }
+            MigrationPartialNotice(search.result.failedSources)
         }
     }
+}
+
+@Composable
+private fun MigrationCardHitGroups(
+    hits: List<MigrationSearchHit>,
+    state: MigrationSingleState,
+    onOpenCatalogue: (String, String) -> Unit,
+) {
+    groupMigrationHits(hits).forEach { group ->
+        MiruSectionCard(
+            title = group.sourceName,
+            description = stringResource(
+                R.string.migration_results_count_fmt,
+                group.hits.size,
+            ),
+            actionLabel = stringResource(R.string.finder_gs_open_catalogue),
+            onAction = { onOpenCatalogue(group.sourceId, state.query) },
+            contentPadding = PaddingValues(MiruSpace.S),
+        ) {
+            MigrationResultTiles(
+                hits = group.hits,
+                selectedBookUrl = state.target?.bookUrl,
+                selectedChapterCount = state.target?.chapters?.size,
+                onSelect = state::select,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MigrationPartialNotice(failedSources: List<String>) {
+    if (failedSources.isEmpty()) return
+    Text(
+        text = stringResource(
+            R.string.migration_search_partial_fmt,
+            failedSources.joinToString(", "),
+        ),
+        style = MaterialTheme.typography.bodySmall,
+        color = LocalMiruExtraColors.current.muted,
+    )
 }
 
 // Step 3 for many books: per-book search status, then the grouped matches.

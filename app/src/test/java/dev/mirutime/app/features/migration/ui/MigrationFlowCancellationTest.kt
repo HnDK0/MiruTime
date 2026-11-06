@@ -229,6 +229,70 @@ class MigrationFlowCancellationTest {
         }
     }
 
+    @Test
+    fun `partial hits appear before the slow source answers`() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+        try {
+            val slowGate = CompletableDeferred<Unit>()
+            val slowStarted = CompletableDeferred<Unit>()
+            val finder = object : FinderDataProvider by FakeFinderDataProvider() {
+                override suspend fun searchSource(sourceId: String, query: String): List<CatalogBook> {
+                    if (sourceId == "slow") {
+                        slowStarted.complete(Unit)
+                        slowGate.await()
+                    }
+                    return listOf(hit("$sourceId-$query"))
+                }
+            }
+            val state = MigrationSingleState(candidate(1, "https://old/1", "Book One"), graph(finder), scope)
+            state.syncSources(listOf(source("fast"), source("slow")))
+            state.query = "q"
+
+            state.search()
+            withTimeout(2_000) { slowStarted.await() }
+            await { (state.searchUi as? MigrationSearchUi.Searching)?.hits?.isNotEmpty() == true }
+
+            val partial = state.searchUi as MigrationSearchUi.Searching
+            assertEquals(listOf("fast-q"), partial.hits.map { it.book.title })
+            assertEquals(1, partial.done)
+            assertEquals(2, partial.total)
+
+            slowGate.complete(Unit)
+            await { state.searchUi is MigrationSearchUi.Ready }
+            val ready = state.searchUi as MigrationSearchUi.Ready
+            assertEquals(setOf("fast-q", "slow-q"), ready.result.hits.map { it.book.title }.toSet())
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `a timed out source is reported as failed and the rest survive`() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+        try {
+            val finder = object : FinderDataProvider by FakeFinderDataProvider() {
+                override suspend fun searchSource(sourceId: String, query: String): List<CatalogBook> {
+                    if (sourceId == "slow") {
+                        withTimeout(50) { delay(5_000) }
+                    }
+                    return listOf(hit("$sourceId-$query"))
+                }
+            }
+            val state = MigrationSingleState(candidate(1, "https://old/1", "Book One"), graph(finder), scope)
+            state.syncSources(listOf(source("fast"), source("slow")))
+            state.query = "q"
+
+            state.search()
+            await { state.searchUi is MigrationSearchUi.Ready }
+
+            val ready = state.searchUi as MigrationSearchUi.Ready
+            assertEquals(listOf("fast-q"), ready.result.hits.map { it.book.title })
+            assertEquals(listOf("Source slow"), ready.result.failedSources)
+        } finally {
+            scope.cancel()
+        }
+    }
+
     private suspend fun await(timeoutMs: Long = 3_000, condition: () -> Boolean) {
         withTimeout(timeoutMs) {
             while (!condition()) delay(5)

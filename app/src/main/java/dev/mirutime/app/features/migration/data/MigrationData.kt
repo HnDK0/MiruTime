@@ -3,6 +3,7 @@ package dev.mirutime.app.features.migration.data
 import dev.mirutime.app.features.book.data.BookDataProvider
 import dev.mirutime.app.features.book.domain.BookDetails
 import dev.mirutime.app.features.finder.data.FinderDataProvider
+import dev.mirutime.app.features.finder.domain.CatalogBook
 import dev.mirutime.app.features.finder.domain.CatalogSource
 import dev.mirutime.app.features.migration.domain.MigrationCandidateBook
 import dev.mirutime.app.features.migration.domain.MigrationSearchHit
@@ -17,8 +18,11 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 
 /**
  * One global cap for every plugin call migration makes (search, target
@@ -72,24 +76,49 @@ class MigrationSearch(
         val failed = mutableListOf<String>()
         answers.forEach { (source, result) ->
             result.onSuccess { books ->
-                books.forEach { book ->
-                    hits += MigrationSearchHit(
-                        sourceId = source.id,
-                        sourceName = source.name,
-                        book = book,
-                    )
-                }
+                books.forEach { book -> hits += migrationHit(source, book) }
             }.onFailure { error ->
                 if (error is CancellationException) throw error
                 failed += source.name
             }
         }
         return MigrationSearchResult(
-            hits = hits.distinctBy { it.sourceId to it.book.bookUrl },
+            hits = hits.dedupedMigrationHits(),
             failedSources = failed,
         )
     }
+
+    /**
+     * One source of the same search. The UI fans out per source (like the
+     * global search) so tiles appear as answers land; [search] stays the
+     * deterministic aggregate for the mass flow.
+     */
+    suspend fun searchOne(
+        source: CatalogSource,
+        query: String,
+    ): Result<List<CatalogBook>> {
+        val clean = query.trim()
+        if (clean.isEmpty()) return Result.success(emptyList())
+        return withContext(Dispatchers.IO) {
+            try {
+                Result.success(gate.withPermit { finder.searchSource(source.id, clean) })
+            } catch (cancelled: CancellationException) {
+                // Cancelling the caller must propagate; a source-level timeout
+                // (e.g. TimeoutCancellationException) is that source's failure.
+                currentCoroutineContext().ensureActive()
+                Result.failure(cancelled)
+            } catch (error: Throwable) {
+                Result.failure(error)
+            }
+        }
+    }
 }
+
+internal fun migrationHit(source: CatalogSource, book: CatalogBook): MigrationSearchHit =
+    MigrationSearchHit(sourceId = source.id, sourceName = source.name, book = book)
+
+internal fun List<MigrationSearchHit>.dedupedMigrationHits(): List<MigrationSearchHit> =
+    distinctBy { it.sourceId to it.book.bookUrl }
 
 /**
  * Resolves a chosen search hit into the coordinator's target. It performs no

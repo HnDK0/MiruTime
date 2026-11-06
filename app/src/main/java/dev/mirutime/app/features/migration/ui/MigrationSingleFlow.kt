@@ -16,6 +16,9 @@ import dev.mirutime.app.di.MigrationGraph
 import dev.mirutime.app.features.finder.domain.CatalogSource
 import dev.mirutime.app.features.migration.domain.MigrationCandidateBook
 import dev.mirutime.app.features.migration.domain.MigrationSearchHit
+import dev.mirutime.app.features.migration.domain.MigrationSearchResult
+import dev.mirutime.app.features.migration.data.dedupedMigrationHits
+import dev.mirutime.app.features.migration.data.migrationHit
 import dev.mirutime.app.features.migration.domain.MigrationTargetDetails
 import dev.mirutime.app.features.migration.domain.autoMigrationSearchQuery
 import dev.mirutime.data.library.migration.BookMigrationOptions
@@ -24,9 +27,11 @@ import dev.mirutime.data.library.migration.BookMigrationPlan
 import dev.mirutime.data.library.migration.BookMigrationResult
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruSpace
+import java.util.concurrent.atomic.AtomicReferenceArray
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 /**
@@ -132,7 +137,8 @@ class MigrationSingleState(
         val selected = sources.filter { it.id in selectedSources }
         if (query.isBlank() || selected.isEmpty()) return
         cancelSearch()
-        searchUi = MigrationSearchUi.Searching
+        val clean = query.trim()
+        searchUi = MigrationSearchUi.Searching(total = selected.size)
         target = null
         plan = null
         planError = null
@@ -140,9 +146,48 @@ class MigrationSingleState(
         val seq = searchSeq
         searchJob = scope.launch {
             try {
-                val result = graph.search.search(query, selected)
+                // Per-source fan-out like the global search: every answer lands
+                // in its own slot, so tiles appear while other sources are
+                // still searching; Ready keeps the deterministic source order.
+                val slots = AtomicReferenceArray<List<MigrationSearchHit>?>(selected.size)
+                val failures = AtomicReferenceArray<String?>(selected.size)
+                fun hits(): List<MigrationSearchHit> =
+                    (0 until selected.size).flatMap { slots.get(it).orEmpty() }
+                        .dedupedMigrationHits()
+
+                fun failed(): List<String> =
+                    (0 until selected.size).mapNotNull { failures.get(it) }
+
+                fun done(): Int =
+                    (0 until selected.size).count {
+                        slots.get(it) != null || failures.get(it) != null
+                    }
+
+                // The state scope is the screen's Main scope, so these
+                // snapshot writes stay Main-confined.
+                coroutineScope {
+                    selected.forEachIndexed { index, source ->
+                        launch {
+                            val result = graph.search.searchOne(source, clean)
+                            if (seq != searchSeq) return@launch
+                            result.onSuccess { books ->
+                                slots.set(index, books.map { migrationHit(source, it) })
+                            }.onFailure {
+                                failures.set(index, source.name)
+                            }
+                            searchUi = MigrationSearchUi.Searching(
+                                hits = hits(),
+                                done = done(),
+                                total = selected.size,
+                                failedSources = failed(),
+                            )
+                        }
+                    }
+                }
                 if (seq != searchSeq) return@launch
-                searchUi = MigrationSearchUi.Ready(result)
+                searchUi = MigrationSearchUi.Ready(
+                    MigrationSearchResult(hits = hits(), failedSources = failed()),
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
