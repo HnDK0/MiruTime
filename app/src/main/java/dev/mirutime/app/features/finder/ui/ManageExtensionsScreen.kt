@@ -82,6 +82,7 @@ import dev.mirutime.app.features.finder.domain.PluginExtension
 import dev.mirutime.app.features.finder.domain.PluginFileInstall
 import dev.mirutime.app.features.finder.domain.PluginFileRejection
 import dev.mirutime.app.features.finder.domain.applyFilters
+import dev.mirutime.app.features.finder.domain.supportsPluginTranslation
 import dev.mirutime.app.features.settings.ui.PluginTranslationSheet
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -1007,13 +1008,15 @@ private fun ExtensionActionsSheet(
             subtitle = stringResource(R.string.finder_action_edit_sub),
             onClick = onEdit,
         )
-        MiruRowDivider()
-        MiruActionRow(
-            icon = Icons.Rounded.Translate,
-            title = stringResource(R.string.finder_plugin_translation),
-            subtitle = stringResource(R.string.st_pt_enable),
-            onClick = onTranslate,
-        )
+        if (supportsPluginTranslation(plugin.type)) {
+            MiruRowDivider()
+            MiruActionRow(
+                icon = Icons.Rounded.Translate,
+                title = stringResource(R.string.finder_plugin_translation),
+                subtitle = stringResource(R.string.st_pt_enable),
+                onClick = onTranslate,
+            )
+        }
         MiruRowDivider()
         MiruActionRow(
             icon = Icons.Filled.Delete,

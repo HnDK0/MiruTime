@@ -76,6 +76,8 @@
     <string name="rd_font_sans">Без засечек</string>
     <string name="rd_font_serif">С засечками</string>
     <string name="rd_font_size">Размер шрифта</string>
+    <string name="rd_font_search">Поиск шрифтов</string>
+    <string name="rd_font_search_empty">Шрифты не найдены</string>
     <string name="rd_fullscreen">Полный экран</string>
     <string name="rd_fullscreen_desc">Скрывает системные панели, пока меню закрыто</string>
     <string name="rd_screen">Экран</string>

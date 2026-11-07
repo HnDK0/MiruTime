@@ -7,9 +7,11 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
 import androidx.work.BackoffPolicy
+import dev.mirutime.app.MainActivity
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
@@ -61,7 +63,11 @@ object AppUpdateScheduler {
         }
     }
 
-    fun notifyAvailable(context: Context, version: String, url: String) {
+    fun notifyAvailable(
+        context: Context,
+        release: AppUpdateResult.Available,
+        currentVersion: String,
+    ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
@@ -80,22 +86,61 @@ object AppUpdateScheduler {
                 description = localized.getString(R.string.st_updates_app_notif_channel_desc)
             },
         )
-        val openRelease = PendingIntent.getActivity(
+        val text = localized.getString(R.string.st_updates_app_notif_fmt, release.version)
+        val notes = appUpdateReleaseNotes(release.body)
+        val openUpdates = PendingIntent.getActivity(
             context,
             7402,
-            Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(MainActivity.EXTRA_OPEN_UPDATES, true)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val openRelease = PendingIntent.getActivity(
+            context,
+            7403,
+            Intent(Intent.ACTION_VIEW, Uri.parse(release.url)).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification: Notification = Notification.Builder(localized, channelId)
             .setSmallIcon(R.drawable.ic_stat_download)
+            .setLargeIcon(Icon.createWithResource(localized, R.mipmap.ic_launcher))
             .setContentTitle(localized.getString(R.string.st_updates_app_notif_title))
-            .setContentText(localized.getString(R.string.st_updates_app_notif_fmt, version))
-            .setContentIntent(openRelease)
+            .setContentText(text)
+            .setSubText(
+                localized.getString(
+                    R.string.st_updates_app_notif_installed_fmt,
+                    currentVersion,
+                ),
+            )
+            .setStyle(Notification.BigTextStyle().bigText(notes.ifBlank { text }))
+            .setContentIntent(openUpdates)
+            .addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(localized, R.drawable.ic_stat_download),
+                    localized.getString(R.string.st_updates_app_notif_open_release),
+                    openRelease,
+                ).build(),
+            )
+            .setCategory(Notification.CATEGORY_RECOMMENDATION)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(true)
             .setAutoCancel(true)
-            .setShowWhen(false)
             .build()
         runCatching { manager.notify(7401, notification) }
     }
 }
+
+/** GitHub release notes are markdown; the shade shows their plain text. */
+internal fun appUpdateReleaseNotes(body: String?, maxChars: Int = 800): String =
+    body.orEmpty()
+        .lineSequence()
+        .map { it.trim().replace(Regex("^[#>*\\-\\s]+"), "") }
+        .filter { it.isNotEmpty() }
+        .joinToString("\n")
+        .take(maxChars)
+        .trim()

@@ -104,6 +104,27 @@ class AppUpdateCheckerTest {
     }
 
     @Test
+    fun `release body is parsed for the notification`() = runBlocking {
+        val body = """{"tag_name":"v0.2.0","html_url":"https://example.test/r","body":"## Added\n- Fixed playback"}"""
+        val result = checker { _, _, _ -> response(200, body) }.check("0.1.0")
+
+        assertEquals(
+            "## Added\n- Fixed playback",
+            (result as AppUpdateResult.Available).body,
+        )
+    }
+
+    @Test
+    fun `release notes are plain text and capped`() {
+        assertEquals(
+            "Added playback\nFixed export",
+            appUpdateReleaseNotes("## Added playback\n\n- Fixed export"),
+        )
+        assertEquals("abc", appUpdateReleaseNotes("abc", maxChars = 3))
+        assertEquals("", appUpdateReleaseNotes(null))
+    }
+
+    @Test
     fun `missing or broken payload is not a release`() {
         assertNull(AppUpdateParser.parse("{}"))
         assertNull(AppUpdateParser.parse("not json"))

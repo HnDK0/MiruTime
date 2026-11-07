@@ -19,6 +19,7 @@ sealed interface AppUpdateResult {
         val version: String,
         val url: String,
         val name: String?,
+        val body: String? = null,
     ) : AppUpdateResult
 
     data class UpToDate(val version: String) : AppUpdateResult
@@ -31,6 +32,7 @@ internal data class GitHubRelease(
     @SerialName("tag_name") val tagName: String = "",
     @SerialName("html_url") val htmlUrl: String = "",
     val name: String? = null,
+    val body: String? = null,
     val draft: Boolean = false,
     val prerelease: Boolean = false,
 )
@@ -147,6 +149,7 @@ class AppUpdateChecker(
                         version = tag,
                         url = release.htmlUrl,
                         name = release.name,
+                        body = release.body,
                     )
                 } else {
                     MiruLog.i("updates", "app release current tag=$tag current=$currentVersion")

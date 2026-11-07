@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -27,6 +28,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -395,6 +400,79 @@ fun <T> ChoiceSheet(
                     onSelect(option.key)
                 },
             )
+        }
+    }
+}
+
+// House standard: a list longer than 15 rows gets a search field.
+internal fun searchableChoiceNeedsSearch(size: Int): Boolean = size > 15
+
+internal fun <T> filterChoiceOptions(
+    options: List<ChoiceOption<T>>,
+    query: String,
+): List<ChoiceOption<T>> {
+    val needle = query.trim()
+    if (needle.isEmpty()) return options
+    return options.filter { option ->
+        option.label.contains(needle, ignoreCase = true) ||
+            option.description?.contains(needle, ignoreCase = true) == true
+    }
+}
+
+/**
+ * [ChoiceSheet] variant for long lists: finds by label/description, keeps the
+ * selected row in place and applies immediately, like the short sheet. Short
+ * lists keep the same component without the search field.
+ */
+@Composable
+fun <T> SearchableChoiceSheet(
+    title: String,
+    description: String,
+    options: List<ChoiceOption<T>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    onClose: () -> Unit,
+    searchPlaceholder: String,
+    emptyLabel: String,
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = filterChoiceOptions(options, query)
+    val showSearch = searchableChoiceNeedsSearch(options.size)
+    AppBottomSheet(
+        title = title,
+        description = description,
+        onClose = onClose,
+        contentScrollable = false,
+    ) {
+        if (showSearch) {
+            MiruSearchBar(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = searchPlaceholder,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(MiruSpace.S))
+        }
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        ) {
+            if (filtered.isEmpty()) {
+                item {
+                    SettingsHint(emptyLabel)
+                }
+            } else {
+                items(count = filtered.size) { index ->
+                    val option = filtered[index]
+                    SettingsRadioRow(
+                        title = option.label,
+                        subtitle = option.description,
+                        selected = option.key == selected,
+                        onClick = { onSelect(option.key) },
+                    )
+                }
+            }
         }
     }
 }

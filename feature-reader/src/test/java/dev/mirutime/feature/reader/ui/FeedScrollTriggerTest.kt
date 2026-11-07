@@ -5,7 +5,9 @@ import dev.mirutime.feature.reader.FeedEntry
 import dev.mirutime.feature.reader.FeedPlan
 import dev.mirutime.feature.reader.session.ReaderSessionState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FeedScrollTriggerTest {
@@ -52,5 +54,20 @@ class FeedScrollTriggerTest {
             feedScrollTrigger(state, topPaddingPx = 24f),
             feedScrollTrigger(state.copy(scrollToken = 1), topPaddingPx = 24f),
         )
+    }
+
+    @Test
+    fun `tts follow skips a comfortable visible block`() {
+        assertFalse(ttsFollowNeedsScroll(visible = true, offsetPx = 0, comfortOffsetPx = 200))
+        assertFalse(ttsFollowNeedsScroll(visible = true, offsetPx = 200, comfortOffsetPx = 200))
+        assertTrue(ttsFollowNeedsScroll(visible = true, offsetPx = 201, comfortOffsetPx = 200))
+        assertTrue(ttsFollowNeedsScroll(visible = false, offsetPx = 0, comfortOffsetPx = 200))
+    }
+
+    @Test
+    fun `far tts jumps land immediately`() {
+        assertTrue(ttsFollowUsesAnimation(0))
+        assertTrue(ttsFollowUsesAnimation(5))
+        assertFalse(ttsFollowUsesAnimation(6))
     }
 }

@@ -49,9 +49,9 @@ class TtsController(
     private val settingsStore: TtsSettingsStore = InMemoryTtsSettingsStore(),
     /** Monotonic clock; tests inject the virtual scheduler time. */
     private val now: () -> Long = { SystemClock.elapsedRealtime() },
-) {
+) : TtsHandoffSource {
     private val _state = MutableStateFlow(TtsState())
-    val state: StateFlow<TtsState> = _state.asStateFlow()
+    override val state: StateFlow<TtsState> = _state.asStateFlow()
 
     private val _settings = MutableStateFlow(settingsStore.load().sanitized())
     val settings: StateFlow<TtsSettings> = _settings.asStateFlow()
@@ -66,7 +66,7 @@ class TtsController(
      * skip or auto-next). The reader owns the chapter list, loads the document
      * and calls [play] so the controller never guesses what comes next.
      */
-    val chapterRequests: SharedFlow<TtsChapterDirection> = _chapterRequests.asSharedFlow()
+    override val chapterRequests: SharedFlow<TtsChapterDirection> = _chapterRequests.asSharedFlow()
 
     private val _sleepTimer = MutableStateFlow<TtsSleepTimerState?>(null)
 
@@ -145,7 +145,7 @@ class TtsController(
      * never marks a chapter read the user skipped through (FR-082/FR-083).
      */
     @Volatile
-    var chapterEndedNaturally: Boolean = false
+    override var chapterEndedNaturally: Boolean = false
         private set
 
     private var ready = false
@@ -174,12 +174,17 @@ class TtsController(
     // resurrect playback.
     @Volatile
     private var handoffPending = false
+
+    /** True while a chapter hand-off is between the request and its document. */
+    val isHandoffPending: Boolean
+        get() = handoffPending
+
     // Snapshot for the reader's revert: stop() clears the persisted session, so
     // the last spoken cursor would otherwise be lost.
     private var _lastStoppedSession: TtsSession? = null
 
     /** Last session captured by a user Stop; null after a new start/resume. */
-    val lastStoppedSession: TtsSession?
+    override val lastStoppedSession: TtsSession?
         get() = _lastStoppedSession
 
     fun play(document: ReaderDocument, translations: Map<Int, String> = emptyMap()) {
@@ -316,6 +321,7 @@ class TtsController(
         private set
 
     fun pause() {
+        MiruLog.event("tts", "pause-request", "source" to "user")
         pausedByFocusLoss = false
         pauseInternal(cancelSleepTimer = true)
     }
@@ -323,6 +329,7 @@ class TtsController(
     /** Pause caused by a transient audio-focus loss; a focus gain may resume it. */
     fun pauseForFocusLoss() {
         if (!active && _state.value.status != TtsStatus.Loading) return
+        MiruLog.event("tts", "pause-request", "source" to "focus")
         pausedByFocusLoss = true
         pauseInternal(cancelSleepTimer = false)
     }
@@ -331,7 +338,10 @@ class TtsController(
      * Pause not initiated by the user (headphone unplugged, service teardown).
      * The sleep timer keeps running: the user did not ask to cancel it.
      */
-    fun pauseFromSystem() = pauseInternal(cancelSleepTimer = false)
+    fun pauseFromSystem() {
+        MiruLog.event("tts", "pause-request", "source" to "system")
+        pauseInternal(cancelSleepTimer = false)
+    }
 
     private fun pauseInternal(cancelSleepTimer: Boolean) {
         handoffPending = false
@@ -345,7 +355,7 @@ class TtsController(
         persist(wasPlaying = false, immediate = true)
     }
 
-    fun resume() {
+    override fun resume() {
         handoffPending = false
         _lastStoppedSession = null
         pausedByFocusLoss = false
@@ -408,6 +418,9 @@ class TtsController(
         chapterEndedNaturally = false
         active = false
         pending = null
+        // Mark the hand-off before the Paused state reaches the service: the
+        // service keeps its wake lock while a hand-off is pending.
+        handoffPending = true
         invalidateUtterances()
         engine.stop()
         // Keep the old cursor paused so a rejected request can resume it.
@@ -434,9 +447,9 @@ class TtsController(
      * hand-off. A request is consumed only once: Stop, Pause, a new start or
      * the sleep timer clears it, so a stale hand-off cannot resurrect playback.
      */
-    fun playHandoff(
+    override fun playHandoff(
         document: ReaderDocument,
-        translations: Map<Int, String> = emptyMap(),
+        translations: Map<Int, String>,
     ): Boolean {
         if (!handoffPending) return false
         handoffPending = false
@@ -444,7 +457,7 @@ class TtsController(
         return true
     }
 
-    fun stop() {
+    override fun stop() {
         _lastStoppedSession = sessions.load()
         clearSleepTimer()
         resetPlayback(clearSession = true)

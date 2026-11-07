@@ -45,6 +45,7 @@ import dev.mirutime.feature.reader.ui.ReaderChapterHeader
 import dev.mirutime.feature.tts.api.TtsHighlight
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
+import kotlin.math.abs
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
@@ -64,6 +65,16 @@ internal fun feedScrollTrigger(
     scrollToken = state.scrollToken,
     topPaddingPx = topPaddingPx,
 )
+
+/** True when the spoken block is outside the comfortable band. */
+internal fun ttsFollowNeedsScroll(
+    visible: Boolean,
+    offsetPx: Int,
+    comfortOffsetPx: Int,
+): Boolean = !visible || offsetPx !in 0..comfortOffsetPx
+
+/** Small jumps animate; far chapter jumps should land immediately. */
+internal fun ttsFollowUsesAnimation(distance: Int): Boolean = distance <= 5
 
 /**
  * Backwards loading is explicit. Composition only decides whether the top gap
@@ -108,6 +119,9 @@ internal fun ReaderFeed(
     // The floating chrome header covers the top of the list. A negative scroll
     // offset parks the spoken block below it instead of under the title.
     val ttsFocusInsetPx = with(density) { 72.dp.toPx().toInt() }
+    // A visible block near the top is already comfortable to read: moving it
+    // again on every spoken sentence is what made the feed blink.
+    val ttsComfortOffsetPx = with(density) { 200.dp.toPx().toInt() }
     fun ttsBlockIndex(): Int {
         val blockId = ttsHighlight?.blockId ?: return -1
         return entries.indexOfFirst {
@@ -116,14 +130,35 @@ internal fun ReaderFeed(
     }
     // When TTS moves to another paragraph, keep it below the floating header.
     // Only block changes trigger this; per-sentence range updates do not.
-    LaunchedEffect(ttsHighlight?.blockId, entries.firstOrNull()?.id) {
+    suspend fun followTtsBlock() {
         val index = ttsBlockIndex()
-        if (index < 0) return@LaunchedEffect
-        listState.animateScrollToItem(index, scrollOffset = -ttsFocusInsetPx)
+        if (index < 0) return
+        val visible = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+        if (!ttsFollowNeedsScroll(
+                visible = visible != null,
+                offsetPx = visible?.offset ?: 0,
+                comfortOffsetPx = ttsComfortOffsetPx,
+            )
+        ) {
+            return
+        }
+        val distance = abs(index - (visible?.index ?: listState.firstVisibleItemIndex))
+        if (ttsFollowUsesAnimation(distance)) {
+            listState.animateScrollToItem(index, scrollOffset = -ttsFocusInsetPx)
+        } else {
+            listState.scrollToItem(index, scrollOffset = -ttsFocusInsetPx)
+        }
+    }
+    LaunchedEffect(ttsHighlight?.blockId) {
+        followTtsBlock()
+    }
+    // First content only: prepending a previous chapter must not re-follow.
+    LaunchedEffect(entries.isEmpty()) {
+        if (entries.isNotEmpty()) followTtsBlock()
     }
     // Explicit Focus action: retrigger even when the active block has not
     // changed since the last auto-follow.
-    LaunchedEffect(focusToken, entries.firstOrNull()?.id) {
+    LaunchedEffect(focusToken) {
         if (focusToken <= 0) return@LaunchedEffect
         val index = ttsBlockIndex()
         if (index < 0) return@LaunchedEffect

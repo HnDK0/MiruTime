@@ -16,7 +16,8 @@
         <service
             android:name="dev.mirutime.feature.tts.service.TtsPlaybackService"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
+            android:foregroundServiceType="mediaPlayback"
+            android:stopWithTask="true" />
 
         <!-- Headset/Bluetooth media buttons. The system delivers
              ACTION_MEDIA_BUTTON here; the receiver forwards it to the live

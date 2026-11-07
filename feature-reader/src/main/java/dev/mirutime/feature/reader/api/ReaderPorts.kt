@@ -146,6 +146,7 @@ interface ReaderUiGraph {
     val assets: ReaderAssetPort
     val rules: ReaderTextRules
     val tts: dev.mirutime.feature.tts.TtsController
+    val ttsCoordinator: dev.mirutime.feature.reader.session.TtsChapterCoordinator
     val ttsSessions: dev.mirutime.feature.tts.TtsSessionStore
     val ttsSessionTracker: ReaderSessionTracker?
 

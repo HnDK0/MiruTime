@@ -76,6 +76,8 @@
     <string name="rd_font_sans">Sans</string>
     <string name="rd_font_serif">Serif</string>
     <string name="rd_font_size">Font size</string>
+    <string name="rd_font_search">Search fonts</string>
+    <string name="rd_font_search_empty">No fonts found</string>
     <string name="rd_fullscreen">Fullscreen</string>
     <string name="rd_fullscreen_desc">Hides the system bars while the menu is closed</string>
     <string name="rd_screen">Screen</string>

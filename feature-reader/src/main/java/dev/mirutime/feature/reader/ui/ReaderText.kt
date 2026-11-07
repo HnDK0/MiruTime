@@ -886,9 +886,21 @@ private fun ReaderStyle.resolvedFontFamily(): FontFamily =
     customFontPath?.let(::loadCustomFontFamily) ?: fontFamily.toFontFamily()
 
 private fun String.toFontFamily(): FontFamily = when (this) {
-    "sans" -> FontFamily.SansSerif
-    "mono" -> FontFamily.Monospace
-    else -> FontFamily.Serif
+    "sans", "sans-serif" -> FontFamily.SansSerif
+    "mono", "monospace" -> FontFamily.Monospace
+    "serif" -> FontFamily.Serif
+    else -> ReaderFontCatalog.systemName(this)?.let(::systemFontFamily) ?: FontFamily.Serif
+}
+
+// Typeface.create() silently returns the default face for an unknown family,
+// so a saved key that is not a system key falls back to Serif instead.
+private val systemFontCache = mutableMapOf<String, FontFamily>()
+
+private fun systemFontFamily(name: String): FontFamily = synchronized(systemFontCache) {
+    if (systemFontCache.size >= 8) systemFontCache.clear()
+    systemFontCache.getOrPut(name) {
+        FontFamily(Typeface.create(name, Typeface.NORMAL))
+    }
 }
 
 // Cache the loaded file font by path plus file stats: replacing the picked

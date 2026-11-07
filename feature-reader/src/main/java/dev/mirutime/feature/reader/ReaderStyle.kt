@@ -1,7 +1,7 @@
 package dev.mirutime.feature.reader
 
 data class ReaderStyle(
-    val fontFamily: String = "serif",   // serif | sans | mono
+    val fontFamily: String = "serif",   // serif | sans-serif | monospace | sys:<family>
     val customFontPath: String? = null,
     val customFontName: String? = null,
     val fontSizeSp: Int = 14,

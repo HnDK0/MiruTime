@@ -39,13 +39,14 @@ class LibraryUpdateWorker(
                     "library run checked=${summary.checked} updated=${summary.updated} " +
                         "failed=${summary.failed}",
                 )
-                val newChapters = app.libraryRepository.booksWithUpdates()
-                    .sumOf { it.newChapters }
+                val updated = app.libraryRepository.booksWithUpdates()
                 LibraryUpdateNotifications.notifyResult(
-                    app,
-                    newChapters = newChapters,
+                    context = app,
+                    newChapters = updated.sumOf { it.newChapters },
+                    checked = summary.checked,
                     updatedBooks = summary.updated,
                     failedBooks = summary.failed,
+                    lines = updated.map { it.title to it.newChapters },
                 )
                 Result.success()
             } catch (e: CancellationException) {

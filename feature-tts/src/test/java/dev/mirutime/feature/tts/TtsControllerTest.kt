@@ -1080,7 +1080,7 @@ class TtsControllerTest {
         runCurrent()
 
         val spoken = engine.spoken.size
-        assertFalse(controller.playHandoff(document))
+        assertFalse(controller.playHandoff(document, emptyMap()))
         assertEquals(spoken, engine.spoken.size)
         assertEquals(TtsStatus.Idle, controller.state.value.status)
 
@@ -1102,7 +1102,7 @@ class TtsControllerTest {
         advanceTimeBy(60_000)
         runCurrent()
 
-        assertFalse(controller.playHandoff(document))
+        assertFalse(controller.playHandoff(document, emptyMap()))
         assertEquals(TtsStatus.Idle, controller.state.value.status)
     }
 
@@ -1118,7 +1118,7 @@ class TtsControllerTest {
         controller.stop()
         val spoken = engine.spoken.size
 
-        assertFalse(controller.playHandoff(document))
+        assertFalse(controller.playHandoff(document, emptyMap()))
         assertEquals(spoken, engine.spoken.size)
         assertEquals(TtsStatus.Idle, controller.state.value.status)
     }
@@ -1133,7 +1133,7 @@ class TtsControllerTest {
 
         controller.pause()
 
-        assertFalse(controller.playHandoff(document))
+        assertFalse(controller.playHandoff(document, emptyMap()))
         assertEquals(TtsStatus.Paused, controller.state.value.status)
     }
 
@@ -1141,7 +1141,7 @@ class TtsControllerTest {
     fun `handoff without a request is ignored`() = runTest {
         val controller = TtsController(FakeEngine(), this, InMemoryTtsSessionStore())
 
-        assertFalse(controller.playHandoff(document))
+        assertFalse(controller.playHandoff(document, emptyMap()))
         assertEquals(TtsStatus.Idle, controller.state.value.status)
     }
 

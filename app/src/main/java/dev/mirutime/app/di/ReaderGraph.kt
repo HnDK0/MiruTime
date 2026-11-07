@@ -23,6 +23,8 @@ import dev.mirutime.feature.reader.api.ReaderTranslationPort
 import dev.mirutime.feature.reader.api.ReaderUiGraph
 import dev.mirutime.feature.reader.session.ReadTracker
 import dev.mirutime.feature.reader.session.ReaderSessionStore
+import dev.mirutime.feature.reader.session.TtsChapterCoordinator
+import dev.mirutime.feature.reader.ui.ReaderFontCatalog
 import dev.mirutime.app.features.translation.data.MetadataTranslationController
 import dev.mirutime.app.features.translation.data.RoomMetadataTranslationStore
 import dev.mirutime.app.features.translation.data.RoomTranslationCache
@@ -62,6 +64,11 @@ class ReaderGraph(
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val translationGraph = TranslationGraph(appContext, cfGate, plainEngine)
+
+    init {
+        // Warm the catalog early; a stale sys: key is rejected once it loads.
+        scope.launch { ReaderFontCatalog.load() }
+    }
 
     val repository: ReaderRepository = DefaultReaderRepository(bookProvider, libraryRepository)
     override val positions: ReadingPositionRepository = libraryRepository?.let(::RoomReadingPositionRepository)
@@ -115,6 +122,22 @@ class ReaderGraph(
     override val ttsSessions: TtsSessionStore = PrefsTtsSessionStore(appContext)
     private val ttsSettings = PrefsTtsSettingsStore(appContext)
     override val tts = TtsController(AndroidTtsEngine(appContext), scope, ttsSessions, ttsSettings)
+    override val ttsCoordinator = TtsChapterCoordinator(
+        tts = tts,
+        session = session,
+        translation = translation,
+        scope = scope,
+        startPlayback = { bookTitle, chapterTitle, coverUrl, chapterIndex, chapterCount ->
+            startTtsPlayback(
+                bookTitle = bookTitle,
+                chapterTitle = chapterTitle,
+                coverUrl = coverUrl,
+                chapterNumber = chapterIndex,
+                chapterCount = chapterCount,
+            )
+        },
+        stopPlayback = { stopTtsPlayback() },
+    ).also { it.start() }
 
     override fun imageHeadersFor(url: String): Map<String, String> = imageHeaders(url)
 

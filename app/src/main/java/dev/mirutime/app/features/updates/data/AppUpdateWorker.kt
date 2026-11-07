@@ -24,7 +24,11 @@ class AppUpdateWorker(
             }
             when (val result = AppUpdateChecker(fetch).check(BuildConfig.VERSION_NAME)) {
                 is AppUpdateResult.Available ->
-                    AppUpdateScheduler.notifyAvailable(applicationContext, result.version, result.url)
+                    AppUpdateScheduler.notifyAvailable(
+                        context = applicationContext,
+                        release = result,
+                        currentVersion = BuildConfig.VERSION_NAME,
+                    )
                 // Up-to-date, no releases and errors are not worth a daily
                 // notification. Errors are deliberately never reported as
                 // success.

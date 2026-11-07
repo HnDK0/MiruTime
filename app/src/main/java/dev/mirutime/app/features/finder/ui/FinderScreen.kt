@@ -63,6 +63,7 @@ import dev.mirutime.app.features.finder.domain.BrowseFilters
 import dev.mirutime.app.features.finder.domain.CatalogSource
 import dev.mirutime.app.features.finder.domain.LocalSources
 import dev.mirutime.app.features.finder.domain.applyBrowse
+import dev.mirutime.app.features.finder.domain.supportsPluginTranslation
 import dev.mirutime.app.features.finder.domain.withPin
 import dev.mirutime.app.features.library.data.PickedImportFile
 import dev.mirutime.app.features.library.ui.ImportSheet
@@ -350,6 +351,7 @@ private fun SourceRow(
 ) {
     val extra = LocalMiruExtraColors.current
     val translating = AppSettings.pluginTranslation[source.id]?.enabled == true
+    val canTranslate = !source.local && supportsPluginTranslation(source.type)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -358,7 +360,7 @@ private fun SourceRow(
             .defaultMinSize(minHeight = MiruSize.Row)
             .padding(
                 start = MiruSpace.L,
-                end = if (source.local) MiruSpace.L else MiruSpace.Xs,
+                end = if (canTranslate) MiruSpace.Xs else MiruSpace.L,
                 top = MiruSpace.S,
                 bottom = MiruSpace.S,
             ),
@@ -410,7 +412,7 @@ private fun SourceRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (!source.local) {
+        if (canTranslate) {
             IconButton(onClick = onTranslation, modifier = Modifier.size(MiruSize.Touch)) {
                 Icon(
                     imageVector = Icons.Rounded.Translate,

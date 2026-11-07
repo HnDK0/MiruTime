@@ -93,6 +93,7 @@ class TtsPlaybackService : Service() {
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY && isActive()) {
+                MiruLog.event("tts", "noisy-receiver")
                 ttsController.pauseFromSystem()
             }
         }
@@ -248,6 +249,16 @@ class TtsPlaybackService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        MiruLog.event("tts", "tts-task-removed")
+        if (::ttsController.isInitialized) {
+            ttsController.stop()
+            stopPlayback()
+        }
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         started = false
         serviceScope.cancel()
@@ -333,12 +344,21 @@ class TtsPlaybackService : Service() {
                 ensureForeground()
             }
             TtsStatus.Paused -> {
-                releaseWakeLock()
+                // A chapter hand-off pauses the engine while the next document
+                // loads. Keep the wake lock so the load still completes with
+                // the screen off; a real pause releases it.
+                if (ttsController.isHandoffPending) {
+                    acquireWakeLock()
+                } else {
+                    releaseWakeLock()
+                }
                 // A pause caused by audio-focus loss must keep the request:
                 // abandoning it means the system never delivers AUDIOFOCUS_GAIN,
                 // so the "resume what we paused" path could never run. A user
                 // pause still drops the request so other apps get clean focus.
-                if (!ttsController.pausedByFocusLoss) abandonAudioFocus()
+                if (!ttsController.pausedByFocusLoss && !ttsController.isHandoffPending) {
+                    abandonAudioFocus()
+                }
                 updateMediaSession()
                 ensureForeground()
             }

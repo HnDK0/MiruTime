@@ -162,6 +162,23 @@ class ReaderSessionStore(
     }
 
     /**
+     * TTS hand-off path: load and activate a chapter without the restore
+     * spinner or the hard anchor scroll. The feed follows the spoken block on
+     * its own, so bumping [ReaderSessionState.scrollToken] here would race it.
+     */
+    suspend fun goToChapterForTts(index: Int): ReaderDocument? {
+        if (_state.value.chapters.none { it.index == index }) return null
+        sessionTracker?.stop()
+        _state.update { it.copy(endOfBook = false) }
+        val document = loadChapter(index, saved = null, restoreAnchor = false, makeActive = true)
+        if (document != null) {
+            sessionTracker?.start(bookUrl, index)
+            launchPrefetch()
+        }
+        return document
+    }
+
+    /**
      * Moves the active chapter while the user scrolls the continuous manga
      * strip. Deliberately does not bump [ReaderSessionState.scrollToken] and
      * does not touch restorePhase: the strip is already on screen, so the

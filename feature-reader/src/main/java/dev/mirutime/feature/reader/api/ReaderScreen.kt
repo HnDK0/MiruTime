@@ -59,6 +59,7 @@ import dev.mirutime.feature.reader.ReaderPalette
 import dev.mirutime.feature.reader.SavedReading
 import dev.mirutime.feature.reader.session.ReaderSessionStore
 import dev.mirutime.feature.reader.session.RestorePhase
+import dev.mirutime.feature.reader.session.TtsChapterCoordinator
 import dev.mirutime.feature.reader.ui.ReaderAutoscrollEffect
 import dev.mirutime.feature.reader.ui.ReaderChrome
 import dev.mirutime.feature.reader.ui.ReaderFeed
@@ -77,7 +78,6 @@ import dev.mirutime.feature.reader.ui.readerBottomPaddingDp
 import dev.mirutime.feature.reader.ui.readerTopPaddingDp
 import dev.mirutime.feature.reader.ui.restoreReaderBarsNow
 import dev.mirutime.feature.tts.R as TtsR
-import dev.mirutime.feature.tts.TtsChapterDirection
 import dev.mirutime.feature.tts.TtsSession
 import dev.mirutime.feature.tts.TtsStatus
 import dev.mirutime.feature.tts.api.TtsHighlight
@@ -115,6 +115,7 @@ fun ReaderScreen(
     val ttsState by graph.tts.state.collectAsState()
     val ttsSettings by graph.tts.settings.collectAsState()
     val ttsCapabilities by graph.tts.capabilities.collectAsState()
+    val handoffInProgress by graph.ttsCoordinator.handoffInProgress.collectAsState()
     val ttsActive = ttsState.status == TtsStatus.Playing ||
         ttsState.status == TtsStatus.Loading
     val ttsErrorMessage = when (ttsState.message) {
@@ -174,12 +175,24 @@ fun ReaderScreen(
     var readerResumed by remember(lifecycleOwner) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
     }
-    // Chapter opened by a TTS request: the chapter-change guard must not stop
-    // the speech the hand-off is about to start. Consumed by that guard.
-    var ttsHandoffChapter by remember { mutableStateOf<Int?>(null) }
     val ttsSessionActive = ttsState.status == TtsStatus.Playing ||
         ttsState.status == TtsStatus.Loading ||
         ttsState.status == TtsStatus.Paused
+    // While TTS owns a cursor, a stale feed scroll from the previous chapter
+    // must not pull the session (and the guard) back. The TTS effect still
+    // adopts its own chapter and within-chapter offsets.
+    val onReaderAnchor: (ReadingAnchor, Int) -> Unit = { anchor, offset ->
+        val spokenUrl = graph.tts.state.value.blockId?.chapterUrl
+        if (shouldApplyReaderAnchor(
+                ttsOwnsCursor = ttsSessionActive,
+                handoffInProgress = handoffInProgress,
+                spokenChapterUrl = spokenUrl,
+                anchorChapterUrl = anchor.chapterUrl,
+            )
+        ) {
+            store.onAnchorChanged(anchor, offset)
+        }
+    }
     // Captured before store.open() writes a newer reading position, so the
     // stale check compares against the previous session, not this open.
     var restoreSession by remember(bookUrl) { mutableStateOf<TtsSession?>(null) }
@@ -188,8 +201,17 @@ fun ReaderScreen(
     LaunchedEffect(bookUrl, startChapterIndex, restoreSaved) {
         if (!sessionCaptured) {
             val progress = graph.positions.load(bookUrl)
-            restoreSession = graph.ttsSessions.load()?.takeIf { session ->
-                session.bookUrl == bookUrl && isFreshTtsSession(session, progress)
+            // A live controller already holds the session; restoring the
+            // persisted copy here would pause playback on Activity recreation.
+            val liveTts = graph.tts.state.value.blockId != null &&
+                graph.tts.state.value.status != TtsStatus.Idle &&
+                graph.tts.state.value.status != TtsStatus.Failed
+            restoreSession = if (liveTts) {
+                null
+            } else {
+                graph.ttsSessions.load()?.takeIf { session ->
+                    session.bookUrl == bookUrl && isFreshTtsSession(session, progress)
+                }
             }
             sessionCaptured = true
         }
@@ -256,9 +278,8 @@ fun ReaderScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            graph.tts.stop()
-            graph.stopTtsPlayback()
-            graph.stopTtsSession()
+            // Activity recreation must not kill playback; explicit Back and the
+            // manga switch call the coordinator instead.
             store.flush()
         }
     }
@@ -269,6 +290,8 @@ fun ReaderScreen(
     // these buttons (route replacement, process teardown).
     val exitReader: () -> Unit = {
         restoreReaderBarsNow(context)
+        graph.ttsCoordinator.stop()
+        graph.stopTtsSession()
         onBack()
     }
 
@@ -321,20 +344,31 @@ fun ReaderScreen(
         view.keepScreenOn = keepScreenOn
         onDispose { view.keepScreenOn = previous }
     }
-    LaunchedEffect(state.activeChapterIndex, sessionCaptured) {
+    LaunchedEffect(
+        state.activeChapterIndex,
+        state.documents[state.activeChapterIndex]?.chapterUrl,
+        state.restorePhase,
+        sessionCaptured,
+        handoffInProgress,
+    ) {
         // Wait for the restore candidate to be copied into memory: stop()
         // clears the persisted slot, and must not erase it before that.
         if (!sessionCaptured) return@LaunchedEffect
-        if (state.activeChapterIndex == ttsHandoffChapter) {
-            ttsHandoffChapter = null
-        } else {
-            graph.tts.stop()
-        }
+        // A recreate reopens the session and briefly has no document for the
+        // active index; that is not a manual chapter change.
+        if (state.restorePhase != RestorePhase.Ready) return@LaunchedEffect
+        if (state.documents[state.activeChapterIndex] == null) return@LaunchedEffect
+        // The coordinator owns the hand-off; a chapter change it caused must
+        // not stop the speech it is about to restart. The key re-runs when the
+        // hand-off finishes, so a manual change during it is still caught.
+        if (handoffInProgress) return@LaunchedEffect
+        val spokenUrl = graph.tts.state.value.blockId?.chapterUrl
+        val visibleUrl = state.documents[state.activeChapterIndex]?.chapterUrl
+        if (spokenUrl != null && spokenUrl != visibleUrl) graph.tts.stop()
     }
     LaunchedEffect(isManga) {
         if (isManga) {
-            graph.tts.stop()
-            graph.stopTtsPlayback()
+            graph.ttsCoordinator.stop()
             graph.stopTtsSession()
         }
     }
@@ -439,96 +473,20 @@ fun ReaderScreen(
         }
     }
 
-    // The controller has no chapter list: it asks the reader to load the
-    // adjacent chapter, then speech restarts on the loaded document.
-    // The chapter the TTS session actually speaks, from its current block. It
-    // can differ from the visible chapter: the feed adopts the next one while
-    // speech is still playing the previous one.
-    fun ttsSessionChapter(): Int? = graph.tts.state.value.blockId?.chapterUrl?.let { url ->
-        store.state.value.chapters.firstOrNull { it.chapterUrl == url }?.index
-    }
-
-    LaunchedEffect(Unit) {
-        graph.tts.chapterRequests.collect { direction ->
-            // A natural end-of-chapter marks the finished chapter read; a
-            // manual skip (skip buttons) must not (FR-082/FR-083). `atEnd` is
-            // true for any position on the last chunk, so the controller keeps
-            // the real reason of the request instead.
-            val naturalCompletion = graph.tts.chapterEndedNaturally
-            val sessionChapter = ttsSessionChapter() ?: store.state.value.activeChapterIndex
-            val target = store.onTtsChapterRequest(sessionChapter, direction, naturalCompletion)
-            if (target == null) {
-                when (direction) {
-                    // No previous chapter: stay where the cursor was.
-                    TtsChapterDirection.Previous -> graph.tts.resume()
-                    TtsChapterDirection.Next -> {
-                        graph.tts.stop()
-                        Toast.makeText(
-                            context,
-                            R.string.rd_tts_end_of_book,
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                    }
-                }
-                return@collect
+    // The coordinator owns the chapter hand-off; the screen only reports its
+    // user-visible outcomes.
+    LaunchedEffect(graph.ttsCoordinator) {
+        graph.ttsCoordinator.events.collect { event ->
+            when (event) {
+                TtsChapterCoordinator.Event.EndOfBook ->
+                    Toast.makeText(
+                        context,
+                        R.string.rd_tts_end_of_book,
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                is TtsChapterCoordinator.Event.Failed ->
+                    Toast.makeText(context, TtsR.string.rd_tts_failed, Toast.LENGTH_SHORT).show()
             }
-            val previousChapter = sessionChapter
-            val previousUrl = store.state.value.documents[previousChapter]?.chapterUrl
-            val previousAnchor = store.state.value.anchor?.takeIf { it.chapterUrl == previousUrl }
-            ttsHandoffChapter = target
-            store.goToChapter(target)
-            val document = store.state.value.documents[target]
-            if (document == null) {
-                ttsHandoffChapter = null
-                graph.tts.stop()
-                return@collect
-            }
-            val activeMode = graph.translation.activeMode(bookUrl)
-            val available = if (activeMode?.hasPair == true) {
-                graph.translation.state.value
-            } else {
-                emptyMap()
-            }
-            // A manual chapter choice wins over an auto-next that was already
-            // loading; never let the hand-off pull the reader back.
-            if (!ttsHandoffApplies(store.state.value.activeChapterIndex, target)) {
-                ttsHandoffChapter = null
-                graph.tts.stop()
-                return@collect
-            }
-            val started = graph.tts.playHandoff(
-                document,
-                available[document.chapterUrl]?.translations.orEmpty(),
-            )
-            if (!started) {
-                ttsHandoffChapter = null
-                if (ttsHandoffApplies(store.state.value.activeChapterIndex, target)) {
-                    // Timer/Stop/Pause dropped the hand-off: return to the
-                    // chapter and cursor that were actually spoken.
-                    val last = graph.ttsSessions.load() ?: graph.tts.lastStoppedSession
-                    val session = last?.takeIf { it.bookUrl == bookUrl }
-                    val revertChapter = session?.chapterIndex ?: previousChapter
-                    val revertAnchor = session?.let {
-                        ReadingAnchor(
-                            chapterUrl = it.chapterUrl,
-                            blockId = BlockId(it.chapterUrl, it.blockIndex),
-                            charOffset = it.charOffset,
-                            sentenceIndex = it.sentenceIndex,
-                        )
-                    } ?: previousAnchor
-                    store.goToChapter(revertChapter, anchor = revertAnchor)
-                }
-            }
-        }
-    }
-
-    // Natural completion with auto-next off emits no chapter request, so the
-    // finished chapter is marked read here (exactly once). Pause/Stop leave the
-    // status Paused/Idle without atEnd, so they never reach this branch.
-    LaunchedEffect(ttsState.status, ttsState.atEnd) {
-        if (ttsState.status == TtsStatus.Idle && ttsState.atEnd) {
-            // The spoken chapter, not the visible one (see ttsSessionChapter).
-            ttsSessionChapter()?.let { store.onChapterFinished(it) }
         }
     }
 
@@ -613,15 +571,7 @@ fun ReaderScreen(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         if (granted) {
-            if (ttsActive) {
-                graph.startTtsPlayback(
-                    bookTitle = bookTitle,
-                    chapterTitle = chapterTitle,
-                    coverUrl = state.book?.coverUrl,
-                    chapterNumber = state.activeChapterIndex,
-                    chapterCount = chapterCount,
-                )
-            }
+            if (ttsActive) graph.ttsCoordinator.ensurePlayback()
         } else {
             notificationDenied = true
             Toast.makeText(context, R.string.tts_notifications_off, Toast.LENGTH_LONG).show()
@@ -667,8 +617,7 @@ fun ReaderScreen(
         }
     }
     val stopTts: () -> Unit = {
-        graph.tts.stop()
-        graph.stopTtsPlayback()
+        graph.ttsCoordinator.stop()
     }
     // "Start here" uses the reader's own visible anchor.
     val startTtsHere: () -> Unit = {
@@ -730,27 +679,6 @@ fun ReaderScreen(
     LaunchedEffect(ttsState.status) {
         if (ttsState.status == TtsStatus.Failed) chromeVisible = true
     }
-    LaunchedEffect(
-        ttsState.status,
-        bookTitle,
-        chapterTitle,
-        state.book?.coverUrl,
-        state.activeChapterIndex,
-        chapterCount,
-    ) {
-        when (ttsState.status) {
-            TtsStatus.Playing, TtsStatus.Loading ->
-                graph.startTtsPlayback(
-                    bookTitle = bookTitle,
-                    chapterTitle = chapterTitle,
-                    coverUrl = state.book?.coverUrl,
-                    chapterNumber = state.activeChapterIndex,
-                    chapterCount = chapterCount,
-                )
-            TtsStatus.Idle, TtsStatus.Failed -> graph.stopTtsPlayback()
-            TtsStatus.Paused -> Unit
-        }
-    }
     val safeInsets = WindowInsets.safeDrawing.asPaddingValues()
     // Chrome floats over the page: the reading area never changes when a menu
     // opens, so Feed does not scroll and Paged does not repaginate. Fullscreen
@@ -795,19 +723,6 @@ fun ReaderScreen(
             Toast.makeText(context, R.string.rd_autoscroll_end, Toast.LENGTH_SHORT).show()
         },
     )
-
-    LaunchedEffect(mode, state.documents, state.activeChapterIndex) {
-        // Active chapter first, then the prefetch window and chapters loaded
-        // behind the anchor by the top gap. ensurePrevious() does not move the
-        // reader, so without this they stay untranslated in Feed/parallel.
-        translationEnsureTargets(
-            activeChapterIndex = state.activeChapterIndex,
-            loadedChapterIndices = state.documents.keys,
-        ).forEach { index ->
-            val document = state.documents[index] ?: return@forEach
-            graph.translation.ensureChapter(bookUrl, index, document)
-        }
-    }
 
     Box(
         modifier = Modifier
@@ -900,7 +815,7 @@ fun ReaderScreen(
                             scope.launch { store.goToChapter(it.index) }
                         }
                     },
-                    onAnchor = store::onAnchorChanged,
+                    onAnchor = onReaderAnchor,
                     onChapterFinished = { index ->
                         scope.launch { store.onChapterFinished(index) }
                     },
@@ -961,7 +876,7 @@ fun ReaderScreen(
                     },
                     onRetry = { index -> scope.launch { store.retry(index) } },
                     onOpenAuth = onOpenAuthUrl,
-                    onAnchor = store::onAnchorChanged,
+                    onAnchor = onReaderAnchor,
                     onChapterFinished = { index ->
                         scope.launch { store.onChapterFinished(index) }
                     },
@@ -981,7 +896,7 @@ fun ReaderScreen(
                     ttsHighlight = ttsHighlight,
                     focusToken = ttsFocusToken,
                     onSearchSelection = { text -> openWebSearch(context, text) },
-                    onAnchor = store::onAnchorChanged,
+                    onAnchor = onReaderAnchor,
                     onRetry = { index -> scope.launch { store.retry(index) } },
                     onLoadPrevious = { index -> scope.launch { store.ensurePrevious(index) } },
                     onOpenAuth = onOpenAuthUrl,
@@ -1198,3 +1113,16 @@ internal fun isFreshTtsSession(session: TtsSession, progress: SavedReading?): Bo
 /** True while a chapter hand-off still targets the chapter the reader shows. */
 internal fun ttsHandoffApplies(activeChapterIndex: Int, target: Int): Boolean =
     activeChapterIndex == target
+
+/**
+ * While TTS owns a cursor, a feed anchor from another chapter is a stale scroll
+ * position (the list has not reached the spoken chapter yet) and must not pull
+ * the session back. Within-chapter offsets always apply.
+ */
+internal fun shouldApplyReaderAnchor(
+    ttsOwnsCursor: Boolean,
+    handoffInProgress: Boolean,
+    spokenChapterUrl: String?,
+    anchorChapterUrl: String,
+): Boolean = !handoffInProgress &&
+    (!ttsOwnsCursor || spokenChapterUrl == null || anchorChapterUrl == spokenChapterUrl)

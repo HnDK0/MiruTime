@@ -935,10 +935,15 @@
     <string name="st_updates_notif_failed_title">Обновление библиотеки не удалось</string>
     <string name="st_updates_notif_failed_fmt">Не удалось проверить книги: %1$d.</string>
     <string name="st_updates_notif_failed_generic">Запуск обновления завершился ошибкой.</string>
+    <string name="st_updates_notif_book_line_fmt">%1$s — +%2$d</string>
+    <string name="st_updates_notif_more_fmt">и ещё %1$d</string>
+    <string name="st_updates_notif_summary_fmt">Проверено %1$d · обновлено %2$d · ошибок %3$d</string>
     <string name="st_updates_app_notif_channel">Обновления приложения</string>
     <string name="st_updates_app_notif_channel_desc">Новый релиз MiruTime</string>
     <string name="st_updates_app_notif_title">Доступно обновление</string>
     <string name="st_updates_app_notif_fmt">Доступен MiruTime %1$s.</string>
+    <string name="st_updates_app_notif_installed_fmt">Установлено: %1$s</string>
+    <string name="st_updates_app_notif_open_release">Открыть релиз</string>
     <string name="st_updates_library">Обновления библиотеки</string>
     <string name="st_updates_library_desc">Искать новые главы в фоне</string>
     <string name="st_updates_library_auto">Автоматически проверять обновления библиотеки</string>

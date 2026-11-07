@@ -30,6 +30,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -496,6 +497,54 @@ class ReaderSessionStoreTest {
 
         assertEquals(2, store.state.value.activeChapterIndex)
         assertEquals(anchor, store.state.value.anchor)
+    }
+
+    @Test
+    fun `goToChapterForTts keeps the scroll token and ready phase`() = runTest {
+        val store = ReaderSessionStore(
+            content = TestRepository(chapters, docs),
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(TestRepository(chapters, docs)),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+        val scrollToken = store.state.value.scrollToken
+
+        val document = store.goToChapterForTts(2)
+        advanceUntilIdle()
+
+        assertNotNull(document)
+        assertEquals(2, store.state.value.activeChapterIndex)
+        assertEquals(scrollToken, store.state.value.scrollToken)
+        assertEquals(RestorePhase.Ready, store.state.value.restorePhase)
+        assertFalse(store.state.value.endOfBook)
+    }
+
+    @Test
+    fun `goToChapterForTts reports a failed load`() = runTest {
+        val store = ReaderSessionStore(
+            content = TestRepository(
+                chapters,
+                docs,
+                failOn = 2 to IllegalStateException("boom"),
+            ),
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(TestRepository(chapters, docs)),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+        val before = store.state.value.activeChapterIndex
+
+        val document = store.goToChapterForTts(2)
+        advanceUntilIdle()
+
+        assertEquals(null, document)
+        assertEquals(before, store.state.value.activeChapterIndex)
+        assertTrue(store.state.value.statuses[2] is ChapterLoadStatus.Failed)
     }
 
     @Test

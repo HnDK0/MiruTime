@@ -25,6 +25,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,10 +47,10 @@ import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.uikit.ChoiceOption
-import dev.mirutime.uikit.ChoiceSheet
 import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
+import dev.mirutime.uikit.SearchableChoiceSheet
 import dev.mirutime.uikit.SettingsSliderRow
 import dev.mirutime.uikit.SettingsSwitchRow
 import dev.mirutime.uikit.SettingsValueRow
@@ -76,7 +77,11 @@ fun ReaderStyleControls(
     hostedInSheet: Boolean = false,
 ) {
     var fontSheet by remember { mutableStateOf(false) }
+    var fontOptions by remember { mutableStateOf(ReaderFontCatalog.legacyOptions()) }
     var resetConfirm by remember { mutableStateOf(false) }
+    LaunchedEffect(fontSheet) {
+        if (fontSheet) fontOptions = ReaderFontCatalog.load()
+    }
     val update: (ReaderStyle) -> Unit = { onStyleChange(it.sanitized()) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -398,15 +403,13 @@ fun ReaderStyleControls(
     }
 
     if (fontSheet) {
-        ChoiceSheet(
+        SearchableChoiceSheet(
             title = stringResource(R.string.rd_font),
             description = stringResource(R.string.rd_typography),
-            options = listOf(
-                ChoiceOption("serif", stringResource(R.string.rd_font_serif)),
-                ChoiceOption("sans", stringResource(R.string.rd_font_sans)),
-                ChoiceOption("mono", stringResource(R.string.rd_font_mono)),
-            ),
-            selected = style.fontFamily,
+            options = fontOptions.map { key ->
+                ChoiceOption(key, fontLabel(key))
+            },
+            selected = ReaderFontCatalog.canonicalKey(style.fontFamily),
             onSelect = {
                 update(
                     style.copy(
@@ -417,6 +420,8 @@ fun ReaderStyleControls(
                 )
             },
             onClose = { fontSheet = false },
+            searchPlaceholder = stringResource(R.string.rd_font_search),
+            emptyLabel = stringResource(R.string.rd_font_search_empty),
         )
     }
     if (resetConfirm && !hostedInSheet) {
@@ -679,13 +684,12 @@ private fun RemoveAssetButton(
 }
 
 @Composable
-private fun fontLabel(key: String): String = stringResource(
-    when (key) {
-        "sans" -> R.string.rd_font_sans
-        "mono" -> R.string.rd_font_mono
-        else -> R.string.rd_font_serif
-    },
-)
+private fun fontLabel(key: String): String = when (ReaderFontCatalog.canonicalKey(key)) {
+    "serif" -> stringResource(R.string.rd_font_serif)
+    "sans-serif" -> stringResource(R.string.rd_font_sans)
+    "monospace" -> stringResource(R.string.rd_font_mono)
+    else -> ReaderFontCatalog.displayName(key)
+}
 
 private val FontMimeTypes = arrayOf(
     "font/ttf",

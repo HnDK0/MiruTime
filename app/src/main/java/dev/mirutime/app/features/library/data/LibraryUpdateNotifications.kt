@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
 import android.os.Build
 import dev.mirutime.app.MainActivity
 import dev.mirutime.app.R
@@ -39,13 +40,18 @@ object LibraryUpdateNotifications {
         )
     }
 
-    fun notifyResult(context: Context, newChapters: Int, updatedBooks: Int, failedBooks: Int) {
+    fun notifyResult(
+        context: Context,
+        newChapters: Int,
+        checked: Int,
+        updatedBooks: Int,
+        failedBooks: Int,
+        lines: List<Pair<String, Int>>,
+    ) {
         val localized = AppLanguage.wrap(context, AppSettings.appLanguage)
-        val title: String
-        val text: String
         if (newChapters > 0) {
-            title = localized.getString(R.string.st_updates_notif_new_title)
-            text = if (failedBooks > 0) {
+            val title = localized.getString(R.string.st_updates_notif_new_title)
+            val text = if (failedBooks > 0) {
                 localized.getString(
                     R.string.st_updates_notif_new_failed_fmt,
                     newChapters,
@@ -55,23 +61,83 @@ object LibraryUpdateNotifications {
             } else {
                 localized.getString(R.string.st_updates_notif_new_fmt, newChapters, updatedBooks)
             }
+            postSuccess(
+                context = context,
+                localized = localized,
+                title = title,
+                text = text,
+                checked = checked,
+                updatedBooks = updatedBooks,
+                failedBooks = failedBooks,
+                lines = lines,
+            )
         } else if (failedBooks > 0) {
-            title = localized.getString(R.string.st_updates_notif_failed_title)
-            text = localized.getString(R.string.st_updates_notif_failed_fmt, failedBooks)
-        } else {
-            return
+            postFailure(
+                context = context,
+                title = localized.getString(R.string.st_updates_notif_failed_title),
+                text = localized.getString(R.string.st_updates_notif_failed_fmt, failedBooks),
+            )
         }
-        post(context, title, text)
     }
 
     fun notifyFailure(context: Context, message: String?) {
         val localized = AppLanguage.wrap(context, AppSettings.appLanguage)
         val text = message?.takeIf { it.isNotBlank() }
             ?: localized.getString(R.string.st_updates_notif_failed_generic)
-        post(context, localized.getString(R.string.st_updates_notif_failed_title), text)
+        postFailure(
+            context = context,
+            title = localized.getString(R.string.st_updates_notif_failed_title),
+            text = text,
+        )
     }
 
-    private fun post(context: Context, title: String, text: String) {
+    private fun postSuccess(
+        context: Context,
+        localized: Context,
+        title: String,
+        text: String,
+        checked: Int,
+        updatedBooks: Int,
+        failedBooks: Int,
+        lines: List<Pair<String, Int>>,
+    ) {
+        if (!canPost(context)) return
+        ensureChannel(context)
+        val style = Notification.InboxStyle().setBigContentTitle(title)
+        libraryUpdateLines(
+            books = lines,
+            format = { bookTitle, count ->
+                localized.getString(R.string.st_updates_notif_book_line_fmt, bookTitle, count)
+            },
+            more = { remaining ->
+                localized.getString(R.string.st_updates_notif_more_fmt, remaining)
+            },
+        ).forEach(style::addLine)
+        post(
+            context = context,
+            title = title,
+            text = text,
+            style = style,
+            subText = localized.getString(
+                R.string.st_updates_notif_summary_fmt,
+                checked,
+                updatedBooks,
+                failedBooks,
+            ),
+        )
+    }
+
+    private fun postFailure(context: Context, title: String, text: String) {
+        post(context = context, title = title, text = text, style = null, subText = null)
+    }
+
+    private fun post(
+        context: Context,
+        title: String,
+        text: String,
+        style: Notification.Style?,
+        subText: String?,
+    ) {
         if (!canPost(context)) return
         ensureChannel(context)
         val openUpdates = PendingIntent.getActivity(
@@ -83,17 +149,22 @@ object LibraryUpdateNotifications {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val notification: Notification = Notification.Builder(context, ChannelId)
+        val builder = Notification.Builder(context, ChannelId)
             .setSmallIcon(R.drawable.ic_stat_download)
+            .setLargeIcon(Icon.createWithResource(context, R.mipmap.ic_launcher))
             .setContentTitle(title)
             .setContentText(text)
             .setContentIntent(openUpdates)
+            .setCategory(Notification.CATEGORY_RECOMMENDATION)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
-            .setShowWhen(false)
-            .build()
+            .setShowWhen(true)
+        if (subText != null) builder.setSubText(subText)
+        if (style != null) builder.setStyle(style)
         runCatching {
-            context.getSystemService(NotificationManager::class.java)?.notify(NotificationId, notification)
+            context.getSystemService(NotificationManager::class.java)
+                ?.notify(NotificationId, builder.build())
         }
     }
 
@@ -101,4 +172,20 @@ object LibraryUpdateNotifications {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
+}
+
+/**
+ * Inbox lines for the library notification. Keeps the first [limit] books and
+ * collapses the rest into one "and N more" line.
+ */
+internal fun libraryUpdateLines(
+    books: List<Pair<String, Int>>,
+    limit: Int = 5,
+    format: (String, Int) -> String,
+    more: (Int) -> String,
+): List<String> {
+    val valid = books.filter { it.first.isNotBlank() && it.second > 0 }
+    val shown = valid.take(limit).map { (title, count) -> format(title, count) }
+    val remaining = valid.size - shown.size
+    return if (remaining > 0) shown + more(remaining) else shown
 }
