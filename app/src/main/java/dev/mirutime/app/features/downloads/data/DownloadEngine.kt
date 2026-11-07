@@ -739,7 +739,7 @@ class DownloadEngine(
         // File write and row commit share the book lock, so a concurrent
         // delete (or a second writer) cannot interleave them.
         return lockFor(book.bookId).withLock {
-            if (!stillRunning(task.id)) {
+            if (!stillRunning(task.id) || store.book(book.bookId) == null) {
                 discardUncommittedOutput(book.bookId, chapter.chapterId, task.id)
                 return@withLock false
             }
@@ -781,7 +781,7 @@ class DownloadEngine(
             // deletion never sees a half-written page set outside the lock.
             var active = true
             lockFor(book.bookId).withLock {
-                if (!stillRunning(task.id)) {
+                if (!stillRunning(task.id) || store.book(book.bookId) == null) {
                     discardUncommittedOutput(book.bookId, chapter.chapterId, task.id)
                     active = false
                     return@withLock
@@ -805,7 +805,7 @@ class DownloadEngine(
         }
         val json = files.encodePagePaths(paths)
         return lockFor(book.bookId).withLock {
-            if (!stillRunning(task.id)) {
+            if (!stillRunning(task.id) || store.book(book.bookId) == null) {
                 discardUncommittedOutput(book.bookId, chapter.chapterId, task.id)
                 return@withLock false
             }

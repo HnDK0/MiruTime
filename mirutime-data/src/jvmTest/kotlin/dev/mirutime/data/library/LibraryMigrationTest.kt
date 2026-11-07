@@ -526,6 +526,36 @@ class LibraryMigrationTest {
         }
     }
 
+    @Test
+    fun `unknown schema version fails loudly instead of wiping the library`() = runTest {
+        val file = File(tempDir(), "newer.db")
+        val created = buildLibraryDatabase(libraryDatabaseBuilder(file))
+        try {
+            LibraryRepository(created.libraryDao()).saveBook(book("https://newer.test/book"))
+        } finally {
+            created.close()
+        }
+        BundledSQLiteDriver().open(file.absolutePath).use { connection ->
+            connection.exec("PRAGMA user_version = 99")
+        }
+
+        val failed = runCatching {
+            val db = buildLibraryDatabase(libraryDatabaseBuilder(file))
+            try {
+                db.libraryDao().shelfCount()
+            } finally {
+                db.close()
+            }
+        }
+        assertTrue(failed.isFailure, "unknown schema version must fail loudly")
+
+        // The file must still contain the original row: no destructive fallback.
+        BundledSQLiteDriver().open(file.absolutePath).use { connection ->
+            assertEquals(99, connection.long("PRAGMA user_version").toInt())
+            assertEquals(1, connection.long("SELECT COUNT(*) FROM books").toInt())
+        }
+    }
+
     private fun downgradeToV9(file: File) {
         BundledSQLiteDriver().open(file.absolutePath).use { connection ->
             connection.exec("DROP INDEX index_history_readAt")

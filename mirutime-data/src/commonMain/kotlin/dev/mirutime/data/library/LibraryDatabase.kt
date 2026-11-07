@@ -57,11 +57,19 @@ expect object LibraryDatabaseConstructor : RoomDatabaseConstructor<LibraryDataba
 
 fun buildLibraryDatabase(
     builder: RoomDatabase.Builder<LibraryDatabase>,
+    allowDestructiveFallback: Boolean = false,
 ): LibraryDatabase = builder
     .setDriver(BundledSQLiteDriver())
     .setQueryCoroutineContext(Dispatchers.IO)
-    // v6 -> v7 -> v8 -> v9 are explicit in-place migrations; the destructive fallback
-    // is only a safety net for versions with no migration (v1 pre-release data).
     .addMigrations(*LibraryMigrations.ALL)
-    .fallbackToDestructiveMigration(true)
+    // Release builds must never silently wipe a library when a schema version
+    // has no migration. Only debug builds opt into the destructive fallback for
+    // throwaway pre-release data.
+    .apply {
+        // The boolean is `dropAllTables`, not an on/off switch: any call enables
+        // the fallback. Release builds must not call it at all.
+        if (allowDestructiveFallback) {
+            fallbackToDestructiveMigration(true)
+        }
+    }
     .build()

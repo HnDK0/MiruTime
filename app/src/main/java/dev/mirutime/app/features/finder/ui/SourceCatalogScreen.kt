@@ -567,7 +567,7 @@ fun SourceCatalogScreen(
                     book = shown,
                     importing = false,
                     error = null,
-                    onClick = { onBookOpen(book.bookUrl) },
+                    onClick = { onBookOpen(book.bookKey) },
                     onLongClick = { toggleMembership(book) },
                     inLibrary = book.inLibrary,
                     kind = if (LocalSources.kindOf(sourceId) == "manga") {
@@ -585,7 +585,7 @@ fun SourceCatalogScreen(
                     style = catalogStyle,
                     compactInfo = true,
                     showTypeChip = false,
-                    onOpen = { onBookOpen(book.bookUrl) },
+                    onOpen = { onBookOpen(book.bookKey) },
                     onLongPress = { toggleMembership(book) },
                     membership = book.badge?.toMiruBadge(),
                     onRetry = {

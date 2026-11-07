@@ -2,6 +2,7 @@ package dev.mirutime.app.features.library.data
 
 import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.app.features.library.domain.LibraryBook
+import dev.mirutime.data.library.libraryBookKey
 import dev.mirutime.app.features.library.domain.LibrarySort
 import dev.mirutime.app.features.library.domain.Shelf
 import dev.mirutime.app.features.library.domain.SortDirection
@@ -104,6 +105,17 @@ class FakeLibraryDataProvider : LibraryDataProvider {
             .sortedBy { it.shelfId }
     }
 
+    override suspend fun matchingLibrarySources(
+        query: String,
+        filters: LibraryPageFilters,
+    ): Map<String, Set<String>> {
+        val urls = matchingLibraryUrls(query, filters).toSet()
+        return bookState
+            .filter { it.bookUrl in urls }
+            .groupBy({ it.bookUrl }, { it.source })
+            .mapValues { (_, sources) -> sources.toSet() }
+    }
+
     private fun searchMatches(query: String): List<LibraryBook> {
         val terms = query.trim()
         if (terms.isEmpty()) return bookState
@@ -133,34 +145,55 @@ class FakeLibraryDataProvider : LibraryDataProvider {
 
     override suspend fun moveBook(bookUrl: String, shelfId: String) {
         bookState = bookState.map {
-            if (it.bookUrl == bookUrl) it.copy(shelfId = shelfId) else it
+            if (it.bookKey == bookUrl || it.bookUrl == bookUrl) {
+                it.copy(shelfId = shelfId)
+            } else {
+                it
+            }
         }
     }
 
-    override suspend fun deleteBooks(bookUrls: Set<String>): BulkActionResult {
-        val found = bookState.mapTo(LinkedHashSet()) { it.bookUrl }.intersect(bookUrls)
-        bookState = bookState.filterNot { it.bookUrl in found }
-        return BulkActionResult(found, bookUrls - found)
+    override suspend fun deleteBooks(
+        bookUrls: Set<String>,
+        sources: Map<String, Set<String>>,
+    ): BulkActionResult {
+        val found = bookState.filter { it.key() in bookUrls || it.bookUrl in bookUrls }
+        val keys = matchKeys(bookUrls, found)
+        bookState = bookState - found.toSet()
+        return BulkActionResult(keys, bookUrls - keys)
     }
 
     override suspend fun moveBooks(bookUrls: Set<String>, shelfId: String): BulkActionResult {
-        val found = bookState.mapTo(LinkedHashSet()) { it.bookUrl }.intersect(bookUrls)
+        val found = bookState.filter { it.key() in bookUrls || it.bookUrl in bookUrls }
+        val keys = matchKeys(bookUrls, found)
         bookState = bookState.map {
-            if (it.bookUrl in found) it.copy(shelfId = shelfId) else it
+            if (it.key() in keys) it.copy(shelfId = shelfId) else it
         }
-        return BulkActionResult(found, bookUrls - found)
+        return BulkActionResult(keys, bookUrls - keys)
     }
 
     override suspend fun markBooksRead(bookUrls: Set<String>, read: Boolean): BulkActionResult {
-        val found = bookState.mapTo(LinkedHashSet()) { it.bookUrl }.intersect(bookUrls)
+        val found = bookState.filter { it.key() in bookUrls || it.bookUrl in bookUrls }
+        val keys = matchKeys(bookUrls, found)
         bookState = bookState.map { book ->
-            if (book.bookUrl !in found) {
+            if (book.key() !in keys) {
                 book
             } else {
                 book.copy(readChapters = if (read) book.totalChapters else 0)
             }
         }
-        return BulkActionResult(found, bookUrls - found)
+        return BulkActionResult(keys, bookUrls - keys)
+    }
+
+    private fun matchKeys(
+        requested: Set<String>,
+        rows: List<dev.mirutime.app.features.library.domain.LibraryBook>,
+    ): Set<String> {
+        val rowKeys = rows.mapTo(LinkedHashSet()) { it.bookKey }
+        val rowUrls = rows.mapTo(LinkedHashSet()) { it.bookUrl }
+        return requested.filterTo(LinkedHashSet()) { key ->
+            key in rowKeys || key in rowUrls
+        }
     }
 
     override suspend fun importFiles(files: List<PickedImportFile>): ImportSummary {
@@ -310,3 +343,6 @@ object LibraryFixtures {
         ),
     )
 }
+
+private fun dev.mirutime.app.features.library.domain.LibraryBook.key(): String =
+    libraryBookKey(installId, bookUrl)

@@ -136,6 +136,15 @@ interface BookDataProvider {
     // Real ones move into the data lib with the DB.
     suspend fun moveShelf(bookUrl: String, shelfId: String)
     suspend fun setInLibrary(bookUrl: String, inLibrary: Boolean): MembershipResult
+
+    // Cards that know their installId use this overload so a URL shared by two
+    // installs deletes the selected row. Providers that cannot distinguish keep
+    // the URL-only behavior.
+    suspend fun setInLibrary(
+        bookUrl: String,
+        inLibrary: Boolean,
+        installId: String?,
+    ): MembershipResult = setInLibrary(bookUrl, inLibrary)
     fun setChapterDownloaded(bookUrl: String, range: IntRange, downloaded: Boolean)
     suspend fun downloadNext100(bookUrl: String)
     suspend fun markChapterRead(bookUrl: String, chapterIndex: Int, read: Boolean)

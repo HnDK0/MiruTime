@@ -147,7 +147,8 @@ object AutoBackupScheduler {
         val spec = BackupSchedule.spec(settings)
         val key = "${settings.backupDirectory}|${spec.intervalMinutes}|${spec.flexMinutes}|" +
             "${settings.backupMaxCount}|${settings.backupIncludeImages}|" +
-            "${settings.backupIncludeSettings}|${settings.backupIncludePlugins}"
+            "${settings.backupIncludeSettings}|${settings.backupIncludePlugins}|" +
+            "${settings.backupIncludeHistoryOnly}"
         synchronized(lock) {
             if (key == lastAppliedKey) return
             lastAppliedKey = key

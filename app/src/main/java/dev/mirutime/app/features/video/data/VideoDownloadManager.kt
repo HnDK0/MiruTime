@@ -26,6 +26,7 @@ import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.Downloader
 import androidx.media3.exoplayer.offline.DownloaderFactory
 import androidx.media3.exoplayer.offline.ProgressiveDownloader
+import dev.mirutime.data.library.bookKeyUrl
 import dev.mirutime.app.features.video.VideoDownloadService
 import dev.mirutime.app.features.video.domain.videoMimeType
 import dev.mirutime.core.api.VideoStream
@@ -154,7 +155,7 @@ class VideoDownloadManager(
         allDownloads().firstNotNullOfOrNull { download ->
             if (download.state != Download.STATE_COMPLETED) return@firstNotNullOfOrNull null
             val meta = VideoDownloadData.decode(download.request.data) ?: return@firstNotNullOfOrNull null
-            if (meta.bookUrl != bookUrl || meta.chapterIndex != chapterIndex) {
+            if (bookKeyUrl(meta.bookUrl) != bookKeyUrl(bookUrl) || meta.chapterIndex != chapterIndex) {
                 return@firstNotNullOfOrNull null
             }
             VideoStream(
@@ -245,7 +246,7 @@ class VideoDownloadManager(
         downloadManager.currentDownloads
             .filter { download ->
                 download.state == Download.STATE_STOPPED &&
-                    VideoDownloadData.decode(download.request.data)?.bookUrl == bookUrl
+                    VideoDownloadData.decode(download.request.data)?.bookUrl?.let(::bookKeyUrl) == bookKeyUrl(bookUrl)
             }
             .forEach { downloadManager.setStopReason(it.request.id, Download.STOP_REASON_NONE) }
         downloadManager.resumeDownloads()
@@ -294,13 +295,22 @@ class VideoDownloadManager(
         removeIds(idsForBook(bookUrls))
     }
 
+    /** Drops downloads whose book row no longer exists. */
+    suspend fun removeOrphaned(validBookUrls: Set<String>) {
+        val ids = allDownloads().mapNotNull { download ->
+            val meta = VideoDownloadData.decode(download.request.data) ?: return@mapNotNull null
+            download.request.id.takeIf { bookKeyUrl(meta.bookUrl) !in validBookUrls }
+        }
+        removeIds(ids)
+    }
+
     suspend fun removeChapters(bookUrl: String, chapterIndexes: Set<Int>) {
         if (chapterIndexes.isEmpty()) return
         val ids = allDownloads()
             .mapNotNull { download ->
                 val meta = VideoDownloadData.decode(download.request.data) ?: return@mapNotNull null
                 download.request.id.takeIf {
-                    meta.bookUrl == bookUrl && meta.chapterIndex in chapterIndexes
+                    bookKeyUrl(meta.bookUrl) == bookKeyUrl(bookUrl) && meta.chapterIndex in chapterIndexes
                 }
             }
         removeIds(ids)
@@ -330,12 +340,18 @@ class VideoDownloadManager(
 
     private suspend fun idsForBook(bookUrl: String): List<String> =
         allDownloads()
-            .filter { VideoDownloadData.decode(it.request.data)?.bookUrl == bookUrl }
+            .filter {
+            VideoDownloadData.decode(it.request.data)?.bookUrl
+                ?.let(::bookKeyUrl) == bookKeyUrl(bookUrl)
+        }
             .map { it.request.id }
 
     private suspend fun idsForBook(bookUrls: Set<String>): List<String> =
         allDownloads()
-            .filter { VideoDownloadData.decode(it.request.data)?.bookUrl in bookUrls }
+            .filter {
+            VideoDownloadData.decode(it.request.data)?.bookUrl
+                ?.let(::bookKeyUrl) in bookUrls
+        }
             .map { it.request.id }
 
     private suspend fun allDownloads(): List<Download> = withContext(Dispatchers.IO) {

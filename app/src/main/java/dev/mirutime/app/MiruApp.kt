@@ -7,6 +7,7 @@ import androidx.compose.runtime.snapshotFlow
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import dev.mirutime.app.core.AndroidCoverDecoder
+import dev.mirutime.app.core.RecoverySweeper
 import dev.mirutime.core.log.CrashReporter
 import dev.mirutime.core.log.MiruFileLogger
 import dev.mirutime.core.log.MiruLog
@@ -64,6 +65,7 @@ import dev.mirutime.app.features.updates.data.AppUpdateScheduler
 import dev.mirutime.app.features.video.data.VideoDownloadManager
 import dev.mirutime.data.library.LibraryDatabase
 import dev.mirutime.data.library.LibraryRepository
+import dev.mirutime.data.library.bookKeyUrl
 import dev.mirutime.data.library.buildLibraryDatabase
 import dev.mirutime.data.library.libraryDatabaseBuilder
 import dev.mirutime.data.library.migration.BookMigrationCoordinator
@@ -93,10 +95,32 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
         )
     }
     val libraryDatabase: LibraryDatabase by lazy {
-        buildLibraryDatabase(libraryDatabaseBuilder(this))
+        // Only debug builds may drop an unmigratable pre-release database.
+        // Release builds fail loudly instead of wiping the user's library.
+        buildLibraryDatabase(
+            libraryDatabaseBuilder(this),
+            allowDestructiveFallback = BuildConfig.DEBUG,
+        )
     }
     val libraryRepository: LibraryRepository by lazy {
-        LibraryRepository(libraryDatabase.libraryDao())
+        LibraryRepository(libraryDatabase.libraryDao()) { bookIds ->
+            // Deleting a book must cancel its unique work before the row
+            // disappears; otherwise a worker can race the cascade.
+            bookIds.forEach { bookId ->
+                downloadScheduler.cancel(bookId)
+                translationScheduler.cancel(bookId)
+            }
+        }
+    }
+    private val recoverySweeper by lazy {
+        RecoverySweeper(
+            filesDir = filesDir,
+            cacheDir = cacheDir,
+            loadImportJobs = libraryRepository::importJobs,
+            saveImportJob = libraryRepository::saveImportJob,
+            loadMigrations = libraryRepository::bookMigrations,
+            saveMigration = libraryRepository::saveBookMigration,
+        )
     }
     // Read-only L2 view for exports; the reader keeps its own instance, both
     // are stateless wrappers over the same Room tables.
@@ -110,6 +134,7 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
         DownloadTranslationQueue(translationQueueStore)
     }
     private val translationScheduler by lazy { WorkManagerTranslationScheduler(this) }
+    private val downloadScheduler by lazy { WorkManagerDownloadScheduler(this) }
     val downloadTranslationRunner: DownloadTranslationRunner by lazy {
         DownloadTranslationRunner(
             store = translationQueueStore,
@@ -249,7 +274,7 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             store = RoomDownloadStore(libraryRepository),
             provider = pluginBookProvider,
             files = downloadFiles,
-            scheduler = WorkManagerDownloadScheduler(this),
+            scheduler = downloadScheduler,
             notifier = object : DownloadNotifier {
                 override fun paused(bookId: Long, title: String, progress: Float) {
                     DownloadNotifications.paused(this@MiruApp, bookId, title, progress)
@@ -280,7 +305,7 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             },
             chapterDelayMs = { AppSettings.downloadDelayMs.toLong() },
             fetchPage = { bookUrl, url ->
-                PluginBookIndex.sourceFor(bookUrl)?.let { sourceId ->
+                PluginBookIndex.sourceForBook(bookUrl)?.let { sourceId ->
                     pluginGraph.fetchImage(sourceId, url, pluginGraph.imageHeadersFor(url))
                         .takeIf { it.status in 200..299 }
                         ?.bytes
@@ -339,6 +364,20 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
                     videoDownloadManager.removeAll()
                 }
             },
+            purgeOutOfLibraryAction = {
+                val result = libraryRepository.purgeOutOfLibrary { files ->
+                    localBookProvider.removeFiles(files)
+                    files.forEach { downloadFiles.deleteBookFiles(it.bookId) }
+                }
+                if (result.deleted.isNotEmpty()) {
+                    removeVideoDownloads(result.deleted)
+                }
+                // Media3 keeps its own index; drop rows whose book is gone.
+                videoDownloadManager.removeOrphaned(
+                    libraryRepository.libraryBookUrls().toSet(),
+                )
+            },
+            filesDir = filesDir,
         )
     }
     // One media3 stack for offline video; the service and every screen share
@@ -383,7 +422,8 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             },
             translationsFor = { bookUrl, chapterUrl, html ->
                 val mode = translationMode(
-                    novel = AppSettings.novelTranslation[bookUrl],
+                    novel = AppSettings.novelTranslation[bookUrl]
+                        ?: AppSettings.novelTranslation[bookKeyUrl(bookUrl)],
                     plugin = AppSettings.pluginTranslation[
                         dev.mirutime.app.features.translation.data.translationSourceId(bookUrl)
                     ],
@@ -420,7 +460,7 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
                     }
                 }
             },
-            sourceIdFor = { PluginBookIndex.sourceFor(it).orEmpty() },
+            sourceIdFor = { PluginBookIndex.sourceForBook(it).orEmpty() },
         )
     }
     // App-level translator for the in-app browser. The reader keeps its own
@@ -442,8 +482,17 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
         // Only crash recovery runs here: live restores are applied immediately
         // from Settings. If a process death interrupted one, finish it before
         // the first provider read.
-        val restoredSettings = runBlocking(Dispatchers.IO) {
-            restoreService.recoverInterruptedRestore().settings
+        val restoredSettings = try {
+            runBlocking(Dispatchers.IO) {
+                restoreService.recoverInterruptedRestore().settings
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // An incompatible/corrupt DB must reach the blocking R1 screen, not
+            // kill the process from a background init.
+            MiruLog.e("app", "event=restore_recovery_failed", e)
+            null
         }
         // Synchronous read: every screen must see saved keys/provider/backup
         // settings on its first composition. Writes stay on appScope (IO).
@@ -451,20 +500,31 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
         startSettingsPersistence()
         PluginBookIndex.attach(this)
         appScope.launch {
-            // Default shelves must exist before the first Library render.
-            libraryRepository.ensureDefaultShelves()
-            // Re-arm or cancel periodic auto backup from persisted settings.
-            AutoBackupScheduler.sync(this@MiruApp, settingsStore.load())
-            // Same contract for the library-update worker; WorkManager keeps
-            // the request across process death.
-            LibraryUpdateScheduler.sync(this@MiruApp, settingsStore.load())
-            AppUpdateScheduler.sync(this@MiruApp, settingsStore.load())
-            // Covers are a background nicety, never a startup block.
-            backfillCovers()
-            // A process death leaves RUNNING rows; re-arm their unique work.
-            downloadEngine.reconcile()
-            // PENDING translation intents are the queue; re-arm them too.
-            runCatching {
+            // Each step is independent: one recoverable failure must not skip
+            // download reconciliation or translation re-arm for the session.
+            suspend fun step(event: String, block: suspend () -> Unit) {
+                try {
+                    block()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    MiruLog.e("app", "event=$event", e)
+                }
+            }
+            step("startup_recovery_sweep_failed") { recoverySweeper.sweep() }
+            step("startup_shelves_failed") { libraryRepository.ensureDefaultShelves() }
+            step("startup_auto_backup_failed") {
+                AutoBackupScheduler.sync(this@MiruApp, settingsStore.load())
+            }
+            step("startup_library_update_failed") {
+                LibraryUpdateScheduler.sync(this@MiruApp, settingsStore.load())
+            }
+            step("startup_app_update_failed") {
+                AppUpdateScheduler.sync(this@MiruApp, settingsStore.load())
+            }
+            step("startup_cover_backfill_failed") { backfillCovers() }
+            step("startup_download_reconcile_failed") { downloadEngine.reconcile() }
+            step("startup_translation_rearm_failed") {
                 libraryRepository.bookIdsWithPendingTranslations().forEach { bookId ->
                     translationScheduler.enqueue(bookId)
                 }
@@ -472,6 +532,14 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
         }
         // Warm the installed-plugin list once; screens read graph.installed.
         pluginGraph.bootstrap()
+    }
+
+    /**
+     * Opens the lazy library DB once for the R1 probe. Kept here so MainActivity
+     * goes through the repository instead of touching the DAO directly.
+     */
+    suspend fun probeLibraryDatabase() {
+        libraryRepository.bookCount()
     }
 
     // Stable grep marker for support: app version and device in one line.

@@ -320,7 +320,7 @@ fun NovelTranslationScreen(
                 } else {
                     list.forEachIndexed { index, book ->
                         if (index > 0) MiruRowDivider()
-                        val config = s.novelTranslation[book.bookUrl] ?: NovelTranslation()
+                        val config = s.novelTranslation[book.bookKey] ?: NovelTranslation()
                         SettingsValueRow(
                             title = book.title,
                             // Enabled rows preview the effective pair: an
@@ -345,7 +345,7 @@ fun NovelTranslationScreen(
 
     editing?.let { book ->
         NovelTranslationSheet(
-            bookUrl = book.bookUrl,
+            bookUrl = book.bookKey,
             name = book.title,
             onClose = { editing = null },
         )

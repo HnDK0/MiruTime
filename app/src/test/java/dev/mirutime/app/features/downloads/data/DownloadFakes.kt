@@ -216,6 +216,9 @@ internal class FakeScheduler : DownloadScheduler {
 
 internal class FakeProvider : BookDataProvider {
     var contents: MutableMap<Int, Update> = mutableMapOf()
+    // Test seam: runs after the chapter payload is produced, before the engine
+    // commits it.
+    var onContent: (suspend () -> Unit)? = null
     var pageUrls: MutableMap<Int, List<String>> = mutableMapOf()
     var failures: MutableMap<Int, Throwable> = mutableMapOf()
     val chapterDownloadedCalls = mutableListOf<Triple<String, IntRange, Boolean>>()
@@ -232,6 +235,7 @@ internal class FakeProvider : BookDataProvider {
         failures[chapterIndex]?.let { throw it }
         val update = contents[chapterIndex] ?: return null
         val text = update.text ?: return null
+        onContent?.invoke()
         return ChapterContent(
             bookUrl = bookUrl,
             chapterIndex = chapterIndex,

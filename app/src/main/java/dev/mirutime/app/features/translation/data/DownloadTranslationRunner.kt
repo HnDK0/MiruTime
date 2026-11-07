@@ -72,6 +72,12 @@ class DownloadTranslationRunner(
                 mark(row, DownloadTranslationQueue.STATUS_CANCELLED)
                 continue
             }
+            if (store.book(bookId) == null) {
+                // The book was deleted while this pass was running; its
+                // chapter_translations rows are already gone with the cascade.
+                store.delete(row.translationId)
+                continue
+            }
             val chapter = store.chapter(row.chapterId)
             if (chapter == null) {
                 failed++
@@ -153,7 +159,26 @@ class DownloadTranslationRunner(
                 }
             ) {
                 is Outcome.Ok -> {
-                    cache.save(request, outcome.value)
+                    if (store.book(bookId) == null || store.chapter(row.chapterId) == null) {
+                        store.delete(row.translationId)
+                        continue
+                    }
+                    try {
+                        cache.save(request, outcome.value)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        MiruLog.e("translation", "download-translation save failed", e)
+                        try {
+                            cache.markFailed(request)
+                        } catch (ce: CancellationException) {
+                            throw ce
+                        } catch (_: Exception) {
+                            // Best effort; the row will be retried on the next pass.
+                        }
+                        failed++
+                        continue
+                    }
                     if (exact != null && exact.translationId != row.translationId) {
                         store.delete(row.translationId)
                     }

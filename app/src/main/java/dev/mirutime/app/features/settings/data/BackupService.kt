@@ -1,10 +1,13 @@
 package dev.mirutime.app.features.settings.data
 
 import android.content.Context
+import dev.mirutime.core.log.MiruLog
 import dev.mirutime.data.library.LibraryRepository
 import dev.mirutime.data.library.LibrarySchemaVersion
 import dev.mirutime.data.library.LocalBackupBook
+import dev.mirutime.data.library.LocalBackupCover
 import dev.mirutime.data.library.createDatabaseSnapshot
+import dev.mirutime.data.library.pruneHistoryOnlyBooks
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -62,6 +65,11 @@ data class BackupReaderAssetEntry(
 @Serializable
 data class BackupCounts(
     val localBooks: Int,
+    // Every in-library book; localBooks only counts books that also own local
+    // files and is therefore 0 for a plugin-only library.
+    val libraryBooks: Int = 0,
+    // Every book row in the DB snapshot, including history-only books.
+    val totalBooks: Int = 0,
     val localFiles: Int,
     val pluginFiles: Int = 0,
     val readerFiles: Int = 0,
@@ -93,12 +101,15 @@ data class BackupOptions(
     val includeSettings: Boolean = true,
     val includeImages: Boolean = true,
     val includePlugins: Boolean = false,
+    // Default is library-only: history-only rows are not user library content.
+    val includeHistoryOnly: Boolean = false,
 ) {
     companion object {
         fun fromSettings(): BackupOptions = BackupOptions(
             includeSettings = AppSettings.backupIncludeSettings,
             includeImages = AppSettings.backupIncludeImages,
             includePlugins = AppSettings.backupIncludePlugins,
+            includeHistoryOnly = AppSettings.backupIncludeHistoryOnly,
         )
     }
 }
@@ -114,6 +125,8 @@ data class BackupResult(
     val success: Boolean,
     val bytes: Long = 0,
     val entryCount: Int = 0,
+    val bookCount: Int = 0,
+    val libraryBookCount: Int = 0,
     val localBookCount: Int = 0,
     val localFileCount: Int = 0,
     val pluginFileCount: Int = 0,
@@ -143,11 +156,15 @@ class BackupService(
     private val cacheDir: File,
     private val appVersion: String,
     private val localBooks: suspend () -> List<LocalBackupBook>,
+    private val localCovers: suspend () -> List<LocalBackupCover> = { emptyList() },
+    private val bookCount: suspend () -> Int = { 0 },
+    private val libraryBookCount: suspend () -> Int = { 0 },
     private val settingsSnapshot: () -> PersistedSettings = { AppSettings.persistedSnapshot() },
     private val readerSnapshot: () -> ReaderBackupPrefs = { ReaderBackupPrefs() },
-    private val snapshotDatabase: suspend (File) -> DatabaseSnapshot = { target ->
-        createSnapshot(databasePath, target)
-    },
+    private val snapshotDatabase: suspend (File, Boolean) -> DatabaseSnapshot =
+        { target, includeHistoryOnly ->
+            createSnapshot(databasePath, target, includeHistoryOnly)
+        },
     private val clock: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = { UUID.randomUUID().toString() },
 ) {
@@ -164,6 +181,9 @@ class BackupService(
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull() ?: "0.1",
         localBooks = { library.localBackupBooks() },
+        localCovers = { library.localBackupCovers() },
+        bookCount = { library.bookCount() },
+        libraryBookCount = { library.libraryBookCount() },
         readerSnapshot = readerSnapshot,
     )
 
@@ -239,9 +259,37 @@ class BackupService(
             // Selection already filters in Room; keep the archive boundary
             // strict so a future caller cannot leak a history-only copy.
             val books = localBooks().filter { it.inLibrary }
+            val totalBooks = bookCount()
+            val libraryBooks = libraryBookCount()
+            val savedTotalBooks = if (options.includeHistoryOnly) totalBooks else libraryBooks
             onProgress(0.10f)
-            val candidates = books.flatMap(::collectBookFiles)
-                .filter { options.includeImages || it.isContentWithoutImages() }
+            val fileCandidates = books.flatMap(::collectBookFiles)
+            // Plugin books own no local copy/bodies, but their covers (and
+            // especially user overrides) are still user data. A user override
+            // is always packed; other covers follow includeImages.
+            val coverCandidates = localCovers().mapNotNull { cover ->
+                val file = resolve(cover.coverLocalPath)
+                if (!file.isFile) {
+                    if (cover.isUserOverride) {
+                        MiruLog.event("backup", "cover-missing", "book" to cover.bookId)
+                    }
+                    return@mapNotNull null
+                }
+                FileCandidate(
+                    entryPath = entryPath(file, cover.bookId, KIND_COVER),
+                    bookId = cover.bookId,
+                    kind = KIND_COVER,
+                    file = file,
+                    installId = cover.installId,
+                    isUserOverride = cover.isUserOverride,
+                )
+            }
+            val candidates = (fileCandidates + coverCandidates)
+                .filter {
+                    options.includeImages ||
+                        it.isContentWithoutImages() ||
+                        (it.kind == KIND_COVER && it.isUserOverride)
+                }
                 .distinctBy { it.entryPath }
                 .sortedBy { it.entryPath }
             val plugins = if (options.includePlugins) collectPluginFiles() else emptyList()
@@ -251,7 +299,7 @@ class BackupService(
             val targetDb = File(cacheDir, "mirutime-db-${newId()}.db")
             snapshotTarget = targetDb
             if (targetDb.exists()) targetDb.delete()
-            val db = snapshotDatabase(targetDb)
+            val db = snapshotDatabase(targetDb, options.includeHistoryOnly)
             snapshot = db
             onProgress(0.30f)
 
@@ -343,6 +391,8 @@ class BackupService(
                 readerAssets = readerAssetEntries,
                 counts = BackupCounts(
                     localBooks = books.size,
+                    libraryBooks = libraryBooks,
+                    totalBooks = savedTotalBooks,
                     localFiles = fileEntries.size,
                     pluginFiles = pluginEntries.size,
                     readerFiles = readerAssetEntries.size,
@@ -418,6 +468,8 @@ class BackupService(
                 success = true,
                 bytes = target.length(),
                 entryCount = entries,
+                bookCount = savedTotalBooks,
+                libraryBookCount = libraryBooks,
                 localBookCount = books.size,
                 localFileCount = fileEntries.size,
                 pluginFileCount = pluginEntries.size,
@@ -473,6 +525,7 @@ class BackupService(
         val kind: String,
         val file: File,
         val installId: String,
+        val isUserOverride: Boolean = false,
     ) {
         /**
          * Local installs own real content: copy, bodies and manga pages are
@@ -627,12 +680,19 @@ class BackupService(
     }
 }
 
-private suspend fun createSnapshot(databasePath: File, target: File): DatabaseSnapshot =
+private suspend fun createSnapshot(
+    databasePath: File,
+    target: File,
+    includeHistoryOnly: Boolean,
+): DatabaseSnapshot =
     withContext(Dispatchers.IO) {
         createDatabaseSnapshot(
             databasePath = databasePath.absolutePath,
             targetPath = target.absolutePath,
         )
+        if (!includeHistoryOnly) {
+            pruneHistoryOnlyBooks(target.absolutePath)
+        }
         DatabaseSnapshot(
             file = target,
             size = target.length(),

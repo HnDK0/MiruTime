@@ -1,6 +1,7 @@
 package dev.mirutime.app.features.downloads.data
 
 import dev.mirutime.data.library.BookEntity
+import dev.mirutime.data.library.libraryBookKey
 import dev.mirutime.data.library.DownloadTaskEntity
 
 /** Per-book queue card. Built from Room tasks + the real stored-body count. */
@@ -58,7 +59,7 @@ object DownloadUiMapper {
         }
         return DownloadBookUi(
             bookId = book.bookId,
-            bookUrl = book.url,
+            bookUrl = libraryBookKey(book.installId, book.url),
             title = book.title,
             coverUrl = book.coverUrl,
             kind = DownloadKind.from(tasks.first().kind) ?: DownloadKind.TEXT,

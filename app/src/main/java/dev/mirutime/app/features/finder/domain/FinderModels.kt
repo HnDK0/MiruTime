@@ -2,6 +2,7 @@ package dev.mirutime.app.features.finder.domain
 
 import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.core.api.PluginError
+import dev.mirutime.data.library.libraryBookKey
 import kotlinx.serialization.Serializable
 
 // One installed plugin as the Browse list shows it.
@@ -128,7 +129,11 @@ data class CatalogBook(
     val inLibrary: Boolean = false,
     // NoveLA bookmark: URL match = same source, title-only = another plugin.
     val badge: LibraryBadgeState? = null,
-)
+    // Raw plugin id. Two plugins may expose different works under one URL.
+    val installId: String = "",
+) {
+    val bookKey: String = libraryBookKey(installId, bookUrl)
+}
 
 data class LibraryBadgeState(val inSameSource: Boolean, val sourceCount: Int)
 
@@ -181,10 +186,11 @@ internal fun List<CatalogBook>.applyMembership(
 internal fun List<CatalogBook>.applyLibraryUrls(libraryUrls: Set<String>): List<CatalogBook> =
     if (libraryUrls.isEmpty()) this else applyMembership(libraryUrls, emptyMap())
 
-// Catalogue identity is the book URL; providers can repeat an entry across
-// pages or merged extensions.
+// Catalogue identity is installId + URL; providers can repeat an entry across
+// pages or merged extensions, but two plugins may expose different works
+// under the same URL.
 internal fun dedupeCatalogBooks(books: List<CatalogBook>): List<CatalogBook> =
-    books.distinctBy { it.bookUrl }
+    books.distinctBy { it.bookKey }
 
 // Sort options as a plugin would declare them (order = plugin order).
 @Serializable

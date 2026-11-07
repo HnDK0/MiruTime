@@ -150,7 +150,8 @@ class BackupOperationService : Service() {
                         "ok" to result.success,
                         "bytes" to result.bytes,
                         "entries" to result.entryCount,
-                        "books" to result.localBookCount,
+                        "books" to result.bookCount,
+                        "library" to result.libraryBookCount,
                         "files" to result.localFileCount,
                         "plugins" to result.pluginFileCount,
                     )
@@ -205,6 +206,11 @@ class BackupOperationService : Service() {
     private suspend fun runBackup(request: BackupOperationRequest): BackupResult {
         val app = application as MiruApp
         val requestedUri = Uri.parse(request.uri)
+        // A killed manual backup into a tree folder can leave a stale `.part`.
+        // The auto worker already does this; manual tree backups did not.
+        if (SafBackupTree.isTreeUri(request.uri)) {
+            runCatching { SafBackupTree.cleanupParts(this, requestedUri) }
+        }
         var createdDocument: Uri? = null
         var finalName: String? = null
         val destination = if (request.source == BackupOperationRequest.Source.Auto ||
@@ -314,12 +320,23 @@ class BackupOperationService : Service() {
         }
     }
 
-    private fun buildBackupMessage(result: BackupResult): String = getString(
-        R.string.backup_notification_result_fmt,
-        result.localBookCount,
-        result.localFileCount,
-        result.pluginFileCount,
-    )
+    private fun buildBackupMessage(result: BackupResult): String =
+        if (result.bookCount == result.libraryBookCount) {
+            getString(
+                R.string.backup_notification_result_same_fmt,
+                result.bookCount,
+                result.localFileCount,
+                result.pluginFileCount,
+            )
+        } else {
+            getString(
+                R.string.backup_notification_result_fmt,
+                result.bookCount,
+                result.libraryBookCount,
+                result.localFileCount,
+                result.pluginFileCount,
+            )
+        }
 
     companion object {
         fun backupIntent(
@@ -333,6 +350,7 @@ class BackupOperationService : Service() {
             putExtra(BackupOperationRequest.ExtraIncludeSettings, options.includeSettings)
             putExtra(BackupOperationRequest.ExtraIncludeImages, options.includeImages)
             putExtra(BackupOperationRequest.ExtraIncludePlugins, options.includePlugins)
+            putExtra(BackupOperationRequest.ExtraIncludeHistoryOnly, options.includeHistoryOnly)
             putExtra(BackupOperationRequest.ExtraSource, source.name)
         }
 
@@ -392,6 +410,7 @@ data class BackupOperationRequest(
         const val ExtraIncludeSettings = "backup_include_settings"
         const val ExtraIncludeImages = "backup_include_images"
         const val ExtraIncludePlugins = "backup_include_plugins"
+        const val ExtraIncludeHistoryOnly = "backup_include_history_only"
         const val ExtraSource = "backup_source"
 
         fun from(intent: Intent): BackupOperationRequest? {
@@ -411,6 +430,7 @@ data class BackupOperationRequest(
                     includeSettings = intent.getBooleanExtra(ExtraIncludeSettings, true),
                     includeImages = intent.getBooleanExtra(ExtraIncludeImages, true),
                     includePlugins = intent.getBooleanExtra(ExtraIncludePlugins, false),
+                    includeHistoryOnly = intent.getBooleanExtra(ExtraIncludeHistoryOnly, false),
                 ),
                 source = source,
             )

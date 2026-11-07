@@ -61,6 +61,7 @@ private fun DashboardBook.toLibraryBook(): LibraryBook = LibraryBook(
     title = title,
     translatedTitle = translatedTitle,
     source = source,
+    installId = installId,
     sourceLabel = sourceLabel,
     author = author,
     rating = rating,
@@ -275,11 +276,11 @@ private fun UpdatesRail(
     ) {
         items(
             updates,
-            key = { "update:${it.book.bookUrl}" },
+            key = { "update:${it.book.bookKey}" },
         ) { update ->
             LibraryCard(
                 book = update.book.toLibraryBook().copy(newChapters = update.newChapters),
-                onOpen = { onOpenBook(update.book.bookUrl) },
+                onOpen = { onOpenBook(update.book.bookKey) },
                 modifier = Modifier.width(railWidth),
                 style = railStyle,
             )
@@ -305,12 +306,12 @@ private fun HistoryRail(
     ) {
         itemsIndexed(
             history,
-            key = { index, entry -> "history:${entry.book.bookUrl}:$index" },
+            key = { index, entry -> "history:${entry.book.bookKey}:$index" },
         ) { _, entry ->
             val book = entry.book
             LibraryCard(
                 book = book.toLibraryBook(),
-                onOpen = { onOpenBook(book.bookUrl) },
+                onOpen = { onOpenBook(book.bookKey) },
                 modifier = Modifier.width(railWidth),
                 style = railStyle,
             )

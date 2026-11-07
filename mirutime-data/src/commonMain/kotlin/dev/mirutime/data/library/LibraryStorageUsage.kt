@@ -158,6 +158,25 @@ data class LocalBackupBookRow(
 )
 
 data class LocalBackupPathRow(val bookId: Long, val path: String)
+// Every in-library cover that has a local file. Unlike LocalBackupBook this
+// deliberately includes plugin books: a user-override cover is user data, not
+// a cache entry, and must survive a clean restore.
+data class LocalBackupCover(
+    val bookId: Long,
+    val installId: String,
+    val title: String,
+    val coverLocalPath: String,
+    val isUserOverride: Boolean,
+)
+
+data class LocalBackupCoverRow(
+    val bookId: Long,
+    val installId: String,
+    val title: String,
+    val coverLocalPath: String?,
+    val isUserOverride: Boolean,
+)
+
 
 data class LocalBackupPageRow(val bookId: Long, val pathsJson: String)
 

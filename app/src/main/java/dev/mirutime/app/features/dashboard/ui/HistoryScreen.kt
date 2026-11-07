@@ -101,7 +101,7 @@ fun HistoryScreen(
             selectionMode = false
             selected = emptySet()
         } else {
-            val urls = history.map { it.book.bookUrl }.toSet()
+            val urls = history.map { it.book.bookKey }.toSet()
             if (selected.any { it !in urls }) selected = selected.intersect(urls)
         }
     }
@@ -140,7 +140,7 @@ fun HistoryScreen(
                     if (selectionMode) {
                         item(key = "history-selection-toolbar") {
                             HistorySelectionToolbar(
-                                onSelectAll = { selected = history.map { it.book.bookUrl }.toSet() },
+                                onSelectAll = { selected = history.map { it.book.bookKey }.toSet() },
                                 onClear = { selected = emptySet() },
                                 onExit = {
                                     selectionMode = false
@@ -154,9 +154,9 @@ fun HistoryScreen(
                     }
                     itemsIndexed(
                         history,
-                        key = { index, entry -> "history:${entry.book.bookUrl}:$index" },
+                        key = { index, entry -> "history:${entry.book.bookKey}:$index" },
                     ) { _, entry ->
-                        val url = entry.book.bookUrl
+                        val url = entry.book.bookKey
                         MiruCard(
                             modifier = Modifier
                                 .fillMaxWidth()

@@ -3,6 +3,7 @@ package dev.mirutime.app.features.translation.data
 import dev.mirutime.app.features.book.data.BookDataProvider
 import dev.mirutime.app.features.reader.document.ReaderDocument
 import dev.mirutime.app.features.settings.data.AppSettings
+import dev.mirutime.data.library.bookKeyUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -77,7 +78,8 @@ class ChapterBulkTranslator(
 
 /** The same mode resolution the reader uses; kept here for the bulk caller. */
 fun activeTranslationMode(bookUrl: String): TranslationMode? = translationMode(
-    novel = AppSettings.novelTranslation[bookUrl],
+    novel = AppSettings.novelTranslation[bookUrl]
+        ?: AppSettings.novelTranslation[bookKeyUrl(bookUrl)],
     plugin = AppSettings.pluginTranslation[translationSourceId(bookUrl)],
     globalEnabled = AppSettings.translationGlobalMode,
     globalSource = AppSettings.globalSource,

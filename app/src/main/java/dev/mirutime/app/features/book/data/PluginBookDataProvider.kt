@@ -42,6 +42,8 @@ import dev.mirutime.data.library.ChapterStatusSnapshot
 import dev.mirutime.data.library.ChapterSeed
 import dev.mirutime.data.library.LibraryBookFiles
 import dev.mirutime.data.library.LibraryRepository
+import dev.mirutime.data.library.bookKeyUrl
+import dev.mirutime.data.library.libraryBookKey
 import dev.mirutime.data.library.LocalBookFileEntity
 import dev.mirutime.data.library.TagEntity
 import java.io.File
@@ -98,6 +100,11 @@ class PluginBookDataProvider(
     private val graph: PluginGraph
         get() = requireNotNull(graphOrNull) { "plugin graph is not configured" }
 
+    // A route passes an opaque (installId + URL) key; plugins and local
+    // adapters need the real URL. DB calls through LibraryRepository accept
+    // the key directly and decode it there.
+    private fun realUrl(bookKey: String): String = bookKeyUrl(bookKey)
+
     // Installed plugins keep the display name; the DB row only stores the id.
     // Library cards already resolve through this map, so the book page and the
     // shell header must use the same name instead of the raw install id.
@@ -153,8 +160,8 @@ class PluginBookDataProvider(
 
     override suspend fun book(bookUrl: String): BookDetails? =
         when {
-            isLocalFileBook(bookUrl) -> loadLocalSafBook(bookUrl)
-            LocalBookProvider.isLocalBook(bookUrl) -> loadLocalBook(bookUrl)
+            isLocalFileBook(realUrl(bookUrl)) -> loadLocalSafBook(bookUrl)
+            LocalBookProvider.isLocalBook(realUrl(bookUrl)) -> loadLocalBook(bookUrl)
             else -> loadBook(bookUrl, persist = false)
         }
 
@@ -163,7 +170,7 @@ class PluginBookDataProvider(
     // never books.coverUrl — and never re-saves the book through provider.book.
     // The old file/URI survives a failed forced fetch (BookCoverStore).
     override suspend fun refreshCover(bookUrl: String): Outcome<String?> {
-        if (isLocalFileBook(bookUrl) || LocalBookProvider.isLocalBook(bookUrl)) {
+        if (isLocalFileBook(realUrl(bookUrl)) || LocalBookProvider.isLocalBook(realUrl(bookUrl))) {
             return Outcome.Ok(null)
         }
         val store = coverStore ?: return Outcome.Ok(null)
@@ -177,12 +184,12 @@ class PluginBookDataProvider(
         }
         coverRefreshAt[bookUrl] = at
         MiruLog.d("covers", "event=cover-repair book=${row.bookId} result=start")
-        val sourceId = PluginBookIndex.sourceFor(bookUrl)
+        val sourceId = PluginBookIndex.sourceForBook(bookUrl)
             ?: row.installId.takeIf { it.isNotBlank() }
             ?: return Outcome.Err(PluginError.ScriptError("cover source unavailable"))
         val source = pluginSourceFor(sourceId)
             ?: return Outcome.Err(PluginError.ScriptError("cover source unavailable"))
-        val meta = when (val result = source.book(bookUrl)) {
+        val meta = when (val result = source.book(realUrl(bookUrl))) {
             is Outcome.Err -> return Outcome.Err(result.error)
             is Outcome.Ok -> result.value
         }
@@ -198,16 +205,16 @@ class PluginBookDataProvider(
     // source hiccup (or a genuinely absent field) never wipes data (FR-012);
     // membership, shelf, progress and read flags come from the existing row.
     override suspend fun refreshMetadata(bookUrl: String): Outcome<Unit> {
-        if (LocalBookProvider.isLocalBook(bookUrl) || isLocalFileBook(bookUrl)) {
+        if (LocalBookProvider.isLocalBook(realUrl(bookUrl)) || isLocalFileBook(realUrl(bookUrl))) {
             return Outcome.Ok(Unit)
         }
-        val sourceId = PluginBookIndex.sourceFor(bookUrl)
+        val sourceId = PluginBookIndex.sourceForBook(bookUrl)
             ?: return Outcome.Err(PluginError.ScriptError("metadata source unavailable"))
         val source = pluginSourceFor(sourceId)
             ?: return Outcome.Err(PluginError.ScriptError("metadata source unavailable"))
-        val existing = library?.book(sourceId, bookUrl) ?: library?.book(bookUrl)
+        val existing = library?.book(sourceId, realUrl(bookUrl)) ?: library?.book(bookUrl)
             ?: return Outcome.Err(PluginError.ScriptError("book is not stored"))
-        val meta = when (val result = source.book(bookUrl)) {
+        val meta = when (val result = source.book(realUrl(bookUrl))) {
             is Outcome.Err -> {
                 pluginErrors[bookUrl] = result.error as? PluginError
                     ?: PluginError.ScriptError(result.error::class.simpleName ?: "unknown error")
@@ -231,8 +238,9 @@ class PluginBookDataProvider(
             title = title,
             source = sourceLabel(
                 sourceId,
-                source.metadata.name.ifBlank { hostOf(bookUrl) },
+                source.metadata.name.ifBlank { hostOf(realUrl(bookUrl)) },
             ),
+            installId = sourceId,
             author = meta.author?.takeIf { it.isNotBlank() }
                 ?: existing.authorRaw.ifBlank { existing.author }.ifBlank { "Unknown" },
             originLanguage = meta.extras["language"]?.takeIf { it.isNotBlank() }
@@ -252,7 +260,7 @@ class PluginBookDataProvider(
             shelfId = existing.shelfId,
             genres = (meta.genres + extraTags(meta.extras)).distinct(),
             description = mergedText(meta.description, existing.description),
-            sourceUrl = resolveCoverUrl(bookUrl, baseUrl) ?: bookUrl,
+            sourceUrl = resolveCoverUrl(realUrl(bookUrl), baseUrl) ?: realUrl(bookUrl),
             authUrl = null,
             chapters = emptyList(),
             reviews = emptyList(),
@@ -264,7 +272,7 @@ class PluginBookDataProvider(
                 title = title,
             ),
         )
-        library?.saveBook(buildEntity(bookUrl, sourceId, built, meta, existing, timestamp))
+        library?.saveBook(buildEntity(realUrl(bookUrl), sourceId, built, meta, existing, timestamp))
         library?.let { repo -> saveTags(repo, existing.bookId, meta, timestamp) }
         PluginBookIndex.put(bookUrl, sourceId)
         PluginBookIndex.putTitle(bookUrl, title)
@@ -285,11 +293,11 @@ class PluginBookDataProvider(
     }
 
     override suspend fun ensureHistoryBook(bookUrl: String) {
-        if (isLocalFileBook(bookUrl)) {
+        if (isLocalFileBook(realUrl(bookUrl))) {
             ensureLocalSafHistory(bookUrl)
             return
         }
-        if (LocalBookProvider.isLocalBook(bookUrl)) {
+        if (LocalBookProvider.isLocalBook(realUrl(bookUrl))) {
             // The import already created the row, chapters and copy.
             loadLocalBook(bookUrl)
             return
@@ -333,11 +341,11 @@ class PluginBookDataProvider(
             details[bookUrl] = cached
             return overlayLibraryState(bookUrl, cached)
         }
-        val sourceId = PluginBookIndex.sourceFor(bookUrl) ?: return null
+        val sourceId = PluginBookIndex.sourceForBook(bookUrl) ?: return null
         val source = pluginSourceFor(sourceId) ?: return null
         // Metadata only: the chapter list is a separate (possibly slow) call
         // so the page header never waits for it.
-        val metaResult = source.book(bookUrl)
+        val metaResult = source.book(realUrl(bookUrl))
         val meta = metaResult.getOrNull()
         (metaResult as? Outcome.Err)?.let { failure ->
             pluginErrors[bookUrl] = failure.error as? PluginError
@@ -347,7 +355,7 @@ class PluginBookDataProvider(
         if (meta == null) {
             // Offline reopen: the DB row is authoritative enough to restore the
             // reader even when the plugin cannot reach its site.
-            val existing = library?.book(sourceId, bookUrl) ?: library?.book(bookUrl)
+            val existing = library?.book(sourceId, realUrl(bookUrl)) ?: library?.book(bookUrl)
                 ?: return null
             val built = bookDetailsFromRow(existing)
             details[bookUrl] = built
@@ -363,7 +371,7 @@ class PluginBookDataProvider(
 
         // The DB row owns identity flags; a fresh plugin load must never reset
         // library membership, shelf, progress or the original added time.
-        val existing = library?.book(sourceId, bookUrl)
+        val existing = library?.book(sourceId, realUrl(bookUrl))
         val readCount = existing?.let { library?.readChapterIndexes(it.bookId)?.size } ?: 0
         val timestamp = now()
         val built = BookDetails(
@@ -371,8 +379,9 @@ class PluginBookDataProvider(
             title = title,
             source = sourceLabel(
                 sourceId,
-                source.metadata.name.ifBlank { hostOf(bookUrl) },
+                source.metadata.name.ifBlank { hostOf(realUrl(bookUrl)) },
             ),
+            installId = sourceId,
             author = meta.author?.takeIf { it.isNotBlank() } ?: "Unknown",
             originLanguage = meta.extras["language"]?.takeIf { it.isNotBlank() }
                 ?: meta.extras["originLanguage"]?.takeIf { it.isNotBlank() }
@@ -390,7 +399,7 @@ class PluginBookDataProvider(
             shelfId = existing?.shelfId ?: "reading",
             genres = (meta.genres + extraTags(meta.extras)).distinct(),
             description = meta.description.orEmpty(),
-            sourceUrl = resolveCoverUrl(bookUrl, baseUrl) ?: bookUrl,
+            sourceUrl = resolveCoverUrl(realUrl(bookUrl), baseUrl) ?: realUrl(bookUrl),
             authUrl = null,     // stub: plugin login flow is a later stage
             chapters = emptyList(),
             reviews = emptyList(), // stub: plugins do not expose reviews yet
@@ -414,7 +423,7 @@ class PluginBookDataProvider(
             )
         }
         if (persist) library?.let { repo ->
-            val saved = repo.book(sourceId, bookUrl)
+            val saved = repo.book(sourceId, realUrl(bookUrl))
             if (saved != null) saveTags(repo, saved.bookId, meta, timestamp)
         }
         PluginBookIndex.put(bookUrl, sourceId)
@@ -426,9 +435,10 @@ class PluginBookDataProvider(
     // Cold-process offline fallback. Everything the reader needs comes from the
     // persisted row; the chapter list falls back to stored chapters separately.
     private suspend fun bookDetailsFromRow(row: BookEntity): BookDetails = BookDetails(
-        bookUrl = row.url,
+        bookUrl = libraryBookKey(row.installId, row.url),
         title = row.title,
         source = sourceLabel(row.installId),
+        installId = row.installId,
         author = row.authorRaw.ifBlank { row.author }.ifBlank { "Unknown" },
         originLanguage = row.originLanguage,
         contentType = runCatching { ContentType.valueOf(row.contentType) }
@@ -516,8 +526,8 @@ class PluginBookDataProvider(
         built: BookDetails,
     ): BookEntity? {
         val repo = library ?: return null
-        val sourceId = PluginBookIndex.sourceFor(bookUrl) ?: return null
-        val existing = repo.book(sourceId, bookUrl)
+        val sourceId = PluginBookIndex.sourceForBook(bookUrl) ?: return null
+        val existing = repo.book(sourceId, realUrl(bookUrl))
         repo.saveBook(
             buildEntity(
                 bookUrl = bookUrl,
@@ -530,7 +540,7 @@ class PluginBookDataProvider(
         )
         PluginBookIndex.put(bookUrl, sourceId)
         PluginBookIndex.putTitle(bookUrl, built.title)
-        return repo.book(sourceId, bookUrl)
+        return repo.book(sourceId, realUrl(bookUrl))
     }
 
     // Local books have no plugin and no network metadata. The DB row and the
@@ -539,9 +549,9 @@ class PluginBookDataProvider(
     private suspend fun loadLocalBook(bookUrl: String): BookDetails? {
         details[bookUrl]?.let { return overlayLibraryState(bookUrl, it) }
         val adapter = local ?: return null
-        val meta = adapter.book(bookUrl) ?: return null
+        val meta = adapter.book(realUrl(bookUrl)) ?: return null
         val row = library?.book(bookUrl)
-        val chapterCount = adapter.chapters(bookUrl)?.size ?: row?.totalChapters ?: 0
+        val chapterCount = adapter.chapters(realUrl(bookUrl))?.size ?: row?.totalChapters ?: 0
         val title = meta.title.trim().ifBlank { row?.title ?: "Untitled" }
         val author = meta.author?.trim().takeUnless { it.isNullOrBlank() }
             ?: row?.authorRaw?.takeIf { it.isNotBlank() }
@@ -554,6 +564,7 @@ class PluginBookDataProvider(
             bookUrl = bookUrl,
             title = title,
             source = row?.installId ?: "local",
+            installId = row?.installId ?: "local",
             author = author,
             originLanguage = row?.originLanguage,
             contentType = if (row?.installId == LocalMangaInstallId) {
@@ -593,7 +604,7 @@ class PluginBookDataProvider(
     // copied and no row is needed until the reader/ensureHistoryBook asks.
     private suspend fun loadLocalSafBook(bookUrl: String): BookDetails? {
         val source = localSaf ?: return null
-        val meta = source.book(bookUrl)
+        val meta = source.book(realUrl(bookUrl))
         val previousHash = localSafHashes.put(bookUrl, meta.cacheHash)
         if (previousHash != null && previousHash != meta.cacheHash) {
             chapterLists.remove(bookUrl)
@@ -610,6 +621,7 @@ class PluginBookDataProvider(
             bookUrl = bookUrl,
             title = meta.title.trim().ifBlank { row?.title ?: meta.displayName },
             source = row?.installId ?: meta.installId,
+            installId = row?.installId ?: meta.installId,
             author = meta.author.trim().ifBlank {
                 row?.authorRaw?.takeIf { it.isNotBlank() } ?: "Unknown"
             },
@@ -646,7 +658,7 @@ class PluginBookDataProvider(
     private suspend fun localSafChapters(bookUrl: String): List<BookChapter> {
         chapterLists[bookUrl]?.let { return withChapterStatus(bookUrl, it) }
         val source = localSaf ?: return emptyList()
-        val mapped = source.chapters(bookUrl).map { chapter ->
+        val mapped = source.chapters(realUrl(bookUrl)).map { chapter ->
             BookChapter(
                 index = chapter.index,
                 title = chapter.title.ifBlank { "Chapter ${chapter.index}" },
@@ -675,8 +687,8 @@ class PluginBookDataProvider(
     private suspend fun ensureLocalSafHistory(bookUrl: String) {
         val repo = library ?: return
         val source = localSaf ?: return
-        val meta = source.book(bookUrl)
-        val chapters = source.chapters(bookUrl)
+        val meta = source.book(realUrl(bookUrl))
+        val chapters = source.chapters(realUrl(bookUrl))
         val documentUri = meta.documentUri
         val existingFile = repo.localBookFileByUri(documentUri)
         val existingBook = existingFile?.let { repo.book(it.bookId) }
@@ -698,7 +710,7 @@ class PluginBookDataProvider(
                 runCatching { repo.clearProgress(existingBook.bookId) }
             }
         }
-        val bookRow = buildLocalSafBookRow(existingBook, meta, bookUrl, seeds.size, timestamp)
+        val bookRow = buildLocalSafBookRow(existingBook, meta, realUrl(bookUrl), seeds.size, timestamp)
         val fileRow = directBookFileRow(meta, documentUri, existingFile, timestamp)
         val bookId = repo.ensureDirectBook(bookRow, fileRow, seeds, timestamp)
         // Opening a direct book must make its embedded cover visible on the
@@ -716,7 +728,7 @@ class PluginBookDataProvider(
     private suspend fun persistDirectCover(bookId: Long, bookUrl: String) {
         val store = coverStore ?: return
         if (store.localCoverUrl(bookId) != null) return
-        val bytes = localSaf?.coverBytes(bookUrl) ?: return
+        val bytes = localSaf?.coverBytes(realUrl(bookUrl)) ?: return
         store.storeLocalCover(bookId, remoteUrl = null, bytes)
     }
 
@@ -860,10 +872,10 @@ class PluginBookDataProvider(
     }
 
     override suspend fun chapterListHash(bookUrl: String): String? {
-        if (isLocalFileBook(bookUrl) || LocalBookProvider.isLocalBook(bookUrl)) return null
-        val sourceId = PluginBookIndex.sourceFor(bookUrl) ?: return null
+        if (isLocalFileBook(realUrl(bookUrl)) || LocalBookProvider.isLocalBook(realUrl(bookUrl))) return null
+        val sourceId = PluginBookIndex.sourceForBook(bookUrl) ?: return null
         val source = pluginSourceFor(sourceId) ?: return null
-        return source.chapterListHash(bookUrl).getOrNull()
+        return source.chapterListHash(realUrl(bookUrl)).getOrNull()
     }
 
     override suspend fun refreshChapters(bookUrl: String): List<BookChapter> =
@@ -881,11 +893,11 @@ class PluginBookDataProvider(
         bookUrl: String,
     ): Outcome<List<BookChapter>> {
         invalidateChapterCaches(bookUrl)
-        if (isLocalFileBook(bookUrl)) {
-            localSaf?.invalidate(bookUrl)
+        if (isLocalFileBook(realUrl(bookUrl))) {
+            localSaf?.invalidate(realUrl(bookUrl))
             return Outcome.Ok(localSafChapters(bookUrl))
         }
-        if (LocalBookProvider.isLocalBook(bookUrl)) return Outcome.Ok(localChapters(bookUrl))
+        if (LocalBookProvider.isLocalBook(realUrl(bookUrl))) return Outcome.Ok(localChapters(bookUrl))
         val stored = storedChapters(bookUrl)
         return when (val result = fetchPluginChaptersOutcome(bookUrl, stored?.size ?: 0)) {
             is Outcome.Err -> result
@@ -897,11 +909,11 @@ class PluginBookDataProvider(
     // failure instead of collapsing into "no chapters".
     override suspend fun refreshChapterCountOutcome(bookUrl: String): Outcome<Int?> {
         invalidateChapterCaches(bookUrl)
-        if (isLocalFileBook(bookUrl)) {
-            localSaf?.invalidate(bookUrl)
+        if (isLocalFileBook(realUrl(bookUrl))) {
+            localSaf?.invalidate(realUrl(bookUrl))
             return Outcome.Ok(localSafChapters(bookUrl).size.takeIf { it > 0 })
         }
-        if (LocalBookProvider.isLocalBook(bookUrl)) {
+        if (LocalBookProvider.isLocalBook(realUrl(bookUrl))) {
             return Outcome.Ok(localChapters(bookUrl).size.takeIf { it > 0 })
         }
         val stored = storedChapters(bookUrl)
@@ -923,7 +935,7 @@ class PluginBookDataProvider(
     // DB-only: local/SAF books keep their existing paths and return null so the
     // screen does not start a redundant background refresh for them.
     override suspend fun cachedChapters(bookUrl: String): List<BookChapter>? {
-        if (isLocalFileBook(bookUrl) || LocalBookProvider.isLocalBook(bookUrl)) return null
+        if (isLocalFileBook(realUrl(bookUrl)) || LocalBookProvider.isLocalBook(realUrl(bookUrl))) return null
         return storedChapters(bookUrl)
     }
 
@@ -936,8 +948,8 @@ class PluginBookDataProvider(
     // Typed variant for the book page: an Err must reach the screen instead of
     // collapsing into an empty list, which reads as "No chapters".
     override suspend fun chaptersOutcome(bookUrl: String): Outcome<List<BookChapter>> {
-        if (isLocalFileBook(bookUrl)) return Outcome.Ok(localSafChapters(bookUrl))
-        if (LocalBookProvider.isLocalBook(bookUrl)) return Outcome.Ok(localChapters(bookUrl))
+        if (isLocalFileBook(realUrl(bookUrl))) return Outcome.Ok(localSafChapters(bookUrl))
+        if (LocalBookProvider.isLocalBook(realUrl(bookUrl))) return Outcome.Ok(localChapters(bookUrl))
         chapterLists[bookUrl]?.let {
             persistCachedChapters(bookUrl)
             return Outcome.Ok(withChapterStatus(bookUrl, it))
@@ -958,9 +970,9 @@ class PluginBookDataProvider(
         bookUrl: String,
         minimumCount: Int = 0,
     ): Outcome<List<BookChapter>?> {
-        val sourceId = PluginBookIndex.sourceFor(bookUrl) ?: return Outcome.Ok(null)
+        val sourceId = PluginBookIndex.sourceForBook(bookUrl) ?: return Outcome.Ok(null)
         val source = pluginSourceFor(sourceId) ?: return Outcome.Ok(null)
-        val chaptersResult = source.chapters(bookUrl)
+        val chaptersResult = source.chapters(realUrl(bookUrl))
         val raw = when (chaptersResult) {
             is Outcome.Ok -> chaptersResult.value
             is Outcome.Err -> return chaptersResult
@@ -997,7 +1009,7 @@ class PluginBookDataProvider(
         chapterTitles[bookUrl] = titles
         chapterLists[bookUrl] = mapped
         library?.let { repo ->
-            val row = repo.book(sourceId, bookUrl)
+            val row = repo.book(sourceId, realUrl(bookUrl))
             if (row != null) {
                 repo.replaceChapters(
                     bookId = row.bookId,
@@ -1047,7 +1059,7 @@ class PluginBookDataProvider(
     private suspend fun localChapters(bookUrl: String): List<BookChapter> {
         chapterLists[bookUrl]?.let { return withChapterStatus(bookUrl, it) }
         val adapter = local ?: return emptyList()
-        val raw = adapter.chapters(bookUrl) ?: return emptyList()
+        val raw = adapter.chapters(realUrl(bookUrl)) ?: return emptyList()
         val mapped = dedupeChapters(
             raw.mapIndexed { position, chapter ->
                 val index = position + 1
@@ -1104,7 +1116,7 @@ class PluginBookDataProvider(
         return applyChapterStatus(
             chapters = chapters,
             snapshot = snapshot,
-            offline = isLocalFileBook(bookUrl) || LocalBookProvider.isLocalBook(bookUrl),
+            offline = isLocalFileBook(realUrl(bookUrl)) || LocalBookProvider.isLocalBook(realUrl(bookUrl)),
         )
     }
 
@@ -1131,9 +1143,9 @@ class PluginBookDataProvider(
 
     override suspend fun chapterContent(bookUrl: String, chapterIndex: Int): ChapterContent? {
         val started = System.nanoTime()
-        if (isLocalFileBook(bookUrl)) {
+        if (isLocalFileBook(realUrl(bookUrl))) {
             val source = localSaf ?: return null
-            val content = source.chapterContent(bookUrl, chapterIndex)
+            val content = source.chapterContent(realUrl(bookUrl), chapterIndex)
             return ChapterContent(
                 bookUrl = bookUrl,
                 chapterIndex = chapterIndex,
@@ -1143,7 +1155,7 @@ class PluginBookDataProvider(
                 source = chapterSourceFor(bookUrl, safCacheHit = content.cacheHit),
             ).also { logChapterContent(it, started) }
         }
-        if (LocalBookProvider.isLocalBook(bookUrl)) {
+        if (LocalBookProvider.isLocalBook(realUrl(bookUrl))) {
             return localChapterContent(bookUrl, chapterIndex)?.also {
                 logChapterContent(it, started)
             }
@@ -1153,7 +1165,7 @@ class PluginBookDataProvider(
         downloadedBodyContent(bookUrl, chapterIndex)?.let { content ->
             return content.also { logChapterContent(it, started) }
         }
-        val sourceId = PluginBookIndex.sourceFor(bookUrl)
+        val sourceId = PluginBookIndex.sourceForBook(bookUrl)
             ?: throw ChapterDownloadException(
                 ChapterFailureKind.SOURCE,
                 retryable = false,
@@ -1242,7 +1254,7 @@ class PluginBookDataProvider(
         bookUrl: String,
         chapterIndex: Int,
     ): Outcome<List<VideoStream>> {
-        val sourceId = PluginBookIndex.sourceFor(bookUrl)
+        val sourceId = PluginBookIndex.sourceForBook(bookUrl)
             ?: return Outcome.Err(PluginError.ScriptError("Unknown source"))
         val source = pluginSourceFor(sourceId)
             ?: return Outcome.Err(PluginError.ScriptError("Source unavailable"))
@@ -1350,8 +1362,8 @@ class PluginBookDataProvider(
     }
 
     override suspend fun chapterPages(bookUrl: String, chapterIndex: Int): List<String> {
-        if (isLocalFileBook(bookUrl) || LocalBookProvider.isLocalBook(bookUrl)) return emptyList()
-        val sourceId = PluginBookIndex.sourceFor(bookUrl) ?: return emptyList()
+        if (isLocalFileBook(realUrl(bookUrl)) || LocalBookProvider.isLocalBook(realUrl(bookUrl))) return emptyList()
+        val sourceId = PluginBookIndex.sourceForBook(bookUrl) ?: return emptyList()
         val source = pluginSourceFor(sourceId) ?: return emptyList()
         if (chapterUrls[bookUrl] == null) chapters(bookUrl)
         val chapterUrl = chapterUrls[bookUrl]?.get(chapterIndex)
@@ -1384,7 +1396,7 @@ class PluginBookDataProvider(
     // their auth/CF/rate-limit type so the queue can fail fast instead of
     // retrying a blocked source forever.
     override suspend fun downloadChapterText(bookUrl: String, chapterIndex: Int): String {
-        val sourceId = PluginBookIndex.sourceFor(bookUrl)
+        val sourceId = PluginBookIndex.sourceForBook(bookUrl)
             ?: failDownload(ChapterFailureKind.SOURCE, "Unknown source", retryable = false)
         val source = pluginSourceFor(sourceId)
             ?: failDownload(ChapterFailureKind.SOURCE, "Source unavailable", retryable = false)
@@ -1406,7 +1418,7 @@ class PluginBookDataProvider(
     }
 
     override suspend fun downloadChapterPages(bookUrl: String, chapterIndex: Int): List<String> {
-        val sourceId = PluginBookIndex.sourceFor(bookUrl)
+        val sourceId = PluginBookIndex.sourceForBook(bookUrl)
             ?: failDownload(ChapterFailureKind.SOURCE, "Unknown source", retryable = false)
         val source = pluginSourceFor(sourceId)
             ?: failDownload(ChapterFailureKind.SOURCE, "Source unavailable", retryable = false)
@@ -1647,8 +1659,8 @@ class PluginBookDataProvider(
     // model; CBZ pages become image HTML and then Image blocks.
     private suspend fun localChapterContent(bookUrl: String, chapterIndex: Int): ChapterContent? {
         val adapter = local ?: return null
-        val chapterUrl = LocalBookProvider.chapterUrl(bookUrl, chapterIndex)
-        return adapter.chapterContent(bookUrl, chapterUrl)
+        val chapterUrl = LocalBookProvider.chapterUrl(realUrl(bookUrl), chapterIndex)
+        return adapter.chapterContent(realUrl(bookUrl), chapterUrl)
     }
 
     // Library state lives in the Room store; downloads still wait for the queue.
@@ -1657,27 +1669,38 @@ class PluginBookDataProvider(
         details[bookUrl]?.let { details[bookUrl] = it.copy(shelfId = shelfId) }
     }
 
-    override suspend fun setInLibrary(bookUrl: String, inLibrary: Boolean): MembershipResult {
+    override suspend fun setInLibrary(bookUrl: String, inLibrary: Boolean): MembershipResult =
+        setInLibrary(bookUrl, inLibrary, installId = null)
+
+    override suspend fun setInLibrary(
+        bookUrl: String,
+        inLibrary: Boolean,
+        installId: String?,
+    ): MembershipResult {
         val repo = library ?: return MembershipResult(false)
         // The explicit target is published before any lock/DB work, so an
         // older in-flight call can see it is stale and skip its write.
         latestMembershipTarget[bookUrl] = inLibrary
-        if (isLocalFileBook(bookUrl)) {
+        if (isLocalFileBook(realUrl(bookUrl))) {
             return if (inLibrary) {
                 addLocalSafToLibrary(repo, bookUrl)
             } else {
                 removeLocalSafFromLibrary(repo, bookUrl)
             }
         }
-        return if (inLibrary) addToLibrary(repo, bookUrl) else removeFromLibrary(repo, bookUrl)
+        return if (inLibrary) {
+            addToLibrary(repo, bookUrl)
+        } else {
+            removeFromLibrary(repo, bookUrl, installId)
+        }
     }
 
     private suspend fun addToLibrary(
         repo: LibraryRepository,
         bookUrl: String,
     ): MembershipResult {
-        val localBook = LocalBookProvider.isLocalBook(bookUrl)
-        val key = (PluginBookIndex.sourceFor(bookUrl) ?: if (localBook) "local" else "unknown") +
+        val localBook = LocalBookProvider.isLocalBook(realUrl(bookUrl))
+        val key = (PluginBookIndex.sourceForBook(bookUrl) ?: if (localBook) "local" else "unknown") +
             "|" + bookUrl
         val lock = membershipLocks.getOrPut(key) { Mutex() }
 
@@ -1738,9 +1761,10 @@ class PluginBookDataProvider(
     private suspend fun removeFromLibrary(
         repo: LibraryRepository,
         bookUrl: String,
+        installId: String? = null,
     ): MembershipResult {
-        val localBook = LocalBookProvider.isLocalBook(bookUrl)
-        val key = (PluginBookIndex.sourceFor(bookUrl) ?: if (localBook) "local" else "unknown") +
+        val localBook = LocalBookProvider.isLocalBook(realUrl(bookUrl))
+        val key = (PluginBookIndex.sourceForBook(bookUrl) ?: if (localBook) "local" else "unknown") +
             "|" + bookUrl
         val lock = membershipLocks.getOrPut(key) { Mutex() }
         return lock.withLock {
@@ -1750,7 +1774,12 @@ class PluginBookDataProvider(
             // One transaction: collect every owned path, then delete books +
             // FTS. Missing rows are an idempotent success.
             val deleted = try {
-                repo.deleteBookWithFiles(bookUrl)
+                // Null installId arrives before BookDetails loads. Resolve the
+                // stored raw id instead of falling back to URL-wide delete.
+                repo.deleteBookWithFiles(
+                    bookUrl,
+                    installId ?: repo.book(bookUrl)?.installId,
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -1944,9 +1973,9 @@ internal fun applyChapterStatus(
 
 // Existing content came from the local file/DB, not the plugin network.
 internal fun chapterSourceFor(bookUrl: String, safCacheHit: Boolean): ChapterSource = when {
-    isLocalFileBook(bookUrl) ->
+    isLocalFileBook(bookKeyUrl(bookUrl)) ->
         if (safCacheHit) ChapterSource.LOCAL_SAF_CACHE else ChapterSource.LOCAL_SAF_DIRECT
-    LocalBookProvider.isLocalBook(bookUrl) -> ChapterSource.IMPORTED_DB_BODY
+    LocalBookProvider.isLocalBook(bookKeyUrl(bookUrl)) -> ChapterSource.IMPORTED_DB_BODY
     else -> ChapterSource.PLUGIN_NETWORK
 }
 

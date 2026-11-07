@@ -2,6 +2,7 @@ package dev.mirutime.app.features.settings.data
 
 import dev.mirutime.data.library.LibrarySchemaVersion
 import dev.mirutime.data.library.LocalBackupBook
+import dev.mirutime.data.library.LocalBackupCover
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -103,7 +104,7 @@ class BackupServiceTest {
             appVersion = "1.2.3",
             localBooks = { books },
             settingsSnapshot = { settings },
-            snapshotDatabase = { target ->
+            snapshotDatabase = { target, _ ->
                 snapshotTarget = target
                 target.writeText("db-bytes")
                 DatabaseSnapshot(target, target.length(), sha256Hex("db-bytes".encodeToByteArray()))
@@ -296,7 +297,7 @@ class BackupServiceTest {
             cacheDir = cacheDir,
             appVersion = "test",
             localBooks = { emptyList() },
-            snapshotDatabase = { file ->
+            snapshotDatabase = { file, _ ->
                 target = file
                 error("snapshot failed")
             },
@@ -309,11 +310,179 @@ class BackupServiceTest {
         assertFalse(target!!.exists())
     }
 
+    @Test
+    fun `plugin cover is included when images are enabled`() = runBlocking {
+        val root = tempDir()
+        val filesDir = File(root, "files").apply { mkdirs() }
+        val cacheDir = File(root, "cache").apply { mkdirs() }
+        val cover = write(filesDir, "covers/42/cover", "plugin-cover")
+        val covers = listOf(
+            LocalBackupCover(
+                bookId = 42,
+                installId = "plugin-one",
+                title = "Plugin",
+                coverLocalPath = cover.absolutePath,
+                isUserOverride = false,
+            ),
+        )
+        val service = requiredService(root, filesDir, cacheDir, covers = covers)
+        val output = ByteArrayOutputStream()
+
+        val result = service.createBackup(
+            output,
+            BackupOptions(includeSettings = false, includeImages = true, includePlugins = false),
+        )
+
+        assertTrue(result.error, result.success)
+        val entries = readZip(output.toByteArray())
+        assertEquals("plugin-cover", entries.getValue("files/covers/42/cover").decodeToString())
+    }
+
+    @Test
+    fun `user override cover is included even when images are disabled`() = runBlocking {
+        val root = tempDir()
+        val filesDir = File(root, "files").apply { mkdirs() }
+        val cacheDir = File(root, "cache").apply { mkdirs() }
+        val cover = write(filesDir, "covers/43/cover", "user-cover")
+        val covers = listOf(
+            LocalBackupCover(
+                bookId = 43,
+                installId = "plugin-one",
+                title = "Plugin",
+                coverLocalPath = cover.absolutePath,
+                isUserOverride = true,
+            ),
+        )
+        val service = requiredService(root, filesDir, cacheDir, covers = covers)
+        val output = ByteArrayOutputStream()
+
+        val result = service.createBackup(
+            output,
+            BackupOptions(includeSettings = false, includeImages = false, includePlugins = false),
+        )
+
+        assertTrue(result.error, result.success)
+        val entries = readZip(output.toByteArray())
+        assertEquals("user-cover", entries.getValue("files/covers/43/cover").decodeToString())
+    }
+
+    @Test
+    fun `plugin cached cover is skipped when images are disabled`() = runBlocking {
+        val root = tempDir()
+        val filesDir = File(root, "files").apply { mkdirs() }
+        val cacheDir = File(root, "cache").apply { mkdirs() }
+        val cover = write(filesDir, "covers/44/cover", "cached-cover")
+        val covers = listOf(
+            LocalBackupCover(
+                bookId = 44,
+                installId = "plugin-one",
+                title = "Plugin",
+                coverLocalPath = cover.absolutePath,
+                isUserOverride = false,
+            ),
+        )
+        val service = requiredService(root, filesDir, cacheDir, covers = covers)
+        val output = ByteArrayOutputStream()
+
+        val result = service.createBackup(
+            output,
+            BackupOptions(includeSettings = false, includeImages = false, includePlugins = false),
+        )
+
+        assertTrue(result.error, result.success)
+        assertFalse(readZip(output.toByteArray()).containsKey("files/covers/44/cover"))
+    }
+
+    @Test
+    fun `manifest reports total books and the in-library subset`() = runBlocking {
+        val root = tempDir()
+        val filesDir = File(root, "files").apply { mkdirs() }
+        val cacheDir = File(root, "cache").apply { mkdirs() }
+        val service = requiredService(
+            root,
+            filesDir,
+            cacheDir,
+            bookCount = 12,
+            libraryBookCount = 7,
+        )
+        val output = ByteArrayOutputStream()
+
+        val libraryOnly = service.createBackup(
+            output,
+            BackupOptions(
+                includeSettings = false,
+                includeImages = false,
+                includePlugins = false,
+                includeHistoryOnly = false,
+            ),
+        )
+
+        assertTrue(libraryOnly.error, libraryOnly.success)
+        assertEquals(7, libraryOnly.bookCount)
+        assertEquals(7, libraryOnly.libraryBookCount)
+        assertEquals(0, libraryOnly.localBookCount)
+        val libraryManifest = BackupJson.decodeFromString(
+            BackupManifest.serializer(),
+            readZip(output.toByteArray()).getValue("manifest.json").decodeToString(),
+        )
+        assertEquals(7, libraryManifest.counts.totalBooks)
+        assertEquals(7, libraryManifest.counts.libraryBooks)
+        assertEquals(0, libraryManifest.counts.localBooks)
+
+        val withHistoryOutput = ByteArrayOutputStream()
+        val withHistory = service.createBackup(
+            withHistoryOutput,
+            BackupOptions(
+                includeSettings = false,
+                includeImages = false,
+                includePlugins = false,
+                includeHistoryOnly = true,
+            ),
+        )
+        assertEquals(12, withHistory.bookCount)
+        assertEquals(7, withHistory.libraryBookCount)
+        val fullManifest = BackupJson.decodeFromString(
+            BackupManifest.serializer(),
+            readZip(withHistoryOutput.toByteArray()).getValue("manifest.json").decodeToString(),
+        )
+        assertEquals(12, fullManifest.counts.totalBooks)
+        assertEquals(7, fullManifest.counts.libraryBooks)
+    }
+
+    @Test
+    fun `snapshot receives the includeHistoryOnly option`() = runBlocking {
+        val root = tempDir()
+        val filesDir = File(root, "files").apply { mkdirs() }
+        val cacheDir = File(root, "cache").apply { mkdirs() }
+        val seen = mutableListOf<Boolean>()
+        val service = requiredService(
+            root,
+            filesDir,
+            cacheDir,
+            seenHistoryFlags = seen,
+        )
+
+        service.createBackup(
+            ByteArrayOutputStream(),
+            BackupOptions(includeSettings = false, includeHistoryOnly = true),
+        )
+        service.createBackup(
+            ByteArrayOutputStream(),
+            BackupOptions(includeSettings = false, includeHistoryOnly = false),
+        )
+
+        assertEquals(listOf(true, false), seen)
+    }
+
     private fun requiredService(
         root: File,
         filesDir: File,
         cacheDir: File,
         books: List<LocalBackupBook> = emptyList(),
+        covers: List<LocalBackupCover> = emptyList(),
+        bookCount: Int = 0,
+        libraryBookCount: Int = 0,
+        seenHistoryFlags: MutableList<Boolean>? = null,
         readerSnapshot: () -> ReaderBackupPrefs = { ReaderBackupPrefs() },
     ) = BackupService(
         databasePath = File(root, "live.db"),
@@ -321,8 +490,12 @@ class BackupServiceTest {
         cacheDir = cacheDir,
         appVersion = "test",
         localBooks = { books },
+        localCovers = { covers },
+        bookCount = { bookCount },
+        libraryBookCount = { libraryBookCount },
         readerSnapshot = readerSnapshot,
-        snapshotDatabase = { target ->
+        snapshotDatabase = { target, includeHistoryOnly ->
+            seenHistoryFlags?.add(includeHistoryOnly)
             target.writeText("db")
             DatabaseSnapshot(target, target.length(), sha256Hex("db".encodeToByteArray()))
         },

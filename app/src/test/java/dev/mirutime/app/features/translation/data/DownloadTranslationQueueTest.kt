@@ -2,6 +2,7 @@ package dev.mirutime.app.features.translation.data
 
 import dev.mirutime.core.api.Outcome
 import dev.mirutime.core.api.PluginError
+import dev.mirutime.app.features.translation.domain.ChapterTranslationResult
 import dev.mirutime.data.library.ChapterBodyEntity
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -193,6 +194,32 @@ class DownloadTranslationRunnerTest {
         val row = store.rows.single()
         assertEquals(DownloadTranslationQueue.STATUS_COMPLETE, row.status)
         assertTrue(store.blocks.getValue(row.translationId).isNotEmpty())
+    }
+
+    @Test
+    fun `book deleted during translation is not saved`() = runTest {
+        val (store, files, engine) = setup()
+        store.addRow(1L, DownloadTranslationQueue.STATUS_PENDING)
+        addDownloadedBody(store, files, 1L)
+        engine.outcome = { request ->
+            store.bookRow = null
+            Outcome.Ok(
+                ChapterTranslationResult(
+                    translations = request.units.associate {
+                        it.id.toInt() to "translated:${it.text}"
+                    },
+                    provider = request.provider,
+                    model = "fake",
+                ),
+            )
+        }
+
+        val outcome = runner(store, files, engine).first.run(1, 1)
+
+        assertEquals(0, outcome.translated)
+        assertEquals(1, engine.requests.size)
+        assertTrue(store.blocks.isEmpty())
+        assertTrue(store.rows.isEmpty())
     }
 
     @Test

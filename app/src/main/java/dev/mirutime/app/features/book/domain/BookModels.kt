@@ -58,6 +58,9 @@ data class BookDetails(
     val bookUrl: String,
     val title: String,
     val source: String,
+    // Raw installId; [source] is the display label and must not be used for
+    // membership/delete targeting.
+    val installId: String = source,
     val author: String,
     // The plugin's original language, e.g. "English". Null hides the chip
     // (a plugin may not provide it).

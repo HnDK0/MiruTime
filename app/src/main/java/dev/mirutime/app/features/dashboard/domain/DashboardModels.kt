@@ -1,6 +1,7 @@
 package dev.mirutime.app.features.dashboard.domain
 
 import dev.mirutime.app.features.library.domain.ContentType
+import dev.mirutime.data.library.libraryBookKey
 
 // Dashboard UI models. Chapter-level reading lives behind ReaderDataProvider;
 // these are the dashboard's read-only view of it.
@@ -11,6 +12,8 @@ data class DashboardBook(
     // falls back to [title] in the row/rail composables.
     val translatedTitle: String? = null,
     val source: String,
+    // Raw installId; [source] may synthesize a host for legacy rows.
+    val installId: String = "",
     // Plugin display name; falls back to the install id.
     val sourceLabel: String = source,
     val author: String,
@@ -29,6 +32,7 @@ data class DashboardBook(
     val progress: Float get() = readChapters.toFloat() / totalChapters.coerceAtLeast(1)
     val percent: Int get() = (progress * 100).toInt().coerceIn(0, 100)
     val chaptersLeft: Int get() = (totalChapters - readChapters).coerceAtLeast(0)
+    val bookKey: String = libraryBookKey(installId, bookUrl)
 }
 
 data class ReadingTotals(

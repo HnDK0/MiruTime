@@ -187,7 +187,7 @@ class PluginFinderDataProvider(
             CatalogRequest.List -> source.catalog(index)
         }
         val ok = requirePluginPage(operation, result, sourceId, source.metadata.name)
-        val mapped = mapCatalogPage(ok, baseUrl = source.metadata.baseUrl)
+        val mapped = mapCatalogPage(ok, baseUrl = source.metadata.baseUrl, sourceId = sourceId)
         // A catalogue page carries no genre/status metadata: the provider did
         // the real filtering above, so genres are trusted and ongoingOnly is
         // not re-applied here (it would empty every result). Sort/direction are
@@ -251,7 +251,7 @@ class PluginFinderDataProvider(
             throw e
         }
         val ok = requirePluginPage("search", result, sourceId, source.metadata.name)
-        val books = mapCatalogPage(ok, baseUrl = source.metadata.baseUrl).take(12)
+        val books = mapCatalogPage(ok, baseUrl = source.metadata.baseUrl, sourceId = sourceId).take(12)
         graph.registerCoverReferers(sourceId, books.mapNotNull { it.coverUrl }, source.metadata.baseUrl)
         recordBooks(sourceId, books)
         return withMembership(books)
@@ -589,6 +589,7 @@ class PluginFinderDataProvider(
             ),
             book = CatalogBook(
                 bookUrl = clean,
+                installId = plugin.id,
                 title = meta.title.trim().ifBlank { clean },
                 rating = parsePluginRating(meta.rating),
                 chapters = 0,
@@ -969,7 +970,12 @@ internal suspend fun loadFilterSchema(
 // Pure mapping, kept top-level so it is unit-testable without Android (and so
 // a buggy plugin can never inject duplicate Lazy keys or crash the grid: blank
 // entries are dropped, duplicate URLs collapse, the list is capped).
-internal fun mapCatalogPage(page: CoreCatalogPage, cap: Int = 300, baseUrl: String = ""): List<CatalogBook> {
+internal fun mapCatalogPage(
+    page: CoreCatalogPage,
+    cap: Int = 300,
+    baseUrl: String = "",
+    sourceId: String = "",
+): List<CatalogBook> {
     val seen = HashSet<String>()
     val books = ArrayList<CatalogBook>(minOf(page.items.size, cap.coerceAtLeast(0)))
     for (item in page.items) {
@@ -983,6 +989,7 @@ internal fun mapCatalogPage(page: CoreCatalogPage, cap: Int = 300, baseUrl: Stri
         val rating = parsePluginRating(item.rating)
         books += CatalogBook(
             bookUrl = url,
+            installId = sourceId,
             title = title,
             rating = rating,
             chapters = 0,

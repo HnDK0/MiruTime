@@ -11,6 +11,7 @@ class LibraryIdentityTest {
         bookUrl = url,
         title = url,
         source = source,
+        installId = source,
         author = "author",
         rating = 0f,
         contentType = ContentType.Novel,
@@ -27,7 +28,7 @@ class LibraryIdentityTest {
     )
 
     @Test
-    fun `duplicate book urls across installs collapse to one`() {
+    fun `same url from two installs stays two books`() {
         val shown = dedupeLibraryBooks(
             listOf(
                 book("https://site/book/1", "install-a"),
@@ -36,7 +37,14 @@ class LibraryIdentityTest {
             ),
         )
 
-        assertEquals(listOf("https://site/book/1", "https://site/book/2"), shown.map { it.bookUrl })
+        assertEquals(
+            listOf(
+                "https://site/book/1",
+                "https://site/book/1",
+                "https://site/book/2",
+            ),
+            shown.map { it.bookUrl },
+        )
     }
 
     @Test
@@ -50,8 +58,8 @@ class LibraryIdentityTest {
             ),
         )
 
-        val gridKeys = shown.chunked(2).map { row -> libraryRowKey(row.first().bookUrl) }
-        val listKeys = shown.map { libraryListKey(it.bookUrl) }
+        val gridKeys = shown.chunked(2).map { row -> libraryRowKey(row.first().bookKey) }
+        val listKeys = shown.map { libraryListKey(it.bookKey) }
 
         assertEquals(gridKeys.size, gridKeys.distinct().size)
         assertEquals(listKeys.size, listKeys.distinct().size)

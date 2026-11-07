@@ -215,7 +215,7 @@ class LibraryBulkChunkingTest {
 
         val result = LibraryRepository(recording.proxy).markBooksRead(urls, read = true, at = 10L)
 
-        assertEquals(listOf(900, 900, 1), recording.chunks("setChaptersReadForBookUrls"))
+        assertEquals(listOf(900, 900, 1), recording.chunks("setChaptersReadForBookIds"))
         assertEquals(901, result.succeeded.size)
         assertEquals(900, result.missing.size)
         assertEquals(urls.subList(900, 1800).toSet(), result.missing)
@@ -361,11 +361,11 @@ class LibraryBulkChunkingTest {
                     assertTrue(ids.size <= 900)
                     ids.size
                 }
-                "setChaptersReadForBookUrls" -> {
-                    val urls = record(method.name, args)
+                "setChaptersReadForBookUrls", "setChaptersReadForBookIds" -> {
+                    val ids = record(method.name, args)
                     readCalls++
                     if (readCalls == failReadCall) error("read chunk failed")
-                    assertTrue(urls.size <= 900)
+                    assertTrue(ids.size <= 900)
                     0
                 }
                 "bookTranslations" -> {

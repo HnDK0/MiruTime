@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.Flow
 /** Minimal projection for URL-based book lookups (never a full row). */
 data class BookUrlRow(val bookId: Long, val url: String)
 
+data class BookKeyRow(val bookId: Long, val installId: String, val url: String)
+
 @Dao
 interface LibraryDao {
     // --- shelves -------------------------------------------------------------
@@ -234,6 +236,13 @@ interface LibraryDao {
             "(SELECT bookId FROM books WHERE url IN (:urls))",
     )
     suspend fun setChaptersReadForBookUrls(urls: List<String>, read: Boolean, at: Long): Int
+
+    @Query(
+        "UPDATE chapters SET read = :read, " +
+            "readAt = CASE WHEN :read = 1 THEN :at ELSE NULL END, updatedAt = :at " +
+            "WHERE removedAt IS NULL AND bookId IN (:bookIds)",
+    )
+    suspend fun setChaptersReadForBookIds(bookIds: List<Long>, read: Boolean, at: Long): Int
 
     // Independent history: the history table owns the list and its order, so
     // deleting a history row never affects the library sort (books.lastReadAt)
@@ -1011,6 +1020,44 @@ interface LibraryDao {
     @Query("SELECT COUNT(*) FROM books WHERE installId = :installId AND inLibrary = 1")
     suspend fun libraryBookCount(installId: String): Int
 
+    @Query("SELECT COUNT(*) FROM books WHERE inLibrary = 1")
+    suspend fun libraryBookCount(): Int
+
+    @Query("SELECT COUNT(*) FROM books")
+    suspend fun bookCount(): Int
+
+    @Query("SELECT COUNT(*) FROM books WHERE inLibrary = 0")
+    suspend fun outOfLibraryBookCount(): Int
+
+    @Query("SELECT bookId, url FROM books WHERE inLibrary = 0 ORDER BY bookId")
+    suspend fun outOfLibraryBooks(): List<BookUrlRow>
+
+    @Query("SELECT bookId FROM books")
+    suspend fun bookIds(): List<Long>
+
+    @Query("SELECT bookId FROM book_covers")
+    suspend fun bookCoverIds(): List<Long>
+
+    @Query("SELECT copyPath FROM local_book_files WHERE copyPath IS NOT NULL AND copyPath <> ''")
+    suspend fun localBookCopyPaths(): List<String>
+
+    @Query("SELECT url FROM books WHERE inLibrary = 1")
+    suspend fun libraryBookUrls(): List<String>
+
+    @Query(
+        "SELECT bookId, installId, url FROM books " +
+            "WHERE inLibrary = 1 AND url IN (:urls) ORDER BY bookId",
+    )
+    suspend fun bookKeysByUrls(urls: List<String>): List<BookKeyRow>
+
+    // Delete path: a sourced URL can also be a history-only row, so it must
+    // resolve through the same unfiltered lookup as the unsourced path.
+    @Query(
+        "SELECT bookId, installId, url FROM books " +
+            "WHERE url IN (:urls) ORDER BY bookId",
+    )
+    suspend fun bookKeysByUrlsAll(urls: List<String>): List<BookKeyRow>
+
     // --- local backup selection ---------------------------------------------
 
     // Only library books from the two local installs own files the backup has
@@ -1042,6 +1089,22 @@ interface LibraryDao {
     )
     suspend fun localBackupBodyPaths(): List<LocalBackupPathRow>
 
+    // Covers of every in-library book (local and plugin). A user override is
+    // always backed up; non-override covers are cache and follow includeImages.
+    @Query(
+        """
+        SELECT b.bookId AS bookId, b.installId AS installId, b.title AS title,
+            c.localPath AS coverLocalPath, c.isUserOverride AS isUserOverride
+        FROM books b
+        INNER JOIN book_covers c ON c.bookId = b.bookId
+        WHERE b.inLibrary = 1
+            AND c.localPath IS NOT NULL
+            AND c.localPath <> ''
+        ORDER BY b.bookId
+        """,
+    )
+    suspend fun localBackupCovers(): List<LocalBackupCoverRow>
+
     @Query(
         """
         SELECT c.bookId AS bookId, cp.pagePathsJson AS pathsJson
@@ -1053,6 +1116,27 @@ interface LibraryDao {
         """,
     )
     suspend fun localBackupPagePaths(): List<LocalBackupPageRow>
+
+    // Legacy rows without copyPath still own page files. Normal imports derive
+    // their valid folder name from copyPath, so parsing every page JSON on each
+    // Data-screen refresh is unnecessary.
+    @Query(
+        """
+        SELECT c.bookId AS bookId, cp.pagePathsJson AS pathsJson
+        FROM chapter_pages cp
+        INNER JOIN chapters c ON c.chapterId = cp.chapterId
+        INNER JOIN books b ON b.bookId = c.bookId
+        WHERE b.inLibrary = 1
+            AND b.installId IN ('local-books', 'local-manga')
+            AND NOT EXISTS (
+                SELECT 1 FROM local_book_files lf
+                WHERE lf.bookId = b.bookId
+                    AND lf.copyPath IS NOT NULL
+                    AND lf.copyPath <> ''
+            )
+        """,
+    )
+    suspend fun localPagePathsWithoutCopy(): List<LocalBackupPageRow>
 
     @Upsert
     suspend fun upsertImportJob(job: ImportJobEntity): Long
@@ -1106,6 +1190,61 @@ interface LibraryDao {
 
     @Query("DELETE FROM translation_blocks WHERE translationId = :translationId")
     suspend fun deleteTranslationBlocks(translationId: Long)
+
+    /**
+     * One transaction for the cache invariant "COMPLETE implies blocks present".
+     * A crash between the status upsert and the block inserts must not leave a
+     * COMPLETE row with a half-replaced block set.
+     */
+    @Transaction
+    suspend fun saveTranslationWithBlocks(
+        translation: ChapterTranslationEntity,
+        blocks: List<TranslationBlockEntity>,
+    ): Long {
+        require(blocks.isNotEmpty()) { "A COMPLETE translation needs blocks" }
+        val existing = chapterTranslationAnySource(
+            chapterId = translation.chapterId,
+            source = translation.source,
+            target = translation.target,
+            provider = translation.provider,
+            promptHash = translation.promptHash,
+            pipelineVersion = translation.pipelineVersion,
+        )
+        val translationId = if (existing != null) {
+            upsertChapterTranslation(translation.copy(translationId = existing.translationId))
+            existing.translationId
+        } else {
+            upsertChapterTranslation(translation)
+        }
+        deleteTranslationBlocks(translationId)
+        upsertTranslationBlocks(blocks.map { it.copy(translationId = translationId) })
+        return translationId
+    }
+
+    /**
+     * A failed attempt must not keep the previous COMPLETE block set: the
+     * status and its (empty) content have to commit together, otherwise a
+     * reader sees FAILED with stale text from an older revision.
+     */
+    @Transaction
+    suspend fun saveTranslationFailure(translation: ChapterTranslationEntity): Long {
+        val existing = chapterTranslationAnySource(
+            chapterId = translation.chapterId,
+            source = translation.source,
+            target = translation.target,
+            provider = translation.provider,
+            promptHash = translation.promptHash,
+            pipelineVersion = translation.pipelineVersion,
+        )
+        val translationId = if (existing != null) {
+            upsertChapterTranslation(translation.copy(translationId = existing.translationId))
+            existing.translationId
+        } else {
+            upsertChapterTranslation(translation)
+        }
+        deleteTranslationBlocks(translationId)
+        return translationId
+    }
 
     @Upsert
     suspend fun upsertBookTranslation(translation: BookTranslationEntity): Long

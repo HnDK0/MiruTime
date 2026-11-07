@@ -53,8 +53,21 @@ class RoomTranslationCache(
 
     override suspend fun save(request: TranslationRequest, result: ChapterTranslationResult) {
         val chapterId = resolveChapterId(request) ?: return
-        val translationId = library.saveChapterTranslation(
-            ChapterTranslationEntity(
+        val sourceByIndex = request.units.mapNotNull { unit ->
+            unit.id.toIntOrNull()?.let { it to unit.text }
+        }.toMap()
+        val blocks = result.translations.mapNotNull { (index, text) ->
+            val source = sourceByIndex[index] ?: return@mapNotNull null
+            TranslationBlockEntity(
+                translationId = 0,
+                blockIndex = index,
+                sourceTextHash = sha256(source),
+                translatedText = text,
+            )
+        }
+        if (blocks.isEmpty()) error("Translation produced no blocks")
+        library.saveChapterTranslationWithBlocks(
+            translation = ChapterTranslationEntity(
                 chapterId = chapterId,
                 source = request.source?.value.orEmpty(),
                 target = request.target.value,
@@ -66,27 +79,13 @@ class RoomTranslationCache(
                 status = StatusComplete,
                 updatedAt = now(),
             ),
+            blocks = blocks,
         )
-        library.deleteTranslationBlocks(translationId)
-        val sourceByIndex = request.units.mapNotNull { unit ->
-            unit.id.toIntOrNull()?.let { it to unit.text }
-        }.toMap()
-        for ((index, text) in result.translations) {
-            val source = sourceByIndex[index] ?: continue
-            library.saveTranslationBlock(
-                TranslationBlockEntity(
-                    translationId = translationId,
-                    blockIndex = index,
-                    sourceTextHash = sha256(source),
-                    translatedText = text,
-                ),
-            )
-        }
     }
 
     override suspend fun markFailed(request: TranslationRequest) {
         val chapterId = resolveChapterId(request) ?: return
-        library.saveChapterTranslation(
+        library.saveChapterTranslationFailure(
             ChapterTranslationEntity(
                 chapterId = chapterId,
                 source = request.source?.value.orEmpty(),

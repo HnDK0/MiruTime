@@ -1,5 +1,7 @@
 package dev.mirutime.app.features.library.domain
 
+import dev.mirutime.data.library.libraryBookKey
+
 enum class ContentType { Novel, Manga, Video }
 
 enum class LibrarySort {
@@ -46,6 +48,9 @@ data class LibraryBook(
     val bookUrl: String,
     val title: String,
     val source: String,
+    // Raw installId used for delete/selection. [source] may synthesize a host
+    // for legacy blank rows, so it must not be the delete target.
+    val installId: String = "",
     // Display name for the source (plugin name); the raw install id remains
     // in [source] for filters/backup. Defaults keep fakes/tests compiling.
     val sourceLabel: String = source,
@@ -82,9 +87,12 @@ data class LibraryBook(
 ) {
     val unreadChapters: Int get() = (totalChapters - readChapters).coerceAtLeast(0)
     val isFinished: Boolean get() = unreadChapters == 0
+    // Route/selection identity: two installs may expose different works under
+    // the same URL, so URL alone is not stable.
+    val bookKey: String = libraryBookKey(installId, bookUrl)
 }
 
 // Provider rows are unique by installId+URL, so one book URL can arrive from
 // two installs. LazyList identity/navigation use bookUrl, so collapse first.
 internal fun dedupeLibraryBooks(books: List<LibraryBook>): List<LibraryBook> =
-    books.distinctBy { it.bookUrl }
+    books.distinctBy { it.bookKey }

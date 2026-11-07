@@ -15,6 +15,7 @@ import dev.mirutime.data.library.BookCoverEntity
 import dev.mirutime.data.library.BookEntity
 import dev.mirutime.data.library.BookReadStats
 import dev.mirutime.data.library.LibraryBookFiles
+import dev.mirutime.data.library.decodeLibraryBookKey
 import dev.mirutime.data.library.LibraryRepository
 import dev.mirutime.data.library.ShelfEntity
 import java.net.URI
@@ -74,7 +75,7 @@ class RoomLibraryDataProvider(
                 coverStore = coverStore,
                 sourceName = sourceName,
             )
-        }.distinctBy { it.bookUrl }
+        }.distinctBy { it.bookKey }
     }
 
     override suspend fun lastRead(): LibraryBook? {
@@ -149,6 +150,14 @@ class RoomLibraryDataProvider(
             offset += rows.size
         }
         return matched.toList()
+    }
+
+    override suspend fun matchingLibrarySources(
+        query: String,
+        filters: LibraryPageFilters,
+    ): Map<String, Set<String>> {
+        val urls = matchingLibraryUrls(query, filters)
+        return library.bookSourcesByUrls(urls)
     }
 
     override suspend fun shelfSummaries(): List<LibraryShelfSummary> {
@@ -257,7 +266,7 @@ class RoomLibraryDataProvider(
                 coverStore = coverStore,
                 sourceName = sourceName,
             )
-        }.distinctBy { it.bookUrl }
+        }.distinctBy { it.bookKey }
     }
 
     override suspend fun saveShelf(shelf: Shelf) {
@@ -291,13 +300,28 @@ class RoomLibraryDataProvider(
     override suspend fun moveBook(bookUrl: String, shelfId: String) =
         library.setShelf(bookUrl, shelfId)
 
-    override suspend fun deleteBooks(bookUrls: Set<String>): BulkActionResult =
+    override suspend fun deleteBooks(
+        bookUrls: Set<String>,
+        sources: Map<String, Set<String>>,
+    ): BulkActionResult =
         bulk(bookUrls) {
-            // The repository hands each committed chunk to this sink, so a
-            // cancellation between chunks still removes the files of the rows
-            // that already left the DB.
-            val result = library.deleteBooks(bookUrls.toList()) { files ->
+            // Cards carry an opaque BookKey. The repository deletes real
+            // URLs; map the result back to the keys the UI selected.
+            val identities = bookUrls.associateWith(::decodeLibraryBookKey)
+            val urls = bookUrls.mapTo(LinkedHashSet()) { key ->
+                identities[key]?.url ?: key
+            }
+            val decodedSources = identities.values
+                .filterNotNull()
+                .groupBy({ it.url }, { it.installId })
+                .mapValues { (_, installs) -> installs.toSet() }
+                .toMutableMap()
+            sources.forEach { (url, installs) -> decodedSources[url] = installs }
+            val result = library.deleteBooks(urls.toList(), decodedSources) { files ->
                 removeFilesSafely(files)
+            }
+            val deletedKeys = bookUrls.filterTo(LinkedHashSet()) { key ->
+                identities[key]?.url?.let { it in result.deleted } ?: (key in result.deleted)
             }
             if (result.deleted.isNotEmpty()) {
                 try {
@@ -308,7 +332,7 @@ class RoomLibraryDataProvider(
                     MiruLog.w("library", "Post-delete cleanup failed", e)
                 }
             }
-            BulkActionResult(result.deleted, result.missing)
+            BulkActionResult(deletedKeys, bookUrls - deletedKeys)
         }
 
     private suspend fun removeFilesSafely(files: List<LibraryBookFiles>) {
@@ -413,6 +437,7 @@ internal fun mapLibraryBookRow(
         bookUrl = entity.bookUrl,
         title = entity.title,
         source = rawSource,
+        installId = entity.installId,
         sourceLabel = sourceName(rawSource),
         author = entity.authorRaw.ifBlank { entity.author },
         rating = entity.rating.toFloat(),

@@ -179,7 +179,7 @@ fun UpdatesScreen(
                 )
             }
         } else {
-            itemsIndexed(updates, key = { index, update -> "update:${update.book.bookUrl}:$index" }) { _, update ->
+            itemsIndexed(updates, key = { index, update -> "update:${update.book.bookKey}:$index" }) { _, update ->
                 UpdateRow(
                     update = update,
                     modifier = Modifier

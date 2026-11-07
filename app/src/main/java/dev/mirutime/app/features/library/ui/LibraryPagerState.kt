@@ -43,7 +43,7 @@ data class LibraryPagerState(
             this
         } else {
             copy(
-                books = page.books.distinctBy { it.bookUrl },
+                books = page.books.distinctBy { it.bookKey },
                 cursor = page.nextCursor,
                 hasMore = page.hasMore,
                 total = page.total,

@@ -275,13 +275,13 @@ fun MiruShell(
             "nav",
             "open-webview",
             "host" to Uri.parse(url).host.orEmpty(),
-            "source" to PluginBookIndex.sourceFor(url).orEmpty(),
+            "source" to PluginBookIndex.sourceForBook(url).orEmpty(),
         )
         navController.navigate(
             WebViewRoute.build(
                 url = url,
                 title = openWebViewTitle.ifBlank { Uri.parse(url).host.orEmpty() },
-                sourceId = PluginBookIndex.sourceFor(url).orEmpty(),
+                sourceId = PluginBookIndex.sourceForBook(url).orEmpty(),
             ),
         )
         // Consume the request so the same notification action can open it again.
@@ -810,7 +810,7 @@ fun MiruShell(
                                 url,
                                 title,
                                 bookUrl = bookUrl,
-                                sourceId = PluginBookIndex.sourceFor(bookUrl).orEmpty(),
+                                sourceId = PluginBookIndex.sourceForBook(bookUrl).orEmpty(),
                             ),
                         )
                     },
@@ -919,7 +919,7 @@ fun MiruShell(
                                 url,
                                 title,
                                 bookUrl = bookUrl,
-                                sourceId = PluginBookIndex.sourceFor(bookUrl).orEmpty(),
+                                sourceId = PluginBookIndex.sourceForBook(bookUrl).orEmpty(),
                             ),
                         )
                     },

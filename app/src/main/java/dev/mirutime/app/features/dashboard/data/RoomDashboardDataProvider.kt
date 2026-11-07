@@ -80,7 +80,7 @@ class RoomDashboardDataProvider(
         if (rows.isEmpty()) return emptyList()
         val batch = batch(rows)
         return rows.map { it.toDashboardBook(timestamp, batch) }
-            .distinctBy { it.bookUrl }
+            .distinctBy { it.bookKey }
     }
 
     override suspend fun updates(): List<UpdateItem> {
@@ -146,6 +146,7 @@ class RoomDashboardDataProvider(
             title = title,
             translatedTitle = batch.translatedTitles[bookId],
             source = installId.ifBlank { hostOf(bookUrl) },
+            installId = installId,
             sourceLabel = sourceName(installId.ifBlank { hostOf(bookUrl) }),
             author = authorRaw.ifBlank { author },
             rating = rating.toFloat(),

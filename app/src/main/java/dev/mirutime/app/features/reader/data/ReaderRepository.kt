@@ -82,7 +82,7 @@ class DefaultReaderRepository(
             // plugin failure into plain strings at this boundary.
             val report = buildPluginErrorReport(
                 error = failure.pluginError,
-                sourceId = PluginBookIndex.sourceFor(bookUrl),
+                sourceId = PluginBookIndex.sourceForBook(bookUrl),
                 operation = "content",
                 fallbackMessage = failure.message,
                 identity = bookUrl,

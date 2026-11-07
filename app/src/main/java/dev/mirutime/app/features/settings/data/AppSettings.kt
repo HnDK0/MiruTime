@@ -260,6 +260,7 @@ object AppSettings {
     var backupIncludeImages by mutableStateOf(false)
     var backupIncludeSettings by mutableStateOf(true)
     var backupIncludePlugins by mutableStateOf(true)
+    var backupIncludeHistoryOnly by mutableStateOf(false)
     var backupLastTimestamp by mutableLongStateOf(0L)
     var autoBackupLastTimestamp by mutableLongStateOf(0L)
     var exportDirectory by mutableStateOf("")
@@ -399,6 +400,7 @@ object AppSettings {
         backupIncludeImages = backupIncludeImages,
         backupIncludeSettings = backupIncludeSettings,
         backupIncludePlugins = backupIncludePlugins,
+        backupIncludeHistoryOnly = backupIncludeHistoryOnly,
         backupLastTimestamp = backupLastTimestamp,
         autoBackupLastTimestamp = autoBackupLastTimestamp,
         exportDirectory = exportDirectory,
@@ -495,6 +497,7 @@ object AppSettings {
         backupIncludeImages = settings.backupIncludeImages
         backupIncludeSettings = settings.backupIncludeSettings
         backupIncludePlugins = settings.backupIncludePlugins
+        backupIncludeHistoryOnly = settings.backupIncludeHistoryOnly
         backupLastTimestamp = settings.backupLastTimestamp
         autoBackupLastTimestamp = settings.autoBackupLastTimestamp
         exportDirectory = settings.exportDirectory

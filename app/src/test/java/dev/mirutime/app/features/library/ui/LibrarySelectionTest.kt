@@ -1,5 +1,6 @@
 package dev.mirutime.app.features.library.ui
 
+import dev.mirutime.data.library.libraryBookKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -7,6 +8,35 @@ import org.junit.Test
 
 // Pure selection rules: activation, tap-to-toggle, select-all/clear and close.
 class LibrarySelectionTest {
+
+    @Test
+    fun `selection distinguishes two installs with the same url`() {
+        val first = libraryBookKey("install-a", "https://same.test/book")
+        val second = libraryBookKey("install-b", "https://same.test/book")
+        var state = reduceLibrarySelection(
+            LibrarySelection(),
+            LibrarySelectionAction.LongPress(first),
+        )
+        assertEquals(setOf(first), state.selected)
+        assertEquals(1, state.count)
+
+        state = reduceLibrarySelection(state, LibrarySelectionAction.Toggle(second))
+        assertEquals(setOf(first, second), state.selected)
+        assertEquals(2, state.count)
+
+        state = reduceLibrarySelection(state, LibrarySelectionAction.Toggle(first))
+        assertEquals(setOf(second), state.selected)
+        assertEquals(1, state.count)
+
+        state = reduceLibrarySelection(
+            state,
+            LibrarySelectionAction.SelectAll(listOf(first, second, "")),
+        )
+        assertEquals(setOf(first, second), state.selected)
+
+        state = reduceLibrarySelection(state, LibrarySelectionAction.Clear)
+        assertTrue(state.selected.isEmpty())
+    }
 
     @Test
     fun `long press activates selection and tapping toggles`() {

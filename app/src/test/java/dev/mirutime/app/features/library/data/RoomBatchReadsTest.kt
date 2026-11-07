@@ -184,7 +184,7 @@ class RoomBatchReadsTest {
     }
 
     @Test
-    fun `library and search dedupe one book url across two installs`() = runTest {
+    fun `library and search keep one url from two installs separate`() = runTest {
         val rows = listOf(
             books().first().copy(bookId = 1, installId = "install-a"),
             books().first().copy(bookId = 2, installId = "install-b"),
@@ -196,9 +196,12 @@ class RoomBatchReadsTest {
             now = { 1_000L },
         )
 
-        assertEquals(listOf("https://site/book/1", "https://site/book/2"), provider.books().map { it.bookUrl })
         assertEquals(
-            listOf("https://site/book/1", "https://site/book/2"),
+            listOf("https://site/book/1", "https://site/book/1", "https://site/book/2"),
+            provider.books().map { it.bookUrl },
+        )
+        assertEquals(
+            listOf("https://site/book/1", "https://site/book/1", "https://site/book/2"),
             provider.searchBooks("book", limit = 10).map { it.bookUrl },
         )
     }

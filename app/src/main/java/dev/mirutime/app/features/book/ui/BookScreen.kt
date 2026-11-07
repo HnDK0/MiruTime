@@ -465,7 +465,7 @@ fun BookScreen(
                 coverFailure = buildPluginErrorReport(
                     error = result.error as? PluginError
                         ?: PluginError.ScriptError(result.error::class.simpleName ?: "cover"),
-                    sourceId = PluginBookIndex.sourceFor(bookUrl),
+                    sourceId = PluginBookIndex.sourceForBook(bookUrl),
                     sourceName = book?.source,
                     operation = "cover",
                     identity = bookUrl,
@@ -618,7 +618,7 @@ fun BookScreen(
     // refresh, so every chapter failure names the same source/operation.
     fun chapterReport(error: PluginError): PluginErrorReport = buildPluginErrorReport(
         error = error,
-        sourceId = PluginBookIndex.sourceFor(bookUrl),
+        sourceId = PluginBookIndex.sourceForBook(bookUrl),
         sourceName = book?.source,
         operation = "chapters",
         identity = bookUrl,
@@ -707,7 +707,7 @@ fun BookScreen(
     LaunchedEffect(bookUrl, provider) {
         consumeMembershipIntents(membershipIntents) { target ->
             val result = try {
-                provider.setInLibrary(bookUrl, target)
+                provider.setInLibrary(bookUrl, target, book?.installId)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -1241,7 +1241,7 @@ fun BookScreen(
                 if (failure != null) {
                     val report = buildPluginErrorReport(
                         error = failure,
-                        sourceId = PluginBookIndex.sourceFor(bookUrl),
+                        sourceId = PluginBookIndex.sourceForBook(bookUrl),
                         sourceName = book?.source,
                         operation = "details",
                         identity = bookUrl,

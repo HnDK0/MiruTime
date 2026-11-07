@@ -975,7 +975,7 @@ class BackupRestoreService(
             "format" to manifest.formatVersion,
             "schema" to manifest.schemaVersion,
             "app" to manifest.appVersion,
-            "books" to manifest.counts.localBooks,
+            "books" to (manifest.counts.totalBooks.takeIf { it > 0 } ?: manifest.counts.localBooks),
             "files" to manifest.counts.localFiles,
             "plugins" to manifest.counts.pluginFiles,
         )

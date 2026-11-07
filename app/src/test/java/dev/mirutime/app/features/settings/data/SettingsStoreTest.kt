@@ -199,6 +199,7 @@ class SettingsStoreTest {
             backupIncludeImages = true,
             backupIncludeSettings = false,
             backupIncludePlugins = false,
+            backupIncludeHistoryOnly = true,
             backupLastTimestamp = 1_700_000_000_000L,
             autoBackupLastTimestamp = 1_700_000_100_000L,
             exportDirectory = "content://tree/exports",
@@ -385,6 +386,7 @@ class SettingsStoreTest {
             autoBackup = true,
             backupDirectory = "content://tree/backups",
             backupIncludeSettings = true,
+            backupIncludeHistoryOnly = true,
             exportDirectory = "content://tree/exports",
             activePrompt = "custom prompt",
             promptPresets = listOf("Only" to "Only prompt"),
@@ -422,6 +424,7 @@ class SettingsStoreTest {
             assertEquals(true, AppSettings.translationGlobalMode)
             assertEquals(true, AppSettings.autoBackup)
             assertEquals("content://tree/backups", AppSettings.backupDirectory)
+            assertEquals(true, AppSettings.backupIncludeHistoryOnly)
             assertEquals("content://tree/exports", AppSettings.exportDirectory)
             assertEquals("custom prompt", AppSettings.activePrompt)
             assertEquals(listOf("Only" to "Only prompt"), AppSettings.promptPresets.toList())

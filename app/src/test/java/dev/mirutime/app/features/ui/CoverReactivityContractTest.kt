@@ -52,7 +52,7 @@ class CoverReactivityContractTest {
     fun `library cards persist a repaired cover across disposal`() {
         val library = source("src/main/java/dev/mirutime/app/features/library/ui/LibraryScreen.kt")
         assertTrue(library.contains("mutableStateMapOf<String, String>()"))
-        assertTrue(library.contains("coverFixes[book.bookUrl] = fresh"))
+        assertTrue(library.contains("coverFixes[book.bookKey] = fresh"))
         assertTrue(library.contains("val fixCover: (LibraryBook) -> LibraryBook"))
         assertTrue(library.contains("book = fixCover(book)"))
         assertTrue(library.contains("reloadKey = pager.generation"))

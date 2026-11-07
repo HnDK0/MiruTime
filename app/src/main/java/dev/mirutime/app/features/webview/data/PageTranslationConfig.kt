@@ -1,5 +1,6 @@
 package dev.mirutime.app.features.webview.data
 
+import dev.mirutime.data.library.bookKeyUrl
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.settings.data.NovelPrompt
 import dev.mirutime.app.features.settings.data.SettingsLanguages
@@ -109,7 +110,9 @@ fun resolvePageTranslationFor(
     val pluginId = sourceId?.trim()?.takeIf { it.isNotEmpty() }
         ?: book?.let(::pluginIdOf)
     return resolvePageTranslation(
-        novel = book?.let { AppSettings.novelTranslation[it] },
+        novel = book?.let {
+            AppSettings.novelTranslation[it] ?: AppSettings.novelTranslation[bookKeyUrl(it)]
+        },
         plugin = pluginId?.let { AppSettings.pluginTranslation[it] },
         globalSource = AppSettings.globalSource,
         globalTarget = AppSettings.globalTarget,

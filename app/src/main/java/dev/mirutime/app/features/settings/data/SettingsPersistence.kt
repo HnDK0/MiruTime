@@ -106,6 +106,7 @@ data class PersistedSettings(
     val backupIncludeImages: Boolean = false,
     val backupIncludeSettings: Boolean = true,
     val backupIncludePlugins: Boolean = true,
+    val backupIncludeHistoryOnly: Boolean = false,
     val backupLastTimestamp: Long = 0L,
     val autoBackupLastTimestamp: Long = 0L,
     val exportDirectory: String = "",
@@ -129,6 +130,7 @@ data class PersistedSettings(
             "backupIncludeImages=$backupIncludeImages, " +
             "backupIncludeSettings=$backupIncludeSettings, " +
             "backupIncludePlugins=$backupIncludePlugins, " +
+            "backupIncludeHistoryOnly=$backupIncludeHistoryOnly, " +
             "backupLastTimestamp=$backupLastTimestamp, " +
             "autoBackupLastTimestamp=$autoBackupLastTimestamp)"
 }
@@ -346,6 +348,8 @@ class SettingsStore(private val values: KeyValueStore) {
                 ?: defaults.backupIncludeSettings,
             backupIncludePlugins = values.getBoolean(KEY_BACKUP_INCLUDE_PLUGINS)
                 ?: defaults.backupIncludePlugins,
+            backupIncludeHistoryOnly = values.getBoolean(KEY_BACKUP_INCLUDE_HISTORY_ONLY)
+                ?: defaults.backupIncludeHistoryOnly,
             backupLastTimestamp = values.getLong(KEY_BACKUP_LAST_TIMESTAMP)
                 ?: defaults.backupLastTimestamp,
             autoBackupLastTimestamp = values.getLong(KEY_AUTO_BACKUP_LAST_TIMESTAMP)
@@ -439,6 +443,7 @@ class SettingsStore(private val values: KeyValueStore) {
                 KEY_BACKUP_INCLUDE_IMAGES to settings.backupIncludeImages,
                 KEY_BACKUP_INCLUDE_SETTINGS to settings.backupIncludeSettings,
                 KEY_BACKUP_INCLUDE_PLUGINS to settings.backupIncludePlugins,
+                KEY_BACKUP_INCLUDE_HISTORY_ONLY to settings.backupIncludeHistoryOnly,
                 KEY_BACKUP_LAST_TIMESTAMP to settings.backupLastTimestamp,
                 KEY_AUTO_BACKUP_LAST_TIMESTAMP to settings.autoBackupLastTimestamp,
                 KEY_EXPORT_DIRECTORY to settings.exportDirectory,
@@ -529,6 +534,7 @@ class SettingsStore(private val values: KeyValueStore) {
         private const val KEY_BACKUP_INCLUDE_IMAGES = "BACKUP_INCLUDE_IMAGES"
         private const val KEY_BACKUP_INCLUDE_SETTINGS = "BACKUP_INCLUDE_SETTINGS"
         private const val KEY_BACKUP_INCLUDE_PLUGINS = "BACKUP_INCLUDE_PLUGINS"
+        private const val KEY_BACKUP_INCLUDE_HISTORY_ONLY = "BACKUP_INCLUDE_HISTORY_ONLY"
         private const val KEY_BACKUP_LAST_TIMESTAMP = "BACKUP_LAST_TIMESTAMP"
         private const val KEY_AUTO_BACKUP_LAST_TIMESTAMP = "BACKUP_AUTO_LAST_TIMESTAMP"
         private const val KEY_EXPORT_DIRECTORY = "EXPORT_DIRECTORY_URI"

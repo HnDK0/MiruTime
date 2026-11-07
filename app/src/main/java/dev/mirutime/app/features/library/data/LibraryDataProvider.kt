@@ -39,6 +39,11 @@ interface LibraryDataProvider {
         query: String = "",
         filters: LibraryPageFilters = LibraryPageFilters(),
     ): List<String>
+    // url -> installId for select-all; keeps duplicate-URL deletion targeted.
+    suspend fun matchingLibrarySources(
+        query: String = "",
+        filters: LibraryPageFilters = LibraryPageFilters(),
+    ): Map<String, Set<String>> = emptyMap()
     suspend fun shelfSummaries(): List<LibraryShelfSummary>
     // Real full-text search over the library; empty queries return the normal
     // library page. Kept for callers that need a simple offset page.
@@ -55,7 +60,10 @@ interface LibraryDataProvider {
     // Bulk library actions. Each one is a single DB write with no per-book
     // transaction/query; files are collected in the same delete transaction
     // and removed afterwards on IO. Missing URLs are reported as failures.
-    suspend fun deleteBooks(bookUrls: Set<String>): BulkActionResult
+    suspend fun deleteBooks(
+        bookUrls: Set<String>,
+        sources: Map<String, Set<String>> = emptyMap(),
+    ): BulkActionResult
     suspend fun moveBooks(bookUrls: Set<String>, shelfId: String): BulkActionResult
     suspend fun markBooksRead(bookUrls: Set<String>, read: Boolean): BulkActionResult
     // Real SAF import: copies, hashes and persists every picked file. The

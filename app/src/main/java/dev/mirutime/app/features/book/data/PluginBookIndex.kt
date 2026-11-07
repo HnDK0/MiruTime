@@ -2,6 +2,8 @@ package dev.mirutime.app.features.book.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import dev.mirutime.data.library.bookKeyInstallId
+import dev.mirutime.data.library.bookKeyUrl
 import java.net.URI
 import java.net.URLDecoder
 
@@ -39,6 +41,11 @@ object PluginBookIndex {
         sourceByBook[bookUrl] ?: prefs?.getString("$SourcePrefix$bookUrl", null)
     }
 
+    // A route may carry an opaque BookKey. Its embedded installId is the
+    // source, so a cold index still resolves the right plugin.
+    fun sourceForBook(bookKey: String): String? =
+        sourceFor(bookKey) ?: bookKeyInstallId(bookKey)
+
     fun putTitle(bookUrl: String, title: String) {
         if (bookUrl.isBlank() || title.isBlank()) return
         synchronized(lock) {
@@ -53,11 +60,14 @@ object PluginBookIndex {
 
     // Synchronous header/screen title: the cached plugin title wins; a miss
     // falls back to a readable URL label, never a synthesized "Untitled".
-    fun displayTitle(bookUrl: String): String =
-        titleFor(bookUrl)?.takeIf { it.isNotBlank() }
-            ?: urlDisplayTitle(bookUrl).ifBlank {
-                bookUrl.substringAfter("://").ifBlank { bookUrl }
+    fun displayTitle(bookUrl: String): String {
+        val actualUrl = bookKeyUrl(bookUrl)
+        return titleFor(bookUrl)?.takeIf { it.isNotBlank() }
+            ?: titleFor(actualUrl)?.takeIf { it.isNotBlank() }
+            ?: urlDisplayTitle(actualUrl).ifBlank {
+                actualUrl.substringAfter("://").ifBlank { actualUrl }
             }
+    }
 
     // Test seam / full reset.
     fun clear() = synchronized(lock) {

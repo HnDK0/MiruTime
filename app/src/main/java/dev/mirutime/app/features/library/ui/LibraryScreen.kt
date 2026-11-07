@@ -94,6 +94,7 @@ import dev.mirutime.uikit.SheetHeaderAction
 import dev.mirutime.uikit.SheetSection
 import dev.mirutime.app.core.libraryListKey
 import dev.mirutime.app.core.libraryRowKey
+import dev.mirutime.data.library.libraryBookKey
 import dev.mirutime.core.api.getOrNull
 import dev.mirutime.core.log.MiruLog
 import dev.mirutime.app.di.ReaderGraph
@@ -437,8 +438,8 @@ fun LibraryScreen(
         AppSettings.activePrompt,
     ) {
         pager.books.mapNotNull { book ->
-            metadataConfigFor(book.bookUrl)?.let { config ->
-                TitleTranslationJob(book.bookUrl, book.title, config)
+            metadataConfigFor(book.bookKey)?.let { config ->
+                TitleTranslationJob(book.bookKey, book.title, config)
             }
         }
     }
@@ -449,12 +450,12 @@ fun LibraryScreen(
     val configs = remember(metadataJobs) { metadataJobs.associate { it.bookUrl to it.config } }
     // Pages are already deduped by the pager; the overlay is page-local.
     val fixCover: (LibraryBook) -> LibraryBook = { book ->
-        coverFixes[book.bookUrl]?.let { book.copy(coverUrl = it) } ?: book
+        coverFixes[book.bookKey]?.let { book.copy(coverUrl = it) } ?: book
     }
     val shown = remember(pager.books, metadata, configs) {
         pager.books.map { book ->
-            val translated = metadata[book.bookUrl]
-                ?.takeIf { it.config == configs[book.bookUrl] }
+            val translated = metadata[book.bookKey]
+                ?.takeIf { it.config == configs[book.bookKey] }
                 ?.title
             if (translated != null) book.copy(translatedTitle = translated) else book
         }
@@ -483,20 +484,26 @@ fun LibraryScreen(
             }
     }
 
-    fun toggleSelection(bookUrl: String) {
-        selection = reduceLibrarySelection(selection, LibrarySelectionAction.Toggle(bookUrl))
+    fun toggleSelection(bookKey: String) {
+        selection = reduceLibrarySelection(
+            selection,
+            LibrarySelectionAction.Toggle(bookKey),
+        )
     }
 
-    fun openOrToggle(bookUrl: String) {
+    fun openOrToggle(bookKey: String) {
         if (selection.active) {
-            toggleSelection(bookUrl)
+            toggleSelection(bookKey)
         } else {
-            onBookOpen(bookUrl)
+            onBookOpen(bookKey)
         }
     }
 
-    fun longPressSelection(bookUrl: String) {
-        selection = reduceLibrarySelection(selection, LibrarySelectionAction.LongPress(bookUrl))
+    fun longPressSelection(bookKey: String) {
+        selection = reduceLibrarySelection(
+            selection,
+            LibrarySelectionAction.LongPress(bookKey),
+        )
     }
 
     fun bulkMessage(action: BulkAction, result: BulkActionResult): String {
@@ -592,20 +599,56 @@ fun LibraryScreen(
                             if (!selectAllBusy) {
                                 selectAllBusy = true
                                 ioScope.launch {
-                                    val urls = try {
-                                        provider.matchingLibraryUrls(appliedQuery, filters)
+                                    var failed = false
+                                    val sources = try {
+                                        provider.matchingLibrarySources(appliedQuery, filters)
                                     } catch (e: CancellationException) {
                                         throw e
                                     } catch (e: Exception) {
-                                        MiruLog.w("library", "Select-all failed", e)
-                                        shown.map { it.bookUrl }
+                                        MiruLog.w("library", "Select-all sources failed", e)
+                                        failed = true
+                                        emptyMap()
                                     } finally {
                                         selectAllBusy = false
                                     }
-                                    selection = reduceLibrarySelection(
-                                        selection,
-                                        LibrarySelectionAction.SelectAll(urls),
-                                    )
+                                    val keys = if (failed) {
+                                        emptySet()
+                                    } else if (sources.isNotEmpty()) {
+                                        sources.flatMap { (url, installs) ->
+                                            if (installs.isEmpty()) {
+                                                listOf(url)
+                                            } else {
+                                                installs.map { libraryBookKey(it, url) }
+                                            }
+                                        }.toSet()
+                                    } else {
+                                        try {
+                                            val urls = provider
+                                                .matchingLibraryUrls(appliedQuery, filters)
+                                                .toSet()
+                                            shown.filter { it.bookUrl in urls }
+                                                .map { it.bookKey }
+                                                .toSet()
+                                        } catch (e: CancellationException) {
+                                            throw e
+                                        } catch (e: Exception) {
+                                            MiruLog.w("library", "Select-all failed", e)
+                                            failed = true
+                                            emptySet()
+                                        }
+                                    }
+                                    if (failed) {
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            R.string.lib_select_all_failed,
+                                            android.widget.Toast.LENGTH_SHORT,
+                                        ).show()
+                                    } else {
+                                        selection = reduceLibrarySelection(
+                                            selection,
+                                            LibrarySelectionAction.SelectAll(keys),
+                                        )
+                                    }
                                 }
                             }
                         },
@@ -686,10 +729,10 @@ fun LibraryScreen(
                         lastRead?.let { book ->
                             ResumeCard(
                                 book = fixCover(book),
-                                onOpen = { onBookOpen(book.bookUrl) },
+                                onOpen = { onBookOpen(book.bookKey) },
                                 onRetry = {
-                                    provider.refreshCover(book.bookUrl).getOrNull()?.also { fresh ->
-                                        coverFixes[book.bookUrl] = fresh
+                                    provider.refreshCover(book.bookKey).getOrNull()?.also { fresh ->
+                                        coverFixes[book.bookKey] = fresh
                                     }
                                 },
                                 reloadKey = pager.generation,
@@ -832,7 +875,7 @@ fun LibraryScreen(
                 } else if (layout == LayoutMode.Grid && cardStyle != CardStyle.Horizontal) {
                     val rows = shown.chunked(columns)
                     rows.forEach { row ->
-                        item(key = libraryRowKey(row.first().bookUrl)) {
+                        item(key = libraryRowKey(row.first().bookKey)) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -845,14 +888,14 @@ fun LibraryScreen(
                                     LibraryCard(
                                         book = fixCover(book),
                                         style = cardStyle,
-                                        selected = selection.isSelected(book.bookUrl),
+                                        selected = selection.isSelected(book.bookKey),
                                         selectionMode = selection.active,
                                         // Tap opens normally; in selection mode it toggles.
-                                        onOpen = { openOrToggle(book.bookUrl) },
-                                        onLongPress = { longPressSelection(book.bookUrl) },
+                                        onOpen = { openOrToggle(book.bookKey) },
+                                        onLongPress = { longPressSelection(book.bookKey) },
                                         onRetry = {
-                                            provider.refreshCover(book.bookUrl).getOrNull()?.also { fresh ->
-                                                coverFixes[book.bookUrl] = fresh
+                                            provider.refreshCover(book.bookKey).getOrNull()?.also { fresh ->
+                                                coverFixes[book.bookKey] = fresh
                                             }
                                         },
                                         reloadKey = pager.generation,
@@ -868,17 +911,17 @@ fun LibraryScreen(
                 } else {
                     // Horizontal C cards: full-width rows in grid, and the List
                     // layout always (C is the file's horizontal variant).
-                    items(shown, key = { libraryListKey(it.bookUrl) }) { book ->
+                    items(shown, key = { libraryListKey(it.bookKey) }) { book ->
                         LibraryCard(
                             book = fixCover(book),
                             style = CardStyle.Horizontal,
-                            selected = selection.isSelected(book.bookUrl),
+                            selected = selection.isSelected(book.bookKey),
                             selectionMode = selection.active,
-                            onOpen = { openOrToggle(book.bookUrl) },
-                            onLongPress = { longPressSelection(book.bookUrl) },
+                            onOpen = { openOrToggle(book.bookKey) },
+                            onLongPress = { longPressSelection(book.bookKey) },
                             onRetry = {
-                                provider.refreshCover(book.bookUrl).getOrNull()?.also { fresh ->
-                                    coverFixes[book.bookUrl] = fresh
+                                provider.refreshCover(book.bookKey).getOrNull()?.also { fresh ->
+                                    coverFixes[book.bookKey] = fresh
                                 }
                             },
                             reloadKey = pager.generation,
@@ -1132,7 +1175,9 @@ fun LibraryScreen(
             onClose = { bulkDeleteOpen = false },
             onConfirm = {
                 bulkDeleteOpen = false
-                runBulk(BulkAction.Delete) { provider.deleteBooks(it) }
+                runBulk(BulkAction.Delete) { urls ->
+                    provider.deleteBooks(urls)
+                }
             },
         )
     }

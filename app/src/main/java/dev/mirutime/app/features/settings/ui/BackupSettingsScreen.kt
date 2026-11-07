@@ -445,6 +445,13 @@ fun BackupSettingsScreen(contentPadding: PaddingValues) {
                     checked = settings.backupIncludePlugins,
                     onChange = { settings.backupIncludePlugins = it },
                 )
+                MiruRowDivider()
+                SettingsSwitchRow(
+                    title = stringResource(R.string.st_backup_history_only),
+                    subtitle = stringResource(R.string.st_backup_history_only_desc),
+                    checked = settings.backupIncludeHistoryOnly,
+                    onChange = { settings.backupIncludeHistoryOnly = it },
+                )
             }
         }
     }

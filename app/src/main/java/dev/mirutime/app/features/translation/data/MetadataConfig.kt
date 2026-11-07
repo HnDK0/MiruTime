@@ -1,6 +1,8 @@
 package dev.mirutime.app.features.translation.data
 
 import dev.mirutime.app.features.settings.data.AppSettings
+import dev.mirutime.data.library.bookKeyInstallId
+import dev.mirutime.data.library.bookKeyUrl
 import dev.mirutime.translator.LanguageCode
 import dev.mirutime.translator.ProviderId
 
@@ -35,9 +37,12 @@ internal fun MetadataConfig.storeKey(): MetadataTranslationKey = MetadataTransla
  * not parse. The controller never touches settings itself (JVM-testable).
  */
 fun metadataConfigFor(bookUrl: String): MetadataConfig? {
-    val plugin = AppSettings.pluginTranslation[translationSourceId(bookUrl)]
+    val actualUrl = bookKeyUrl(bookUrl)
+    val sourceId = bookKeyInstallId(bookUrl) ?: translationSourceId(actualUrl)
+    val plugin = AppSettings.pluginTranslation[sourceId]
     val mode = translationMode(
-        novel = AppSettings.novelTranslation[bookUrl],
+        novel = AppSettings.novelTranslation[bookUrl]
+        ?: AppSettings.novelTranslation[actualUrl],
         plugin = plugin,
         globalEnabled = AppSettings.translationGlobalMode,
         globalSource = AppSettings.globalSource,
@@ -52,7 +57,9 @@ fun metadataConfigFor(bookUrl: String): MetadataConfig? {
     val target = runCatching { LanguageCode.parse(mode.target) }.getOrNull() ?: return null
     val source = runCatching { LanguageCode.parse(mode.source) }.getOrNull()
     val provider = ProviderId.from(mode.provider) ?: return null
-    val novelPrompt = AppSettings.novelPrompts.firstOrNull { it.bookUrl == bookUrl }
+    val novelPrompt = AppSettings.novelPrompts.firstOrNull {
+        it.bookUrl == bookUrl || it.bookUrl == actualUrl
+    }
     val prompt = composePrompt(
         base = AppSettings.activePrompt,
         override = novelPrompt?.prompt.orEmpty(),

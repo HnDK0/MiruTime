@@ -2,6 +2,7 @@ package dev.mirutime.app.features.library.data
 
 import dev.mirutime.data.library.BookEntity
 import dev.mirutime.data.library.LibraryRepository
+import dev.mirutime.data.library.libraryBookKey
 import dev.mirutime.core.api.PluginError
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.cancellation.CancellationException
@@ -138,8 +139,9 @@ class LibraryUpdateService(
         // matches the stored one means the list is unchanged; skip the full
         // chapter fetch entirely. Variant 2 (no hash / changed hash): fetch
         // the chapter list and compare the count.
+        val bookKey = libraryBookKey(sourceId, bookUrl)
         val remoteHash = try {
-            provider.chapterListHash(bookUrl)
+            provider.chapterListHash(bookKey)
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -147,7 +149,7 @@ class LibraryUpdateService(
         }
         if (remoteHash != null && remoteHash == localHash) return UpdateResult.NoChange
         val refreshed = try {
-            provider.refreshChapterCountResult(bookUrl)
+            provider.refreshChapterCountResult(bookKey)
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {

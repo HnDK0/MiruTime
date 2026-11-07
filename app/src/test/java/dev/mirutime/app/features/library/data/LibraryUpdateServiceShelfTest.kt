@@ -4,6 +4,7 @@ import dev.mirutime.data.library.BookEntity
 import dev.mirutime.data.library.LibraryDao
 import dev.mirutime.data.library.LibraryRepository
 import dev.mirutime.data.library.ShelfEntity
+import dev.mirutime.data.library.bookKeyUrl
 import java.lang.reflect.Proxy
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -94,10 +95,16 @@ class LibraryUpdateServiceShelfTest {
         val summary = service.checkAll()
 
         assertEquals(1, summary.checked)
-        assertEquals(listOf("https://site/book/1"), provider.refreshed)
+        assertEquals(
+            listOf("https://site/book/1"),
+            provider.refreshed.map(::bookKeyUrl),
+        )
 
         assertEquals(0, service.checkBook("https://site/book/2"))
-        assertEquals(listOf("https://site/book/1"), provider.refreshed)
+        assertEquals(
+            listOf("https://site/book/1"),
+            provider.refreshed.map(::bookKeyUrl),
+        )
     }
 
     @Test

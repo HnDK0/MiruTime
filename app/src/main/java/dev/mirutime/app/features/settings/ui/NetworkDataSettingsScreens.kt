@@ -203,6 +203,8 @@ fun DataSettingsScreen(contentPadding: PaddingValues) {
     var loading by remember { mutableStateOf(true) }
     var confirm by remember { mutableStateOf<StorageBucket?>(null) }
     var cleaning by remember { mutableStateOf<StorageBucket?>(null) }
+    var outOfLibraryConfirm by remember { mutableStateOf(false) }
+    var purgingOutOfLibrary by remember { mutableStateOf(false) }
 
     LaunchedEffect(storage) {
         usage = runCatching { storage.refresh() }.getOrDefault(StorageUsage.Empty)
@@ -282,6 +284,60 @@ fun DataSettingsScreen(contentPadding: PaddingValues) {
                 SettingsHint(stringResource(R.string.st_data_hint))
             }
         }
+        item(key = "out-of-library") {
+            MiruSectionCard(
+                title = stringResource(R.string.st_data_out_of_library),
+                description = stringResource(R.string.st_data_out_of_library_desc),
+                contentPadding = PaddingValues(0.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = MiruSize.Row)
+                        .padding(start = MiruSpace.L, end = MiruSpace.S),
+                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.M),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (loading) {
+                                stringResource(R.string.st_data_loading)
+                            } else {
+                                stringResource(
+                                    R.string.st_data_out_of_library_count,
+                                    usage.outOfLibraryBookCount,
+                                    usage.orphanBookDirCount,
+                                    formatBytes(usage.orphanBookBytes),
+                                )
+                            },
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    if (purgingOutOfLibrary) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            color = LocalMiruExtraColors.current.accent,
+                            modifier = Modifier.padding(MiruSpace.Xs),
+                        )
+                    } else {
+                        TextButton(
+                            onClick = { outOfLibraryConfirm = true },
+                            enabled = usage.outOfLibraryBookCount > 0 ||
+                                usage.orphanBookDirCount > 0,
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error,
+                            ),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.st_data_clear),
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 
     confirm?.let { bucket ->
@@ -303,6 +359,38 @@ fun DataSettingsScreen(contentPadding: PaddingValues) {
         ) {
             Text(
                 text = stringResource(bucketWarning(bucket)),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+
+    if (outOfLibraryConfirm) {
+        AppBottomSheet(
+            title = stringResource(R.string.st_data_out_of_library),
+            description = stringResource(R.string.st_data_out_of_library_confirm_desc),
+            onClose = { outOfLibraryConfirm = false },
+            doneLabel = stringResource(R.string.st_data_clear),
+            doneDanger = true,
+            onDone = {
+                outOfLibraryConfirm = false
+                purgingOutOfLibrary = true
+                scope.launch {
+                    val result = runCatching { storage.purgeOutOfLibrary() }
+                    if (result.isFailure) {
+                        Toast.makeText(
+                            context,
+                            R.string.st_data_clear_failed,
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                    usage = runCatching { storage.refresh() }.getOrDefault(usage)
+                    purgingOutOfLibrary = false
+                }
+            },
+        ) {
+            Text(
+                text = stringResource(R.string.st_data_out_of_library_warning),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )

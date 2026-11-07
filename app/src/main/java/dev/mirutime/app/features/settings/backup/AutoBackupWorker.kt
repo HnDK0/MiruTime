@@ -129,6 +129,7 @@ class AutoBackupWorker(
                                 includeSettings = settings.backupIncludeSettings,
                                 includeImages = settings.backupIncludeImages,
                                 includePlugins = settings.backupIncludePlugins,
+                                includeHistoryOnly = settings.backupIncludeHistoryOnly,
                             ),
                         ) { fraction ->
                             percent.value = (fraction * 100).toInt().coerceIn(0, 100)

@@ -64,6 +64,20 @@ class DownloadEngineTest {
     )
 
     @Test
+    fun `a book deleted during fetch is not committed`() = runTest {
+        provider.contents[1] = FakeProvider.Update("<p>Hello</p>")
+        provider.onContent = { store.bookRow = null }
+        val engine = engine()
+
+        engine.enqueueNow(bookUrl, listOf(1))
+        val outcome = engine.run(1)
+
+        assertEquals(0, outcome.completed)
+        assertTrue(store.bodies.isEmpty())
+        assertTrue(store.downloaded.isEmpty())
+    }
+
+    @Test
     fun `text download writes a body and never fakes completion`() = runTest {
         provider.contents[1] = FakeProvider.Update("<p>Hello</p>")
         val engine = engine()

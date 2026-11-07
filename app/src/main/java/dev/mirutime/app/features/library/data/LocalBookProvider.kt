@@ -6,6 +6,7 @@ import dev.mirutime.core.api.ChapterContent as CoreChapterContent
 import dev.mirutime.core.api.ContentType
 import dev.mirutime.core.api.getOrNull
 import dev.mirutime.core.host.FileSystem
+import dev.mirutime.core.log.MiruLog
 import dev.mirutime.core.text.textToParagraphHtml
 import dev.mirutime.core.reader.ChapterContent
 import dev.mirutime.core.reader.ChapterSource
@@ -170,23 +171,44 @@ class LocalBookProvider(
         val folderCopy = copyPath?.takeIf { it.isNotBlank() }
             ?.let { File(baseDir, it).isDirectory } == true
         library.deleteBook(row.bookId)
-        if (folderCopy) {
-            copyPath?.takeIf { it.isNotBlank() }?.let(::deleteTree)
-        } else {
-            copyPath?.takeIf { it.isNotBlank() }?.let { copy ->
-                fileSystem.delete(copy)
+        val copy = copyPath?.takeIf { it.isNotBlank() }
+        val contentRoot = copy?.takeIf { !folderCopy }?.substringBeforeLast('.')
+        val pathsToCheck = buildList {
+            copy?.let(::add)
+            contentRoot?.let(::add)
+            coverPath?.takeIf { it.isNotBlank() }?.let(::add)
+        }
+        if (copy != null) {
+            if (folderCopy) {
+                deleteTree(copy)
+            } else {
+                runCatching { fileSystem.delete(copy) }
                 // Text bodies/images and CBZ pages live beside the copy in
                 // the content-addressed book directory.
-                deleteTree(copy.substringBeforeLast('.'))
+                contentRoot?.let(::deleteTree)
             }
         }
-        coverPath?.takeIf { it.isNotBlank() }?.let(fileSystem::delete)
+        coverPath?.takeIf { it.isNotBlank() }?.let { runCatching { fileSystem.delete(it) } }
+        val leftovers = pathsToCheck.filter { path ->
+            runCatching { fileSystem.exists(path) }.getOrDefault(false)
+        }
+        if (leftovers.isNotEmpty()) {
+            // The row is gone; a later Data-screen cleanup can reclaim these.
+            MiruLog.event(
+                "library",
+                "local-remove-leftovers",
+                "paths" to leftovers.size,
+            )
+        }
         return true
     }
 
-    private fun deleteTree(path: String) {
-        fileSystem.list(path).forEach { child -> deleteTree(child) }
-        runCatching { fileSystem.delete(path) }
+    private fun deleteTree(path: String): Boolean {
+        runCatching { fileSystem.list(path) }.getOrDefault(emptyList()).forEach(::deleteTree)
+        return runCatching {
+            fileSystem.delete(path)
+            !fileSystem.exists(path)
+        }.getOrDefault(false)
     }
 
     private suspend fun resolve(bookUrl: String): Pair<LocalSource, String>? {

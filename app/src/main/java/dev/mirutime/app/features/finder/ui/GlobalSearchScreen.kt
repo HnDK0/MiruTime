@@ -428,7 +428,7 @@ fun GlobalSearchScreen(
                                     inLibrary = book.inLibrary,
                                     plain = true,
                                     membership = book.badge?.toMiruBadge(),
-                                    onClick = { onBookOpen(book.bookUrl) },
+                                    onClick = { onBookOpen(book.bookKey) },
                                     onLongClick = { toggleMembership(book) },
                                 )
                             }

@@ -27,6 +27,9 @@ data class StorageUsage(
     val bookCount: Int = 0,
     val chapterCount: Int = 0,
     val localFileCount: Int = 0,
+    val outOfLibraryBookCount: Int = 0,
+    val orphanBookDirCount: Int = 0,
+    val orphanBookBytes: Long = 0,
 ) {
     val totalBytes: Long
         get() = databaseBytes + imageBytes + novelCacheBytes + mangaCacheBytes + videoBytes
@@ -69,6 +72,9 @@ internal object StorageUsageAggregator {
         databaseBytes: Long,
         videoBytes: Long,
         imageCacheBytes: Long = 0,
+        outOfLibraryBookCount: Int = 0,
+        orphanBookDirCount: Int = 0,
+        orphanBookBytes: Long = 0,
         sizeOf: (String) -> Long?,
     ): StorageUsage {
         val coverBytes = fileBytes(library.coverFiles, library.coverBytes, sizeOf)
@@ -91,6 +97,9 @@ internal object StorageUsageAggregator {
             bookCount = library.bookCount,
             chapterCount = library.chapterCount,
             localFileCount = library.localFileCount,
+            outOfLibraryBookCount = outOfLibraryBookCount,
+            orphanBookDirCount = orphanBookDirCount,
+            orphanBookBytes = orphanBookBytes,
         )
     }
 
@@ -139,9 +148,26 @@ class StorageUsageService(
     // Video cache is owned by media3; clearing goes through its manager so
     // its database and cache index stay consistent.
     private val clearVideo: (suspend () -> Unit)? = null,
+    private val purgeOutOfLibraryAction: suspend () -> Unit = {},
+    private val filesDir: File? = null,
 ) {
+    private suspend fun localBookNames(): Map<String, Set<String>> =
+        localValidNames(
+            repository.localBookCopyPaths() +
+                repository.localBookBodyPaths() +
+                repository.localBookPagePaths().flatMap(::pagePaths),
+        )
+
     suspend fun refresh(): StorageUsage = withContext(Dispatchers.IO) {
         val library = repository.storageUsage()
+        val orphans = filesDir?.let { dir ->
+            inspectOrphanBookData(
+                filesDir = dir,
+                validBookIds = repository.bookIds().toSet(),
+                validCoverIds = repository.bookCoverIds().toSet(),
+                validLocalNames = localBookNames(),
+            )
+        } ?: OrphanBookData.Empty
         StorageUsageAggregator.aggregate(
             library = library,
             databaseBytes = databaseFiles.sumOf(::fileBytes),
@@ -149,8 +175,25 @@ class StorageUsageService(
             // bookkeeping, not offline video the user can reclaim.
             videoBytes = videoDirs.sumOf(::videoCacheBytes),
             imageCacheBytes = directoryBytes(imageCacheDir),
+            outOfLibraryBookCount = repository.outOfLibraryBookCount(),
+            orphanBookDirCount = orphans.dirCount,
+            orphanBookBytes = orphans.bytes,
             sizeOf = sizeOf,
         )
+    }
+
+    /** Deletes out-of-library books and their owned rows/files. */
+    suspend fun purgeOutOfLibrary(): Unit = withContext(Dispatchers.IO) {
+        purgeOutOfLibraryAction()
+        val dir = filesDir
+        if (dir != null) {
+            sweepOrphanBookData(
+                filesDir = dir,
+                validBookIds = repository.bookIds().toSet(),
+                validCoverIds = repository.bookCoverIds().toSet(),
+                validLocalNames = localBookNames(),
+            )
+        }
     }
 
     /**

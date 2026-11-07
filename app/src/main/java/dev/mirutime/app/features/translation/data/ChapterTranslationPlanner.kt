@@ -1,5 +1,6 @@
 package dev.mirutime.app.features.translation.data
 
+import dev.mirutime.data.library.bookKeyUrl
 import dev.mirutime.app.features.reader.document.BlockKind
 import dev.mirutime.app.features.reader.document.ReaderBlock
 import dev.mirutime.app.features.reader.document.ReaderDocument
@@ -72,7 +73,10 @@ object ChapterTranslationPlanner {
         if (mode == null || !mode.hasPair) return null
         if (ProviderId.from(mode.provider) == null) return null
         if (runCatching { LanguageCode.parse(mode.target) }.getOrNull() == null) return null
-        val novelPrompt = AppSettings.novelPrompts.firstOrNull { it.bookUrl == bookUrl }
+        val actualUrl = bookKeyUrl(bookUrl)
+        val novelPrompt = AppSettings.novelPrompts.firstOrNull {
+            it.bookUrl == bookUrl || it.bookUrl == actualUrl
+        }
         val prompt = composePrompt(
             base = AppSettings.activePrompt,
             override = novelPrompt?.prompt.orEmpty(),

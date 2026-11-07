@@ -1,7 +1,7 @@
 package dev.mirutime.app.features.library.ui
 
-// Pure library multi-select state, keyed by the stable book URL. Kept out of
-// the composable so the toggle/all/clear rules stay unit-testable.
+// Pure library multi-select state. Identity is the opaque BookKey
+// (installId + URL): two installs may expose different works under one URL.
 data class LibrarySelection(
     val active: Boolean = false,
     val selected: Set<String> = emptySet(),
@@ -9,13 +9,13 @@ data class LibrarySelection(
     val count: Int get() = selected.size
     val isEmpty: Boolean get() = selected.isEmpty()
 
-    fun isSelected(bookUrl: String): Boolean = bookUrl in selected
+    fun isSelected(bookKey: String): Boolean = bookKey in selected
 }
 
 sealed interface LibrarySelectionAction {
-    data class LongPress(val bookUrl: String) : LibrarySelectionAction
-    data class Toggle(val bookUrl: String) : LibrarySelectionAction
-    data class SelectAll(val bookUrls: Collection<String>) : LibrarySelectionAction
+    data class LongPress(val bookKey: String) : LibrarySelectionAction
+    data class Toggle(val bookKey: String) : LibrarySelectionAction
+    data class SelectAll(val bookKeys: Collection<String>) : LibrarySelectionAction
     data object Clear : LibrarySelectionAction
     data object Close : LibrarySelectionAction
 }
@@ -25,18 +25,20 @@ fun reduceLibrarySelection(
     action: LibrarySelectionAction,
 ): LibrarySelection = when (action) {
     is LibrarySelectionAction.LongPress -> {
-        val url = action.bookUrl
+        val key = action.bookKey
         if (state.active) {
-            state.copy(selected = state.selected.toggled(url))
+            state.toggled(key)
         } else {
-            LibrarySelection(active = true, selected = setOf(url))
+            LibrarySelection(active = true, selected = setOf(key))
         }
     }
     is LibrarySelectionAction.Toggle ->
-        if (state.active) state.copy(selected = state.selected.toggled(action.bookUrl)) else state
+        if (state.active) state.toggled(action.bookKey) else state
     is LibrarySelectionAction.SelectAll ->
         if (state.active) {
-            state.copy(selected = action.bookUrls.filter { it.isNotBlank() }.toSet())
+            state.copy(
+                selected = action.bookKeys.filter { it.isNotBlank() }.toSet(),
+            )
         } else {
             state
         }
@@ -45,5 +47,5 @@ fun reduceLibrarySelection(
     LibrarySelectionAction.Close -> LibrarySelection()
 }
 
-private fun Set<String>.toggled(url: String): Set<String> =
-    if (url in this) this - url else this + url
+private fun LibrarySelection.toggled(key: String): LibrarySelection =
+    copy(selected = if (key in selected) selected - key else selected + key)

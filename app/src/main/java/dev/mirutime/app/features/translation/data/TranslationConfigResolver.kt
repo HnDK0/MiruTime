@@ -193,4 +193,4 @@ internal fun pluginIdOf(bookUrl: String): String {
  * (FR-023). The fallback keeps pre-existing behavior for local/legacy URLs.
  */
 internal fun translationSourceId(bookUrl: String): String =
-    PluginBookIndex.sourceFor(bookUrl) ?: pluginIdOf(bookUrl)
+    PluginBookIndex.sourceForBook(bookUrl) ?: pluginIdOf(bookUrl)
