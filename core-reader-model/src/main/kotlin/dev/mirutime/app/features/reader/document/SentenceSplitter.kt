@@ -90,14 +90,16 @@ object SentenceSplitter {
         '\u2039'  // ‹
     )
 
+    // Converted angle brackets (⟨⟩) are deliberately not brackets: they replace
+    // literal ASCII < >, which were never brackets either, so sentence
+    // boundaries must stay exactly where they were before the conversion.
     private val CLOSING_TO_OPENING_BRACKETS = mapOf(
         ')' to '(', ']' to '[', '}' to '{',
-        '\u27E9' to '\u27E8', // ⟩...⟨
         '\u3015' to '\u3014', // 〕...〔
         '\u3011' to '\u3010'  // 】...【
     )
 
-    private val OPENING_BRACKETS = setOf('(', '[', '{', '\u27E8', '\u3014', '\u3010')
+    private val OPENING_BRACKETS = setOf('(', '[', '{', '\u3014', '\u3010')
 
     /** Known abbreviations (lowercase, without the trailing dot). */
     private val ABBREVIATIONS = setOf(

@@ -1,6 +1,7 @@
 package dev.mirutime.core.text
 
 import kotlinx.serialization.Serializable
+import java.util.concurrent.ConcurrentHashMap
 
 // Where a cleanup rule is applied. `Both` is NoveLA's behaviour: the rule runs
 // on the parsed original (also the translator's input) and on the translation.
@@ -41,11 +42,33 @@ fun regexError(pattern: String): String? {
     }
 }
 
+// Editing a rule on a loaded chapter recompiles the same pattern for every
+// block and every translation emission. Cache the compiled Regex process-wide;
+// `Regex`/`Pattern` are safe to share, a Matcher is created per replace call.
+private const val COMPILED_CACHE_LIMIT = 512
+private val NEVER_MATCH = Regex("(?!)")
+private val plainCache = ConcurrentHashMap<String, Regex>()
+private val wholeWordsCache = ConcurrentHashMap<String, Regex>()
+
 // Whole-words wraps the pattern so it only matches between word boundaries.
-fun RegexRule.compiled(): Regex? = try {
-    Regex(if (wholeWords) "\\b(?:$pattern)\\b" else pattern)
-} catch (e: Exception) {
-    null
+fun RegexRule.compiled(): Regex? {
+    val cache = if (wholeWords) wholeWordsCache else plainCache
+    val compiled = cache[pattern] ?: run {
+        val regex = try {
+            Regex(if (wholeWords) "\\b(?:$pattern)\\b" else pattern)
+        } catch (_: Exception) {
+            NEVER_MATCH
+        }
+        if (cache.size >= COMPILED_CACHE_LIMIT) cache.clear()
+        cache[pattern] = regex
+        regex
+    }
+    return compiled.takeUnless { it === NEVER_MATCH }
+}
+
+internal fun clearCompiledRuleCache() {
+    plainCache.clear()
+    wholeWordsCache.clear()
 }
 
 // Applies the ENABLED rules in order. A rule that fails to compile is skipped

@@ -245,6 +245,31 @@ class SentenceSplitterTest {
     }
 
     @Test
+    fun `converted angle chat line stays whole`() {
+        val input = "⟨Alice⟩ Are you there? Hello? It's me, the one who called you yesterday."
+        assertEquals(listOf(input), segments(input))
+        assertEquals(SplitSkip.LOG_BLOCK, SentenceSplitter.splitPlan(input).skipped)
+    }
+
+    @Test
+    fun `single converted angle does not swallow boundaries`() {
+        val input = "He said ⟨ and then stopped. The room was empty."
+
+        assertEquals(
+            listOf("He said ⟨ and then stopped.", "The room was empty."),
+            segments(input),
+        )
+    }
+
+    @Test
+    fun `ascii and converted single angles split identically`() {
+        val ascii = "He said < and then stopped. The room was empty."
+        val converted = "He said ⟨ and then stopped. The room was empty."
+
+        assertEquals(SentenceSplitter.spans(ascii), SentenceSplitter.spans(converted))
+    }
+
+    @Test
     fun `timed multi line chat block stays whole`() {
         val input = "[12:34] Alice: Are you there? Hello?\n[12:35] Bob: Yes. What happened?"
         assertEquals(listOf(input), segments(input))

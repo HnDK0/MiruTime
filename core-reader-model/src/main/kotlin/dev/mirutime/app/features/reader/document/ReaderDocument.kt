@@ -1,5 +1,7 @@
 package dev.mirutime.app.features.reader.document
 
+import dev.mirutime.core.text.normalizeAngles
+
 data class BlockId(val chapterUrl: String, val index: Int)
 
 enum class BlockKind { Heading, Paragraph, Image, Divider }
@@ -33,7 +35,8 @@ data class ReaderDocument(
      * Blocks are never removed, so stored anchors keep pointing at the same [BlockId].
      */
     fun titleBlock(): ReaderBlock? = blocks.firstOrNull()?.takeIf {
-        it.kind == BlockKind.Heading && it.original.trim() == title.trim()
+        it.kind == BlockKind.Heading &&
+            normalizeAngles(it.original).trim() == normalizeAngles(title).trim()
     }
 
     /** Blocks to render as chapter body: everything except the duplicated [titleBlock]. */

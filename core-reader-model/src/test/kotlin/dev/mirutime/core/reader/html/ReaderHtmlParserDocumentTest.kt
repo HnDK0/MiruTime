@@ -55,6 +55,16 @@ class ReaderHtmlParserDocumentTest {
     }
 
     @Test
+    fun `image alt text is angle-normalized`() {
+        val blocks = ReaderHtmlParser.parseDocument(
+            html = "<p><img src=\"a.png\" alt=\"Power < 10\"/></p>",
+            chapterUrl = "c",
+        )
+
+        assertEquals("Power ⟨ 10", blocks.single { it.kind == BlockKind.Image }.original)
+    }
+
+    @Test
     fun `oversized paragraph is split into bounded blocks`() {
         val longText = (1..2_000).joinToString(" ") { "word" }
         val blocks = ReaderHtmlParser.parseDocument("<p>$longText</p>", "c")

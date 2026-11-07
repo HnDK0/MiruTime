@@ -9,6 +9,7 @@ import dev.mirutime.core.text.RegexRule
 import dev.mirutime.core.text.RegexRuleScope
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -133,6 +134,24 @@ class ChapterTranslationPlannerTest {
         assertEquals(fromDocument?.units, fromHtml?.units)
         assertEquals(bookUrl, fromHtml?.bookUrl)
         assertTrue(fromHtml?.revision?.sourceHash?.isNotBlank() == true)
+    }
+
+    @Test
+    fun `literal angle brackets reach units as typographic brackets`() {
+        val html = "<p>You have &lt; 10 HP. &lt;System&gt; Level up!</p>"
+
+        val request = ChapterTranslationPlanner.requestFromHtml(
+            bookUrl = bookUrl,
+            chapterUrl = chapterUrl,
+            html = html,
+            config = ChapterTranslationConfig(mode = mode(), prompt = null),
+        )
+
+        assertNotNull(request)
+        assertEquals(
+            listOf("You have ⟨ 10 HP. ⟨System⟩ Level up!"),
+            request!!.units.map { it.text },
+        )
     }
 
     @Test

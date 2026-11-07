@@ -25,10 +25,12 @@ internal object TextStructure {
     /**
      * Chat/system log line prefix: a timestamp, a bracketed tag, an angle
      * handle or a bold handle. A bare "Name:" multi-line block is caught by
-     * the status classifier instead.
+     * the status classifier instead. Both ASCII and converted angle handles
+     * are accepted: the parser converts fresh text, but cached translations
+     * and provider output may still use either form.
      */
     private val LOG_PREFIX = Regex(
-        """^\s*(?:\[\d{1,2}:\d{2}(?::\d{2})?]|\[[^\]]{1,24}]|<[^<>]{1,32}>|\*\*[^*]{1,32}\*\*)\s*\S"""
+        """^\s*(?:\[\d{1,2}:\d{2}(?::\d{2})?]|\[[^\]]{1,24}]|<[^<>]{1,32}>|⟨[^⟨⟩]{1,32}⟩|\*\*[^*]{1,32}\*\*)\s*\S"""
     )
 
     /** Box Drawing + Block Elements: chars that form a frame around a block. */

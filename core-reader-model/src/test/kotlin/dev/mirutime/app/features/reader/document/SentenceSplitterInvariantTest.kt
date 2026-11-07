@@ -15,6 +15,7 @@ class SentenceSplitterInvariantTest {
     private val cjk = "彼は家に帰った。彼女はまだ起きていた！本当ですか？はい、そうです。"
     private val rtl = "ذهب الرجل إلى البيت. هل أنت بخير؟ نعم، أنا بخير۔ ٣.١٤"
     private val emoji = "🌅🔥😀👋✨★─╔║🙂"
+    private val angles = "Он сказал ⟨ и замер. ⟨Alice⟩ привет! 5 ⟩ 3 < 10 > 2 ⟨tag⟩"
 
     private val alphabets = listOf(
         "latin" to latin,
@@ -22,6 +23,7 @@ class SentenceSplitterInvariantTest {
         "cjk" to cjk,
         "rtl" to rtl,
         "emoji" to emoji,
+        "angles" to angles,
     )
 
     @Test

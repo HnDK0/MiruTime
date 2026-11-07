@@ -122,6 +122,65 @@ class ReaderRepositoryTest {
     }
 
     @Test
+    fun `document dedups a title heading after angle normalization`() = runBlocking {
+        val url = "https://plugin.example/angles"
+        val provider = StubProvider(
+            content = ChapterContent(
+                bookUrl = url,
+                chapterIndex = 1,
+                title = "<System> Awakening",
+                html = "<h2>&lt;System&gt; Awakening</h2><p>Text</p>",
+                chapterUrl = "$url/chapter-1",
+            ),
+        )
+
+        val document = DefaultReaderRepository(provider).document(url, 1)!!
+
+        assertEquals("<System> Awakening", document.title)
+        assertEquals("⟨System⟩ Awakening", document.blocks.first().original)
+        assertNotNull(document.titleBlock())
+        assertEquals(listOf("Text"), document.bodyBlocks().map { it.original })
+    }
+
+    @Test
+    fun `regex rules see typographic angles after conversion`() = runBlocking {
+        val url = "https://plugin.example/angles-rule"
+        val provider = StubProvider(
+            content = ChapterContent(
+                bookUrl = url,
+                chapterIndex = 1,
+                title = "Chapter 1",
+                html = "<p>&lt;System&gt; hi</p>",
+            ),
+        )
+        AppSettings.novelRegexRules[url] = listOf(
+            RegexRule(
+                id = 1,
+                pattern = "<System>",
+                replacement = "NO",
+                description = "ascii angle must not match",
+                enabled = true,
+                wholeWords = false,
+            ),
+            RegexRule(
+                id = 2,
+                pattern = "⟨System⟩",
+                replacement = "YES",
+                description = "converted angle matches",
+                enabled = true,
+                wholeWords = false,
+            ),
+        )
+        try {
+            val document = DefaultReaderRepository(provider).document(url, 1)!!
+
+            assertEquals(listOf("YES hi"), document.blocks.map { it.original })
+        } finally {
+            AppSettings.novelRegexRules.remove(url)
+        }
+    }
+
+    @Test
     fun `document applies enabled regex rules and ignores disabled ones`() = runBlocking {
         val url = "https://plugin.example/regex"
         val provider = StubProvider(

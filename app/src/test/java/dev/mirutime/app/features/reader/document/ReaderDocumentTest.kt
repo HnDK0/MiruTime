@@ -76,6 +76,20 @@ class ReaderDocumentTest {
     }
 
     @Test
+    fun `title block matches a converted angle heading`() {
+        val doc = document(
+            title = "<System> Awakening",
+            blocks = listOf(
+                block(0, BlockKind.Heading, "⟨System⟩ Awakening"),
+                block(1, BlockKind.Paragraph, "Text"),
+            ),
+        )
+
+        assertEquals(doc.blocks[0], doc.titleBlock())
+        assertEquals(listOf(doc.blocks[1]), doc.bodyBlocks())
+    }
+
+    @Test
     fun `body blocks drop only the duplicated title block`() {
         val title = block(0, BlockKind.Heading, "Falling Sideways")
         val body = listOf(title, block(1, BlockKind.Paragraph, "One"), block(2, BlockKind.Paragraph, "Two"))

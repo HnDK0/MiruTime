@@ -471,6 +471,16 @@ class SentenceSplitterCorpusTest {
                 skip = SplitSkip.LOG_BLOCK,
             ),
             Case(
+                name = "chat: converted angle names multi line",
+                text = "⟨Alice⟩ Are you there? Hello?\n⟨Bob⟩ Yes. What happened?",
+                skip = SplitSkip.LOG_BLOCK,
+            ),
+            Case(
+                name = "chat: convertible single angle line",
+                text = "⟨Alice⟩ Hi! You there? It's me, the one who called yesterday.",
+                skip = SplitSkip.LOG_BLOCK,
+            ),
+            Case(
                 name = "chat: bold names multi line",
                 text = "**Alice** Are you there? Hello?\n**Bob** Yes. What happened?",
                 skip = SplitSkip.LOG_BLOCK,
@@ -540,6 +550,11 @@ class SentenceSplitterCorpusTest {
                 name = "dialogue: unclosed bracket",
                 text = "He opened the door (and then stopped. The room was empty and cold, and the window had been broken for weeks.",
                 skip = SplitSkip.NO_BOUNDARY,
+            ),
+            Case(
+                name = "dialogue: single converted angle does not suppress",
+                text = "He said ⟨ and then stopped. The room was empty.",
+                expectedCount = 2,
             ),
             Case(
                 name = "dialogue: unbalanced quote",

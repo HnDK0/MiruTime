@@ -4,16 +4,38 @@ import dev.mirutime.app.features.reader.document.BlockId
 import dev.mirutime.app.features.reader.document.BlockKind
 import dev.mirutime.app.features.reader.document.ReaderBlock as DocumentBlock
 import dev.mirutime.app.features.reader.document.SentenceSplitter
+import dev.mirutime.core.text.normalizeAngles
 import java.net.URI
 
 object ReaderHtmlParser {
     private val blockTag = Regex(
         "(?is)<(h[1-3]|p|div|li)\\b[^>]*>(.*?)</\\1>",
     )
-    private val anyTag = Regex("(?is)<[^>]+>")
+
+    // Real HTML tags carry a known name (boolean attributes included) or an
+    // attribute with a value. A one-word literal like <Alice> is not a tag:
+    // chat handles and LitRPG prose must survive and become ⟨Alice⟩.
+    private val KNOWN_HTML_TAGS = listOf(
+        "a", "abbr", "article", "aside", "audio", "b", "bdi", "bdo", "big", "blockquote",
+        "body", "br", "caption", "center", "cite", "code", "col", "colgroup", "dd", "del",
+        "details", "dfn", "div", "dl", "dt", "em", "figcaption", "figure", "font", "footer",
+        "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hr", "html", "i", "iframe",
+        "img", "ins", "kbd", "li", "link", "main", "mark", "marquee", "meta", "nav", "nobr",
+        "noscript", "ol", "p", "path", "picture", "pre", "q", "rp", "rt", "ruby", "s", "samp",
+        "script", "section", "small", "source", "span", "strike", "strong", "style", "sub",
+        "summary", "sup", "svg", "table", "tbody", "td", "tfoot", "th", "thead", "time",
+        "title", "tr", "track", "tt", "u", "ul", "var", "video", "wbr",
+    )
+    private val knownTag = Regex("(?is)</?(?:${KNOWN_HTML_TAGS.joinToString("|")})\\b[^>]*>")
+    private val closingTag = Regex("(?is)</[a-z][\\w:-]*\\s*>")
+    private val attributedTag =
+        Regex("(?is)<[a-z][\\w:-]*(?=\\s+[a-z_:][\\w:.-]*\\s*=)[^<>]*>")
+    private val declaration = Regex("(?is)<[!?][^>]*>")
+
     private val scriptStyle = Regex("(?is)<(script|style)\\b[^>]*>.*?</\\1>")
     private val brTag = Regex("(?i)<br\\s*/?>")
     private val entity = Regex("&(#x?[0-9a-fA-F]+|[a-zA-Z]+);")
+    private val spaces = Regex("[ \\t\\u00A0]+")
     private val imgTag = Regex("(?is)<img\\b[^>]*>")
     private val srcAttr = Regex("(?is)\\bsrc\\s*=\\s*[\"']([^\"']*)[\"']")
     private val altAttr = Regex("(?is)\\balt\\s*=\\s*[\"']([^\"']*)[\"']")
@@ -45,7 +67,7 @@ object ReaderHtmlParser {
     }
 
     fun parse(html: String): List<ParsedBlock> {
-        val cleanHtml = scriptStyle.replace(html, " ")
+        val cleanHtml = stripScriptStyle(html)
         val matches = blockTag.findAll(cleanHtml).toList()
         val blocks = if (matches.isEmpty()) {
             val text = clean(cleanHtml)
@@ -81,7 +103,7 @@ object ReaderHtmlParser {
         chapterUrl: String,
         transform: (String) -> String = { it },
     ): List<DocumentBlock> {
-        val cleanHtml = scriptStyle.replace(html, " ")
+        val cleanHtml = stripScriptStyle(html)
         val matches = blockTag.findAll(cleanHtml).toList()
         val raw = if (matches.isEmpty()) {
             rawBlocks("p", cleanHtml, chapterUrl)
@@ -139,7 +161,7 @@ object ReaderHtmlParser {
                 .orEmpty()
             if (src.isNotEmpty()) {
                 val alt = altAttr.find(tagText)?.groupValues?.get(1)?.trim().orEmpty()
-                result += RawBlock(BlockKind.Image, alt, resolveImageUrl(src, chapterUrl))
+                result += RawBlock(BlockKind.Image, normalizeAngles(alt), resolveImageUrl(src, chapterUrl))
             }
             cursor = image.range.last + 1
         }
@@ -157,14 +179,28 @@ object ReaderHtmlParser {
         return runCatching { URI(chapterUrl).resolve(src).toString() }.getOrDefault(src)
     }
 
+    private fun stripScriptStyle(html: String): String =
+        if (html.contains("<script", ignoreCase = true) || html.contains("<style", ignoreCase = true)) {
+            scriptStyle.replace(html, " ")
+        } else {
+            html
+        }
+
     private fun clean(raw: String): String {
-        val withBreaks = brTag.replace(raw, "\n")
-        val withoutTags = anyTag.replace(withBreaks, "")
-        val decoded = decodeEntities(withoutTags)
-        return decoded
+        val withBreaks = if ('<' in raw) brTag.replace(raw, "\n") else raw
+        val withoutTags = if ('<' in withBreaks) stripTags(withBreaks) else withBreaks
+        val decoded = if ('&' in withoutTags) decodeEntities(withoutTags) else withoutTags
+        return normalizeAngles(decoded)
             .lines()
-            .joinToString("\n") { it.replace(Regex("[ \\t\\u00A0]+"), " ").trim() }
+            .joinToString("\n") { it.replace(spaces, " ").trim() }
             .trim()
+    }
+
+    private fun stripTags(text: String): String {
+        val withoutDeclarations = declaration.replace(text, "")
+        val withoutKnown = knownTag.replace(withoutDeclarations, "")
+        val withoutClosing = closingTag.replace(withoutKnown, "")
+        return attributedTag.replace(withoutClosing, "")
     }
 
     private fun decodeEntities(text: String): String = entity.replace(text) { match ->

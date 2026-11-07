@@ -45,6 +45,7 @@ class SpeechTextTest {
         val logs = listOf(
             "[12:34] Alice: hi\n[12:35] Bob: yo",
             "<Alice> hi there\n<Bob> hello",
+            "⟨Alice⟩ hi there\n⟨Bob⟩ hello",
             "**Alice** hi\n**Bob** hello",
         )
         logs.forEach { assertTrue("expected noise: $it", SpeechText.isNoiseBlock(it)) }
