@@ -36,6 +36,7 @@ data class LocalChapter(
 internal data class ParsedText(
     val body: String,
     val images: List<LocalImage>,
+    val title: String = "",
 )
 
 internal fun ParsedText.trimmed(): ParsedText {
@@ -46,7 +47,7 @@ internal fun ParsedText.trimmed(): ParsedText {
     val images = images.map { image ->
         image.copy(position = (image.position - start).coerceIn(0, trimmedBody.length))
     }
-    return ParsedText(trimmedBody, images)
+    return ParsedText(trimmedBody, images, title)
 }
 
 // Builds plain text with NUL-delimited image markers, then turns markers into

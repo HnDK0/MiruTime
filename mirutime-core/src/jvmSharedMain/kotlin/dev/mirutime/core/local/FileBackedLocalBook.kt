@@ -76,7 +76,7 @@ class EpubFileReader(file: File) : Closeable {
     private val archive = ZipArchive(file)
     private val manifestItems: Map<String, EpubManifestRef>
     private val spine: List<EpubManifestRef>
-    private val tocEntries: List<EpubTocEntry>
+    private val tocEntries: List<EpubNavEntry>
     private val rootPath: String
 
     val title: String
@@ -124,21 +124,23 @@ class EpubFileReader(file: File) : Closeable {
             manifestItems[itemRef.attr("idref").orEmpty()]
         }.filter { it.absPath.substringAfterLast('.') in FILE_CHAPTER_EXTENSIONS }
 
+        // NCX is optional: EPUB 3 commonly ships only nav.xhtml.
         val ncxPath = manifestItems.values.firstOrNull {
             it.mediaType == "application/x-dtbncx+xml"
         }?.absPath ?: manifestItems["ncx"]?.absPath
-            ?: throw IllegalStateException("ncx file missing")
-        val ncx = archive.read(ncxPath) ?: throw IllegalStateException("ncx file missing")
-        val navMap = parseXmlDocument(ncx)?.selectFirstTag("navMap")
-            ?: throw IllegalStateException("Invalid NCX file: navMap not found")
-        tocEntries = navMap.selectTag("navPoint").mapNotNull { navPoint ->
-            val navTitle = (navPoint.selectFirstTag("navLabel")
-                ?.selectFirstTag("text")?.textContent ?: "")
-                .replace(Regex("\\s+"), " ")
-                .trim()
-            val src = navPoint.selectFirstTag("content")?.attr("src") ?: ""
-            if (src.isEmpty()) null
-            else EpubTocEntry(navTitle, src.decodedURL.hrefAbsolutePath(rootPath))
+        tocEntries = if (ncxPath != null) {
+            runCatching {
+                parseNcxToc(
+                    { runCatching { archive.read(it) }.getOrNull() },
+                    ncxPath,
+                    rootPath,
+                )
+            }
+                .getOrNull()
+                ?.takeIf { it.isNotEmpty() }
+                ?: parseEpub3NavFromArchive(archive, manifestItems, rootPath)
+        } else {
+            parseEpub3NavFromArchive(archive, manifestItems, rootPath)
         }
         val cover = runCatching { extractEpubCover(archive, manifestItems, metadata) }.getOrNull()
         coverBytes = cover?.bytes
@@ -149,7 +151,7 @@ class EpubFileReader(file: File) : Closeable {
     val spineCount: Int get() = spine.size
 
     fun forEachChapter(consumer: (LocalChapter) -> Unit) {
-        var currentToc: EpubTocEntry? = null
+        var currentToc: EpubNavEntry? = null
         var body = StringBuilder()
         var images = mutableListOf<LocalImage>()
 
@@ -159,9 +161,7 @@ class EpubFileReader(file: File) : Closeable {
             val parsed = xhtmlToContent(archive.read(spineUrl) ?: ByteArray(0)) { src ->
                 readEpubImage(src, spineDir, manifestItems)
             }
-            val toc = tocEntries.firstOrNull {
-                it.link.substringBefore('#').equals(spineUrl.substringBefore('#'), ignoreCase = true)
-            }
+            val toc = tocEntryFor(spineUrl, tocEntries, parsed.title)
             if (currentToc != null && toc != null && body.isNotEmpty()) {
                 consumer(LocalChapter(currentToc.link, currentToc.title, body.toString(), images.toList()))
                 body = StringBuilder()
@@ -213,6 +213,21 @@ class EpubFileReader(file: File) : Closeable {
     override fun close() = archive.close()
 }
 
+private fun parseEpub3NavFromArchive(
+    archive: ZipArchive,
+    manifestItems: Map<String, EpubManifestRef>,
+    rootPath: String,
+): List<EpubNavEntry> {
+    val navPath = manifestItems.values.firstOrNull { item ->
+        item.properties.split(Regex("\\s+")).contains("nav")
+    }?.absPath ?: return emptyList()
+    return parseEpub3Nav(
+        read = { runCatching { archive.read(it) }.getOrNull() },
+        navPath = navPath,
+        rootPath = rootPath,
+    )
+}
+
 private fun extractEpubCover(
     archive: ZipArchive,
     manifestItems: Map<String, EpubManifestRef>,
@@ -252,7 +267,6 @@ private data class EpubManifestRef(
     val properties: String = "",
 )
 
-private data class EpubTocEntry(val title: String, val link: String)
 
 // ── CBZ ────────────────────────────────────────────────────────────────────
 

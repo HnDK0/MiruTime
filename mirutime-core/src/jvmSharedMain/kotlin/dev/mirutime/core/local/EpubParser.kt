@@ -47,27 +47,21 @@ internal fun parseEpub(bytes: ByteArray): LocalBook {
         )
     }.toMap()
 
-    // NCX lookup: media-type first, NoveLA's id="ncx" as the fallback.
+    // NCX is optional: EPUB 3 commonly ships only nav.xhtml.
     val ncxPath = manifestItems.values.firstOrNull { it.mediaType == "application/x-dtbncx+xml" }
         ?.absPath ?: manifestItems["ncx"]?.absPath
-        ?: throw IllegalStateException("ncx file missing")
-    val ncx = entries[ncxPath] ?: throw IllegalStateException("ncx file missing")
-    val navMap = parseXmlDocument(ncx)?.selectFirstTag("navMap")
-        ?: throw IllegalStateException("Invalid NCX file: navMap not found")
-
-    val tocEntries = navMap.selectTag("navPoint").mapNotNull { navPoint ->
-        val navTitle = (navPoint.selectFirstTag("navLabel")
-            ?.selectFirstTag("text")?.textContent ?: "")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-        val src = navPoint.selectFirstTag("content")?.attr("src") ?: ""
-        if (src.isEmpty()) null
-        else TocEntry(navTitle, src.decodedURL.hrefAbsolutePath(rootPath))
+    val tocEntries = if (ncxPath != null) {
+        runCatching { parseNcxToc({ entries[it] }, ncxPath, rootPath) }
+            .getOrNull()
+            ?.takeIf { it.isNotEmpty() }
+            ?: parseEpub3NavFromEntries(entries, manifestItems, rootPath)
+    } else {
+        parseEpub3NavFromEntries(entries, manifestItems, rootPath)
     }
 
     // Spine order (sequential port of the NoveLA batched-parallel loop).
     val chapters = mutableListOf<LocalChapter>()
-    var currentToc: TocEntry? = null
+    var currentToc: EpubNavEntry? = null
     var body = StringBuilder()
     var chapterImages = mutableListOf<LocalImage>()
 
@@ -80,9 +74,7 @@ internal fun parseEpub(bytes: ByteArray): LocalBook {
         val parsed = xhtmlToContent(entries[spineUrl] ?: ByteArray(0)) { src ->
             resolveEpubImage(src, spineDir, entries, manifestItems)
         }
-        val toc = tocEntries.firstOrNull {
-            it.link.substringBefore('#').equals(spineUrl.substringBefore('#'), ignoreCase = true)
-        }
+        val toc = tocEntryFor(spineUrl, tocEntries, parsed.title)
 
         if (currentToc != null && toc != null && body.isNotEmpty()) {
             chapters.add(LocalChapter(currentToc.link, currentToc.title, body.toString(), chapterImages.toList()))
@@ -110,6 +102,17 @@ internal fun parseEpub(bytes: ByteArray): LocalBook {
         coverBytes = cover?.bytes,
         coverMediaType = cover?.mediaType,
     )
+}
+
+private fun parseEpub3NavFromEntries(
+    entries: Map<String, ByteArray>,
+    manifestItems: Map<String, ManifestRef>,
+    rootPath: String,
+): List<EpubNavEntry> {
+    val navPath = manifestItems.values.firstOrNull { item ->
+        item.properties.split(Regex("\\s+")).contains("nav")
+    }?.absPath ?: return emptyList()
+    return parseEpub3Nav({ entries[it] }, navPath, rootPath)
 }
 
 // EPUB2 declares the cover through <meta name="cover" content="id">, EPUB3
@@ -164,7 +167,6 @@ private data class ManifestRef(
     val mediaType: String,
     val properties: String = "",
 )
-private data class TocEntry(val title: String, val link: String)
 
 // Chapter XHTML → structured plain text. Port of NoveLA getNodeStructuredText
 // (Jsoup path): paragraphs separated by blank lines, <br> → newline, the
@@ -177,11 +179,14 @@ internal fun xhtmlToContent(
     resolveImage: (String) -> LocalImage?,
 ): ParsedText {
     val doc = Ksoup.parse(bytes.decodeToString(), "")
-    val body = doc.body() ?: return ParsedText(doc.text(), emptyList())
-    body.selectFirst("h1, h2, h3, h4, h5, h6")?.remove()
+    val body = doc.body() ?: return ParsedText(doc.text(), emptyList(), doc.title())
+    val heading = body.selectFirst("h1, h2, h3, h4, h5, h6")
+    val chapterTitle = doc.title().trim().ifBlank { heading?.text()?.trim().orEmpty() }
+    heading?.remove()
     val out = InlineImagesBuilder()
     appendChildren(body, out, resolveImage)
-    return out.build()
+    val parsed = out.build()
+    return ParsedText(parsed.body, parsed.images, chapterTitle)
 }
 
 private fun appendChildren(

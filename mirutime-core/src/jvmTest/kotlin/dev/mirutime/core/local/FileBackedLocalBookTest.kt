@@ -79,6 +79,121 @@ class FileBackedLocalBookTest {
     }
 
     @Test
+    fun `epub3 without ncx reads nav titles`() {
+        val opf = """
+            <package><metadata><dc:title>Nav Book</dc:title></metadata>
+            <manifest>
+              <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+              <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+              <item id="ch2" href="ch2.xhtml" media-type="application/xhtml+xml"/>
+            </manifest>
+            <spine><itemref idref="ch1"/><itemref idref="ch2"/></spine></package>
+        """.trimIndent().encodeToByteArray()
+        val nav = """
+            <html><body><nav><ol>
+              <li><a href="ch1.xhtml">First</a></li>
+              <li><a href="ch2.xhtml">Second</a></li>
+            </ol></nav></body></html>
+        """.trimIndent().encodeToByteArray()
+        val file = tempZip(
+            zip(
+                listOf(
+                    "META-INF/container.xml" to
+                        """<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>"""
+                            .encodeToByteArray(),
+                    "OEBPS/content.opf" to opf,
+                    "OEBPS/nav.xhtml" to nav,
+                    "OEBPS/ch1.xhtml" to "<html><body><p>One body.</p></body></html>".encodeToByteArray(),
+                    "OEBPS/ch2.xhtml" to "<html><body><p>Two body.</p></body></html>".encodeToByteArray(),
+                ),
+            ),
+        )
+
+        val chapters = EpubFileReader(file).use { reader ->
+            buildList { reader.forEachChapter { add(it) } }
+        }
+
+        assertEquals(listOf("First", "Second"), chapters.map { it.title })
+        assertEquals(listOf("One body.", "Two body."), chapters.map { it.body.trim() })
+    }
+
+    @Test
+    fun `epub3 nav picks the toc nav and ignores landmarks`() {
+        val opf = """
+            <package><metadata><dc:title>Nav Book</dc:title></metadata>
+            <manifest>
+              <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+              <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+              <item id="ch2" href="ch2.xhtml" media-type="application/xhtml+xml"/>
+            </manifest>
+            <spine><itemref idref="ch1"/><itemref idref="ch2"/></spine></package>
+        """.trimIndent().encodeToByteArray()
+        val nav = """
+            <html xmlns:epub="http://www.idpf.org/2007/ops"><body>
+              <nav epub:type="landmarks"><a href="ch1.xhtml">Cover</a></nav>
+              <nav epub:type="toc">
+                <a href="ch1.xhtml">First</a><a href="ch2.xhtml">Second</a>
+              </nav>
+            </body></html>
+        """.trimIndent().encodeToByteArray()
+        val file = tempZip(
+            zip(
+                listOf(
+                    "META-INF/container.xml" to
+                        """<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>"""
+                            .encodeToByteArray(),
+                    "OEBPS/content.opf" to opf,
+                    "OEBPS/nav.xhtml" to nav,
+                    "OEBPS/ch1.xhtml" to "<html><body><p>One body.</p></body></html>".encodeToByteArray(),
+                    "OEBPS/ch2.xhtml" to "<html><body><p>Two body.</p></body></html>".encodeToByteArray(),
+                ),
+            ),
+        )
+
+        val chapters = EpubFileReader(file).use { reader ->
+            buildList { reader.forEachChapter { add(it) } }
+        }
+
+        assertEquals(listOf("First", "Second"), chapters.map { it.title })
+        assertEquals(2, chapters.size)
+    }
+
+    @Test
+    fun `epub without any toc emits every spine chapter with a fallback title`() {
+        val opf = """
+            <package><metadata><dc:title>Loose Book</dc:title></metadata>
+            <manifest>
+              <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+              <item id="ch2" href="ch2.xhtml" media-type="application/xhtml+xml"/>
+            </manifest>
+            <spine><itemref idref="ch1"/><itemref idref="ch2"/></spine></package>
+        """.trimIndent().encodeToByteArray()
+        val file = tempZip(
+            zip(
+                listOf(
+                    "META-INF/container.xml" to
+                        """<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>"""
+                            .encodeToByteArray(),
+                    "OEBPS/content.opf" to opf,
+                    "OEBPS/ch1.xhtml" to
+                        "<html><head><title>Heading One</title></head><body><p>One body.</p></body></html>"
+                            .encodeToByteArray(),
+                    "OEBPS/ch2.xhtml" to
+                        "<html><body><h1>Heading Two</h1><p>Two body.</p></body></html>"
+                            .encodeToByteArray(),
+                ),
+            ),
+        )
+
+        val chapters = EpubFileReader(file).use { reader ->
+            buildList { reader.forEachChapter { add(it) } }
+        }
+
+        assertEquals(listOf("Heading One", "Heading Two"), chapters.map { it.title })
+        assertEquals(2, chapters.size)
+    }
+
+    @Test
     fun `oversized zip entry is rejected and unsafe names are ignored`() {
         val file = tempZip(
             zip(
