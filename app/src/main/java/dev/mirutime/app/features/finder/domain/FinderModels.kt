@@ -54,6 +54,8 @@ data class LocalBook(
     val sizeLabel: String,
     val count: Int,
     val bookId: Long = 0,
+    // Raw installId ("local-books" / "local-manga") for install-aware keys.
+    val installId: String = "",
 ) {
     val isManga: Boolean get() = format == "CBZ"
 }
@@ -138,13 +140,17 @@ data class CatalogBook(
 data class LibraryBadgeState(val inSameSource: Boolean, val sourceCount: Int)
 
 internal fun libraryBadgeState(
-    url: String,
+    bookKey: String,
     title: String,
     libraryUrls: Set<String>,
     titleCounts: Map<String, Int>,
+    bookUrl: String = bookKey,
+    installId: String = "",
+    libraryKeys: Set<String> = emptySet(),
 ): LibraryBadgeState? {
     val count = titleCounts[title] ?: 0
-    if (url in libraryUrls) return LibraryBadgeState(inSameSource = true, sourceCount = maxOf(1, count))
+    val sameSource = bookKey in libraryKeys || (installId.isBlank() && bookUrl in libraryUrls)
+    if (sameSource) return LibraryBadgeState(inSameSource = true, sourceCount = maxOf(1, count))
     if (count > 0) return LibraryBadgeState(inSameSource = false, sourceCount = count)
     return null
 }
@@ -153,10 +159,10 @@ internal fun libraryBadgeState(
 // no per-card DB query. Used by providers after mapping and by the screens
 // after a long-press toggle.
 internal fun List<CatalogBook>.setMembership(
-    bookUrl: String,
+    bookKey: String,
     inLibrary: Boolean,
 ): List<CatalogBook> = map {
-    if (it.bookUrl == bookUrl) {
+    if (it.bookKey == bookKey) {
         val old = it.badge
         val badge = if (inLibrary) {
             LibraryBadgeState(
@@ -176,15 +182,40 @@ internal fun List<CatalogBook>.setMembership(
 internal fun List<CatalogBook>.applyMembership(
     libraryUrls: Set<String>,
     titleCounts: Map<String, Int>,
+    libraryKeys: Set<String> = emptySet(),
 ): List<CatalogBook> = map {
-    val badge = libraryBadgeState(it.bookUrl, it.title, libraryUrls, titleCounts)
-    // inLibrary means THIS url is in the library (the long-press target);
-    // a title-only match is a muted bookmark, never a removable membership.
-    it.copy(inLibrary = it.bookUrl in libraryUrls, badge = badge)
+    val badge = libraryBadgeState(
+        bookKey = it.bookKey,
+        title = it.title,
+        libraryUrls = libraryUrls,
+        titleCounts = titleCounts,
+        bookUrl = it.bookUrl,
+        installId = it.installId,
+        libraryKeys = libraryKeys,
+    )
+    // inLibrary means THIS work (installId + url) is in the library; a
+    // title-only match is a muted bookmark, never a removable membership.
+    val inSameSource = it.bookKey in libraryKeys ||
+        (it.installId.isBlank() && it.bookUrl in libraryUrls)
+    it.copy(inLibrary = inSameSource, badge = badge)
 }
 
+// Explicit URL-only helper for fakes/previews: the set carries plain URLs, so
+// it matches the URL regardless of installId.
 internal fun List<CatalogBook>.applyLibraryUrls(libraryUrls: Set<String>): List<CatalogBook> =
-    if (libraryUrls.isEmpty()) this else applyMembership(libraryUrls, emptyMap())
+    if (libraryUrls.isEmpty()) {
+        this
+    } else {
+        map { book ->
+            val badge = libraryBadgeState(
+                bookKey = book.bookUrl,
+                title = book.title,
+                libraryUrls = libraryUrls,
+                titleCounts = emptyMap(),
+            )
+            book.copy(inLibrary = book.bookUrl in libraryUrls, badge = badge)
+        }
+    }
 
 // Catalogue identity is installId + URL; providers can repeat an entry across
 // pages or merged extensions, but two plugins may expose different works

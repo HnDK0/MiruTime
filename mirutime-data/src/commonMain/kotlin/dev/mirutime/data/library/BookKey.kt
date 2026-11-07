@@ -10,17 +10,17 @@ package dev.mirutime.data.library
  */
 data class BookIdentity(val installId: String, val url: String)
 
-private const val KeyPrefix = "miru-book:v1:"
+internal const val LibraryBookKeyPrefix = "miru-book:v1:"
 private const val Hex = "0123456789abcdef"
 
 fun libraryBookKey(installId: String, url: String): String {
-    if (installId.isBlank() || url.startsWith(KeyPrefix)) return url
-    return KeyPrefix + hexEncode(installId) + ":" + hexEncode(url)
+    if (installId.isBlank() || url.startsWith(LibraryBookKeyPrefix)) return url
+    return LibraryBookKeyPrefix + hexEncode(installId) + ":" + hexEncode(url)
 }
 
 fun decodeLibraryBookKey(key: String): BookIdentity? {
-    if (!key.startsWith(KeyPrefix)) return null
-    val payload = key.removePrefix(KeyPrefix)
+    if (!key.startsWith(LibraryBookKeyPrefix)) return null
+    val payload = key.removePrefix(LibraryBookKeyPrefix)
     val separator = payload.indexOf(':')
     if (separator <= 0) return null
     val installId = hexDecode(payload.substring(0, separator)) ?: return null

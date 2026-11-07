@@ -185,7 +185,7 @@ fun UpdatesScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 8.dp),
-                    onOpen = { onBookOpen(update.book.bookUrl) },
+                    onOpen = { onBookOpen(update.book.bookKey) },
                 )
             }
         }

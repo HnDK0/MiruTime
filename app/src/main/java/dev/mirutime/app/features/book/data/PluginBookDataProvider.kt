@@ -63,8 +63,15 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.http.HttpStatusCode
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.json.JSONArray
-import org.json.JSONObject
 
 // Real plugin-backed book provider. For a plugin book it resolves the source
 // via PluginBookIndex, then loads BookMeta and the chapter list independently
@@ -160,6 +167,15 @@ class PluginBookDataProvider(
         ChapterCacheStore(LibraryChapterCacheRepository(repo), files, now, bookLocks)
     }
 
+    override fun invalidateBookCache(bookUrl: String) {
+        details.remove(bookUrl)
+        pluginMeta.remove(bookUrl)
+        chapterLists.remove(bookUrl)
+        chapterUrls.remove(bookUrl)
+        chapterTitles.remove(bookUrl)
+        invalidateChapterStatus(bookUrl)
+    }
+
     override suspend fun book(bookUrl: String): BookDetails? =
         when {
             isLocalFileBook(realUrl(bookUrl)) -> loadLocalSafBook(bookUrl)
@@ -228,7 +244,9 @@ class PluginBookDataProvider(
         pluginMeta[bookUrl] = meta
         val baseUrl = source.metadata.baseUrl
         val title = meta.title.trim().ifBlank {
-            PluginBookIndex.titleFor(bookUrl) ?: source.metadata.name
+            PluginBookIndex.titleFor(bookUrl)
+                ?: existing.title.takeIf { it.isNotBlank() }
+                ?: source.metadata.name
         }
         val coverUrl = resolveCoverUrl(meta.coverUrl, baseUrl)
         graphOrNull?.registerCoverReferers(sourceId, listOfNotNull(coverUrl), baseUrl)
@@ -333,7 +351,11 @@ class PluginBookDataProvider(
 
     private suspend fun loadBook(bookUrl: String, persist: Boolean): BookDetails? {
         if (!persist) {
-            details[bookUrl]?.let { return overlayLibraryState(bookUrl, it) }
+            details[bookUrl]?.let { cached ->
+                PluginBookIndex.put(bookUrl, cached.installId)
+                PluginBookIndex.putTitle(bookUrl, cached.title)
+                return overlayLibraryState(bookUrl, cached)
+            }
         }
         // A cached book opens from its persisted row: no plugin call, so no
         // network and no CF challenge. Only an explicit refresh or the
@@ -341,6 +363,8 @@ class PluginBookDataProvider(
         library?.book(bookUrl)?.let { row ->
             val cached = bookDetailsFromRow(row)
             details[bookUrl] = cached
+            PluginBookIndex.put(bookUrl, row.installId)
+            PluginBookIndex.putTitle(bookUrl, row.title)
             return overlayLibraryState(bookUrl, cached)
         }
         val sourceId = PluginBookIndex.sourceForBook(bookUrl) ?: return null
@@ -361,19 +385,22 @@ class PluginBookDataProvider(
                 ?: return null
             val built = bookDetailsFromRow(existing)
             details[bookUrl] = built
+            PluginBookIndex.put(bookUrl, existing.installId)
+            PluginBookIndex.putTitle(bookUrl, existing.title)
             return overlayLibraryState(bookUrl, built)
         }
         pluginMeta[bookUrl] = meta
         val baseUrl = source.metadata.baseUrl
-        val title = meta.title.trim().ifBlank {
-            PluginBookIndex.titleFor(bookUrl) ?: source.metadata.name
-        }
-        val coverUrl = resolveCoverUrl(meta.coverUrl, baseUrl)
-        graph.registerCoverReferers(sourceId, listOfNotNull(coverUrl), baseUrl)
-
         // The DB row owns identity flags; a fresh plugin load must never reset
         // library membership, shelf, progress or the original added time.
         val existing = library?.book(sourceId, realUrl(bookUrl))
+        val title = meta.title.trim().ifBlank {
+            PluginBookIndex.titleFor(bookUrl)
+                ?: existing?.title?.takeIf { it.isNotBlank() }
+                ?: source.metadata.name
+        }
+        val coverUrl = resolveCoverUrl(meta.coverUrl, baseUrl)
+        graphOrNull?.registerCoverReferers(sourceId, listOfNotNull(coverUrl), baseUrl)
         val readCount = existing?.let { library?.readChapterIndexes(it.bookId)?.size } ?: 0
         val timestamp = now()
         val built = BookDetails(
@@ -472,7 +499,7 @@ class PluginBookDataProvider(
 
     // Shared row builder: metadata save, fast cached add and history all write
     // the same fields so a later plugin refresh cannot reset membership.
-    private fun buildEntity(
+    internal fun buildEntity(
         bookUrl: String,
         sourceId: String,
         built: BookDetails,
@@ -482,8 +509,8 @@ class PluginBookDataProvider(
     ): BookEntity = BookEntity(
         bookId = existing?.bookId ?: 0L,
         installId = sourceId,
-        url = bookUrl,
-        title = built.title,
+        url = persistedBookUrl(bookUrl),
+        title = built.title.ifBlank { existing?.title ?: "" },
         author = built.author,
         coverUrl = built.coverUrl,
         contentType = built.contentType.name,
@@ -498,7 +525,7 @@ class PluginBookDataProvider(
         lastChapterIndex = existing?.lastChapterIndex,
         chapterListHash = existing?.chapterListHash,
         lastUpdateAt = existing?.lastUpdateAt,
-        genresJson = JSONArray(meta.genres.distinct()).toString(),
+        genresJson = buildJsonArray { meta.genres.distinct().forEach { add(it) } }.toString(),
         firstSeenAt = existing?.firstSeenAt?.takeIf { it > 0 } ?: timestamp,
         addedToLibraryAt = existing?.addedToLibraryAt
             ?: if (built.inLibrary) timestamp else null,
@@ -513,7 +540,9 @@ class PluginBookDataProvider(
         statusNormalized = normalizeStatus(meta.status),
         lastUpdatedRaw = meta.lastUpdated.orEmpty(),
         lastUpdatedAt = existing?.lastUpdatedAt,
-        extrasJson = JSONObject(meta.extras).toString(),
+        extrasJson = buildJsonObject {
+            meta.extras.forEach { (key, value) -> put(key, value) }
+        }.toString(),
         metadataSource = "PLUGIN",
         metadataUpdatedAt = timestamp,
         metadataHash = metadataHash(meta),
@@ -2057,6 +2086,10 @@ private data class CachedChapterStatus(
     val at: Long,
 )
 
+// A route passes an opaque (installId + URL) key; the database stores the real
+// URL only. Kept top-level and pure so the row builder is unit-testable.
+internal fun persistedBookUrl(bookKey: String): String = bookKeyUrl(bookKey)
+
 private fun normalizeTag(raw: String): String =
     raw.trim().lowercase().replace(Regex("\\s+"), " ")
 
@@ -2072,11 +2105,13 @@ private fun extraAltTitles(extras: Map<String, String>): String {
         extras["altTitle"] ?: extras["altTitles"],
         extras["alternativeTitle"],
     ).flatMap { it.split('|', '\n') }.map { it.trim() }.filter { it.isNotEmpty() }
-    return JSONArray(values).toString()
+    return buildJsonArray { values.forEach { add(it) } }.toString()
 }
 
 private fun extraAuthors(author: String?): String =
-    JSONArray(listOfNotNull(author?.takeIf { it.isNotBlank() })).toString()
+    buildJsonArray {
+        author?.takeIf { it.isNotBlank() }?.let { add(it) }
+    }.toString()
 
 // Pure-JVM author JSON for the direct row (no Android JSONObject stub in tests).
 private fun jsonAuthors(author: String): String {

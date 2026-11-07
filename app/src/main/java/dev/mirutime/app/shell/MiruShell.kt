@@ -94,6 +94,7 @@ import dev.mirutime.uikit.miruTopVeilBrush
 import dev.mirutime.uikit.title
 import dev.mirutime.app.features.book.data.PluginBookIndex
 import dev.mirutime.app.features.book.ui.BookPageSnapshotStore
+import dev.mirutime.app.features.book.ui.bookHeaderTitle
 import dev.mirutime.app.features.book.ui.BookScreen
 import dev.mirutime.app.features.dashboard.data.RoomDashboardDataProvider
 import dev.mirutime.app.features.dashboard.ui.DashboardScreen
@@ -300,6 +301,9 @@ fun MiruShell(
     // service owns restore, so the shell observes its result instead of
     // relying on the settings screen still being on screen.
     var dataRevision by remember { mutableIntStateOf(0) }
+    // Restore-only revision: an open book page reloads its row after a restore
+    // without reloading on every membership tap or book-open notification.
+    var restoreRevision by remember { mutableIntStateOf(0) }
     // One invalidation path for every committed membership write: cached
     // catalogue/search snapshots carry inLibrary flags, so drop them and let
     // library/dashboard/Finder reload on the new revision. Never called for a
@@ -320,6 +324,7 @@ fun MiruShell(
                 // A restored library invalidates cached inLibrary flags.
                 FinderSearchCache.clear()
                 dataRevision++
+                restoreRevision++
                 MiruLog.event("nav", "data-revision", "rev" to dataRevision, "reason" to "restore")
             }
         }
@@ -384,7 +389,12 @@ fun MiruShell(
             // back to a readable URL label, never a synthesized "Untitled".
             val bookTitle = bookUrl
                 ?.takeIf { it.isNotBlank() }
-                ?.let { PluginBookIndex.displayTitle(it).takeIf(String::isNotBlank) }
+                ?.let { key ->
+                    bookHeaderTitle(
+                        snapshotTitle = BookPageSnapshotStore.titleFor(key),
+                        indexTitle = PluginBookIndex.displayTitle(key),
+                    )
+                }
             // Source catalogue: header shows the source name.
             val sourceId = entry?.arguments?.getString("sourceId")?.let(Uri::decode)
             val sourceName = sourceId?.let { id ->
@@ -541,8 +551,8 @@ fun MiruShell(
                     contentPadding = padding,
                     provider = dashboardProvider,
                     refreshKey = dataRevision,
-                    onBookOpen = { title ->
-                        navController.navigate("book/${Uri.encode(title)}")
+                    onBookOpen = { bookKey ->
+                        navController.navigate("book/${Uri.encode(bookKey)}")
                     },
                     onUpdatesOpen = {
                         navController.navigate("updates")
@@ -558,8 +568,8 @@ fun MiruShell(
                     readerGraph = readerGraph,
                     provider = libraryProvider,
                     refreshKey = dataRevision,
-                    onBookOpen = { title ->
-                        navController.navigate("book/${Uri.encode(title)}")
+                    onBookOpen = { bookKey ->
+                        navController.navigate("book/${Uri.encode(bookKey)}")
                     },
                 )
             }
@@ -794,6 +804,7 @@ fun MiruShell(
                 BookScreen(
                     bookUrl = bookUrl,
                     contentPadding = padding,
+                    refreshKey = restoreRevision,
                     readerGraph = readerGraph,
                     provider = pluginBookProvider,
                     exporter = bookEpubExporter,
@@ -936,8 +947,8 @@ fun MiruShell(
                     refreshKey = dataRevision,
                     onRefresh = { onProgress -> updateService.checkAll(onProgress) },
                     onOpenSettings = { navController.navigate(SettingsRoutes.Updates) },
-                    onBookOpen = { url ->
-                        navController.navigate("book/${Uri.encode(url)}")
+                    onBookOpen = { bookKey ->
+                        navController.navigate("book/${Uri.encode(bookKey)}")
                     },
                 )
             }
@@ -960,8 +971,8 @@ fun MiruShell(
                 HistoryScreen(
                     contentPadding = padding,
                     provider = dashboardProvider,
-                    onBookOpen = { title ->
-                        navController.navigate("book/${Uri.encode(title)}")
+                    onBookOpen = { bookKey ->
+                        navController.navigate("book/${Uri.encode(bookKey)}")
                     },
                 )
             }

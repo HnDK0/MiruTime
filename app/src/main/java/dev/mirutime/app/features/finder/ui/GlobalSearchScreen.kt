@@ -264,27 +264,27 @@ fun GlobalSearchScreen(
     // Explicit target, optimistic section state: only the tapped card flips;
     // a failed write restores the previous value with an error toast.
     fun toggleMembership(book: CatalogBook) {
-        val url = book.bookUrl
-        if (url in membershipPending) return
+        val key = book.bookKey
+        if (key in membershipPending) return
         val target = !book.inLibrary
-        membershipPending = membershipPending + url
+        membershipPending = membershipPending + key
         results = results.map { result ->
-            result.copy(books = result.books.setMembership(url, target))
+            result.copy(books = result.books.setMembership(key, target))
         }
         scope.launch {
             val result = try {
-                provider.setInLibrary(url, target)
+                provider.setInLibrary(key, target)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 MembershipResult(success = false)
             }
-            membershipPending = membershipPending - url
+            membershipPending = membershipPending - key
             if (result.success) {
                 // Keep the committed value even if a late source answer carried
                 // the pre-toggle flag.
                 results = results.map { source ->
-                    source.copy(books = source.books.setMembership(url, target))
+                    source.copy(books = source.books.setMembership(key, target))
                 }
                 val message = when {
                     result.fileCleanupFailed -> R.string.book_library_cleanup_failed
@@ -295,7 +295,7 @@ fun GlobalSearchScreen(
                 Toast.makeText(context, resources.getString(message), Toast.LENGTH_SHORT).show()
             } else {
                 results = results.map { source ->
-                    source.copy(books = source.books.setMembership(url, !target))
+                    source.copy(books = source.books.setMembership(key, !target))
                 }
                 Toast.makeText(
                     context,

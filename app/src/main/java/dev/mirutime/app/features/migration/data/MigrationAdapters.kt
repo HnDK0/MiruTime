@@ -90,22 +90,28 @@ class AppSettingsMigrationSettings(
     private val save: suspend () -> Unit = {},
 ) : BookMigrationSettingsStore {
     override suspend fun copyNovelSettings(oldBookUrl: String, newBookUrl: String) {
+        var changed = false
         AppSettings.novelTranslation[oldBookUrl]?.let { config ->
             if (newBookUrl !in AppSettings.novelTranslation) {
                 AppSettings.novelTranslation[newBookUrl] = config
+                changed = true
             }
         }
         AppSettings.novelRegexRules[oldBookUrl]?.let { rules ->
             if (newBookUrl !in AppSettings.novelRegexRules) {
                 AppSettings.replaceNovelRules(newBookUrl, rules)
+                changed = true
             }
         }
         AppSettings.novelPrompts.firstOrNull { it.bookUrl == oldBookUrl }?.let { prompt ->
             if (AppSettings.novelPrompts.none { it.bookUrl == newBookUrl }) {
                 AppSettings.novelPrompts += prompt.copy(bookUrl = newBookUrl)
+                changed = true
             }
         }
-        saveDurably()
+        // A repair sweeps many books; only a row that actually owned settings
+        // pays for a durable write.
+        if (changed) saveDurably()
     }
 
     override suspend fun deleteNovelSettings(bookUrl: String) {

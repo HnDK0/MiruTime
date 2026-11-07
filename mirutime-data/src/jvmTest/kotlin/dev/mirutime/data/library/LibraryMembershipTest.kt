@@ -40,6 +40,7 @@ class LibraryMembershipTest {
         val membership = repository.libraryMembership(listOf("u1", "u3"), listOf("X", "Y"))
 
         assertEquals(setOf("u1"), membership.urls)
+        assertEquals(setOf(libraryBookKey("source", "u1")), membership.keys)
         assertEquals(1, membership.titles["X"])
         assertEquals(null, membership.titles["Y"])
     }
@@ -69,10 +70,10 @@ class LibraryMembershipTest {
             arrayOf(LibraryDao::class.java),
         ) { _, method, args ->
             when (method.name) {
-                "libraryUrls" -> {
+                "bookKeysByUrls" -> {
                     val chunk = (args!!.first() as List<*>).filterIsInstance<String>()
                     urlChunks += chunk.size
-                    chunk
+                    chunk.map { BookKeyRow(bookId = 0, installId = "source", url = it) }
                 }
                 "libraryTitleCounts" -> {
                     val chunk = (args!!.first() as List<*>).filterIsInstance<String>()
@@ -91,6 +92,7 @@ class LibraryMembershipTest {
         assertEquals(listOf(900, 900, 1), urlChunks)
         assertEquals(listOf(900, 900, 1), titleChunks)
         assertEquals(1801, membership.urls.size)
+        assertEquals(1801, membership.keys.size)
         assertEquals(1801, membership.titles.size)
     }
 

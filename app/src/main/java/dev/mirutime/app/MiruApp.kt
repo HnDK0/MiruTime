@@ -344,6 +344,12 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
     // Live restore: imports into the open Room database in one transaction.
     // recoverInterruptedRestore only finishes a restore interrupted by process
     // death; a normal restore needs no restart.
+    // URL-keyed per-novel settings follow a key -> real URL rewrite.
+    private val copyNovelSettingsForRepair: suspend (String, String) -> Unit = { oldUrl, newUrl ->
+        AppSettingsMigrationSettings(
+            save = { settingsStore.save(AppSettings.persistedSnapshot()) },
+        ).copyNovelSettings(oldUrl, newUrl)
+    }
     val restoreService: BackupRestoreService by lazy {
         BackupRestoreService(
             context = this,
@@ -353,6 +359,12 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             reloadPlugins = { pluginGraph.reload() },
             readerStore = readerBackupStore,
             clearImageCaches = ::clearImageCaches,
+            repair = {
+                libraryRepository.repairKeyUrls(
+                    onBookKeyRewritten = copyNovelSettingsForRepair,
+                )
+            },
+            onBookKeyRewritten = copyNovelSettingsForRepair,
         )
     }
     // Settings -> Data reads the same files the app actually writes. Video
@@ -518,6 +530,26 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
                 }
             }
             step("startup_recovery_sweep_failed") { recoverySweeper.sweep() }
+            step("startup_book_key_repair_failed") {
+                val report = libraryRepository.repairKeyUrls(
+                    onBookKeyRewritten = copyNovelSettingsForRepair,
+                )
+                if (report.changed > 0) libraryRepository.rebuildSearchIndex()
+                if (report.changed + report.ambiguous + report.ambiguousSoftRemoved +
+                    report.unrepairable + report.failed > 0
+                ) {
+                    MiruLog.event(
+                        "recovery",
+                        "book-key-repair",
+                        "rewritten" to report.rewrittenInPlace,
+                        "deleted" to report.deletedEmpty,
+                        "ambiguous" to report.ambiguous,
+                        "ambiguousSoft" to report.ambiguousSoftRemoved,
+                        "unrepairable" to report.unrepairable,
+                        "failed" to report.failed,
+                    )
+                }
+            }
             step("startup_shelves_failed") { libraryRepository.ensureDefaultShelves() }
             step("startup_auto_backup_failed") {
                 AutoBackupScheduler.sync(this@MiruApp, settingsStore.load())

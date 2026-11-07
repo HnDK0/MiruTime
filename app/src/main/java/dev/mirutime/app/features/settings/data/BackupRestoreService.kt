@@ -80,6 +80,8 @@ class BackupRestoreService(
         reloadPlugins: suspend () -> Unit = {},
         clearImageCaches: () -> Unit = {},
         readerStore: ReaderBackupStore = NoopReaderBackupStore,
+        repair: suspend () -> Unit = {},
+        onBookKeyRewritten: suspend (oldUrl: String, newUrl: String) -> Unit = { _, _ -> },
     ) : this(
         filesDir = context.applicationContext.filesDir,
         databasePath = databasePath,
@@ -95,6 +97,8 @@ class BackupRestoreService(
                     coverPathFor = coverPathFor,
                     journalId = journalId,
                     journalNow = journalNow,
+                    onBookKeyRewritten = onBookKeyRewritten,
+                    repair = repair,
                 )
             } finally {
                 source.close()

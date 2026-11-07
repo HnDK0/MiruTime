@@ -22,6 +22,12 @@ data class MembershipResult(
 interface BookDataProvider {
     suspend fun book(bookUrl: String): BookDetails?
 
+    /**
+     * Drops any in-memory copy so the next [book]/[chapters] call re-reads the
+     * store. A live restore replaces rows behind an already-open page.
+     */
+    fun invalidateBookCache(bookUrl: String) = Unit
+
     /** Reader/history entry point: creates a history-only row if needed. */
     suspend fun ensureHistoryBook(bookUrl: String)
 

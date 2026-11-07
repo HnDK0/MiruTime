@@ -1,6 +1,9 @@
 package dev.mirutime.data.library
 
 import androidx.room3.withWriteTransaction
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /**
  * Restores a backup database into the live database without replacing its
@@ -54,7 +57,10 @@ suspend fun LibraryDatabase.importLibraryBackup(
         { _, _, path -> path },
     journalId: Long? = null,
     journalNow: Long = 0L,
+    onBookKeyRewritten: suspend (oldUrl: String, newUrl: String) -> Unit = { _, _ -> },
+    repair: suspend () -> Unit = {},
 ): LibraryImportReport {
+    val rewrites = mutableListOf<Pair<String, String>>()
     val report = withWriteTransaction {
         importLibraryBackupRows(
             source = source,
@@ -63,18 +69,34 @@ suspend fun LibraryDatabase.importLibraryBackup(
             coverPathFor = coverPathFor,
             journalId = journalId,
             journalNow = journalNow,
+            rewrites = rewrites,
         )
+    }
+    // Settings writes are not part of the DB transaction: apply them only after
+    // a successful commit. Cancellation is never swallowed.
+    rewrites.forEach { (oldUrl, newUrl) ->
+        runIgnoringFailure { onBookKeyRewritten(oldUrl, newUrl) }
     }
     // Derived state: rebuild the FTS index so search sees restored books
     // immediately. Cache cleanup is intentionally NOT part of restore: dropping
     // rows here would orphan cached files and could remove offline content.
     // Users clear caches explicitly from Settings -> Data.
     val repository = LibraryRepository(libraryDao())
-    runCatching {
-        repository.ensureDefaultShelves()
-        repository.rebuildSearchIndex()
-    }
+    // Legacy key-URL rows are repaired before shelves and the one FTS rebuild,
+    // so a live restore is clean in the same session.
+    runIgnoringFailure { repair() }
+    runIgnoringFailure { repository.ensureDefaultShelves() }
+    runIgnoringFailure { repository.rebuildSearchIndex() }
     return report
+}
+
+private suspend fun runIgnoringFailure(block: suspend () -> Unit) {
+    try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+    }
 }
 
 private suspend fun importLibraryBackupRows(
@@ -84,6 +106,7 @@ private suspend fun importLibraryBackupRows(
     coverPathFor: (Long, Long, String?) -> String?,
     journalId: Long?,
     journalNow: Long,
+    rewrites: MutableList<Pair<String, String>>,
 ): LibraryImportReport {
     // --- parents -------------------------------------------------------------
     source.installs().forEach { install ->
@@ -103,17 +126,27 @@ private suspend fun importLibraryBackupRows(
 
     val localBookIds = source.localBookFileIds().toHashSet()
     val bookIds = LinkedHashMap<Long, Long>()
+    val insertedBookIds = LinkedHashSet<Long>()
     val lastChapterIds = HashMap<Long, Long?>()
+    val lastChapterIndexes = HashMap<Long, Int?>()
+    val lastReadAts = HashMap<Long, Long?>()
+    val resolvedIds = HashMap<Pair<String, String>, Long>()
     forEachPage(pageSize, BookEntity::bookId, source::backupBooks) { book ->
-        val existing = target.bookByInstallAndUrl(book.installId, book.url)
-        bookIds[book.bookId] = if (existing == null) {
-            target.upsertBook(book.copy(bookId = 0))
-        } else {
-            // Keep the local shelf assignment; everything else is restored.
-            target.upsertBook(book.copy(bookId = existing.bookId, shelfId = existing.shelfId))
-            existing.bookId
-        }.also { newId ->
-            if (book.lastChapterId != null) lastChapterIds[newId] = book.lastChapterId
+        val archiveUrl = book.url
+        val url = bookKeyUrl(archiveUrl)
+        if (url != archiveUrl) rewrites += archiveUrl to url
+        val identity = book.installId to url
+        // The archive id belongs to another database; the resolver merges by
+        // (installId, url) and owns the live-field precedence.
+        val result = target.upsertBookByIdentity(book.copy(bookId = 0, url = url))
+        val newId = resolvedIds[identity] ?: result.id
+        resolvedIds[identity] = newId
+        if (result.created) insertedBookIds += result.id
+        bookIds[book.bookId] = newId
+        if (book.lastChapterId != null) {
+            lastChapterIds.putIfAbsent(newId, book.lastChapterId)
+            lastChapterIndexes.putIfAbsent(newId, book.lastChapterIndex)
+            lastReadAts.putIfAbsent(newId, book.lastReadAt)
         }
     }
     val preservedCovers = LinkedHashSet<Long>()
@@ -149,9 +182,46 @@ private suspend fun importLibraryBackupRows(
         }
     }
 
+    // One batched read of the live rows, then a documented precedence: an
+    // inserted book always takes the archive position; a matched book only when
+    // the archive is not older than its live row.
+    val liveRows = LinkedHashMap<Long, BookEntity>()
+    for (chunk in bookIds.values.distinct().chunked(900)) {
+        currentCoroutineContext().ensureActive()
+        target.booksByIds(chunk).forEach { liveRows[it.bookId] = it }
+    }
     lastChapterIds.forEach { (bookId, oldChapterId) ->
-        val chapterId = oldChapterId?.let { chapterIds[it] }
-        if (chapterId != oldChapterId) target.setLastChapterId(bookId, chapterId)
+        val mappedChapterId = oldChapterId?.let { chapterIds[it] }
+        val archiveReadAt = lastReadAts[bookId]
+        val liveReadAt = liveRows[bookId]?.lastReadAt
+        val apply = bookId in insertedBookIds ||
+            (archiveReadAt != null && (liveReadAt == null || archiveReadAt >= liveReadAt))
+        if (apply) {
+            target.setLastRead(
+                bookId = bookId,
+                readAt = archiveReadAt ?: liveReadAt,
+                // A missing archive chapter keeps the live position.
+                chapterId = mappedChapterId ?: liveRows[bookId]?.lastChapterId,
+                chapterIndex = lastChapterIndexes[bookId] ?: liveRows[bookId]?.lastChapterIndex,
+            )
+        }
+    }
+
+    // --- history -------------------------------------------------------------
+    // Explicit rows win; an archive without the table gets its history rebuilt
+    // from the per-book last-read columns for books this import inserted.
+    forEachPage(pageSize, HistoryEntity::bookId, source::backupHistory) { history ->
+        val bookId = bookIds[history.bookId] ?: return@forEachPage
+        target.upsertHistoryMerged(
+            bookId = bookId,
+            readAt = history.readAt,
+            chapterIndex = history.chapterIndex,
+            chapterId = history.chapterId?.let { chapterIds[it] },
+        )
+    }
+    for (chunk in insertedBookIds.chunked(900)) {
+        currentCoroutineContext().ensureActive()
+        target.backfillHistoryFromBooks(chunk)
     }
 
     // --- reading state -------------------------------------------------------
@@ -237,6 +307,14 @@ private suspend fun importLibraryBackupRows(
         val bookId = chapterBookIds[page.chapterId] ?: return@forEachPage
         if (bookId !in localBookTargetIds) return@forEachPage
         target.upsertChapterPage(page.copy(chapterId = chapterId))
+    }
+
+    // A restored plugin chapter has no local body/page, so it must not claim to
+    // be offline. Bodies/pages are written above, so imported local books keep
+    // their real flags. Bounded to the imported books and chunked.
+    for (chunk in bookIds.values.distinct().chunked(900)) {
+        currentCoroutineContext().ensureActive()
+        target.resetOrphanedDownloadedFlagsFor(chunk)
     }
 
     // --- tags / local files --------------------------------------------------

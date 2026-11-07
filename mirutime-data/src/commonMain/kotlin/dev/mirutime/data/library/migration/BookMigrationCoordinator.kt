@@ -127,12 +127,12 @@ class BookMigrationCoordinator(
         var committed = false
         try {
             val merged = mergeBook(target.book, oldBook, existingBook, target.chapters.size, startedAt)
-            val upsertedId = dao.upsertBook(merged)
-            val newBookId = if (merged.bookId == 0L) upsertedId else merged.bookId
+            val upserted = dao.upsertBookByIdentity(merged)
+            val newBookId = upserted.id
             check(newBookId > 0L) { "Cannot create or resolve the target book" }
             check(newBookId != oldBookId) { "Source and target book are the same row" }
             state.newBookId = newBookId
-            state.bookCreated = existingBook == null
+            state.bookCreated = upserted.created
             runCatching { repository.indexBook(merged.copy(bookId = newBookId)) }
 
             val chapters = writeChapters(plan, newBookId, options, state, startedAt)

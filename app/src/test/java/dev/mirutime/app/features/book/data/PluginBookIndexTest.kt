@@ -87,6 +87,14 @@ class PluginBookIndexTest {
     }
 
     @Test
+    fun `display title resolves a key through its real url`() {
+        val key = dev.mirutime.data.library.libraryBookKey("source", "https://site/book/1")
+        PluginBookIndex.putTitle("https://site/book/1", "Book One")
+
+        assertEquals("Book One", PluginBookIndex.displayTitle(key))
+    }
+
+    @Test
     fun `display title never returns untitled for a trailing slash url`() {
         assertEquals("1234", PluginBookIndex.displayTitle("https://ranobehub.org/ranobe/1234/"))
     }

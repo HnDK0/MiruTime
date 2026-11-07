@@ -4,6 +4,7 @@ import dev.mirutime.app.features.finder.domain.CatalogBook
 import dev.mirutime.app.features.finder.domain.CatalogFilters
 import dev.mirutime.app.features.finder.domain.CatalogPage
 import dev.mirutime.app.features.finder.domain.CatalogSort
+import dev.mirutime.app.features.finder.domain.LocalSources
 import dev.mirutime.app.features.finder.domain.applyCatalogFilters
 import dev.mirutime.app.features.library.data.LocalImportResult
 import dev.mirutime.data.library.BookEntity
@@ -181,6 +182,7 @@ internal fun LocalCatalogEntry.toCatalogBook(imported: ImportedLocalBook? = null
     if (imported != null) {
         CatalogBook(
             bookUrl = imported.bookUrl,
+            installId = LocalSources.idOfKind(kind),
             title = imported.title.ifBlank { title },
             rating = 0f,
             chapters = imported.chapters,
@@ -193,6 +195,7 @@ internal fun LocalCatalogEntry.toCatalogBook(imported: ImportedLocalBook? = null
     } else {
         CatalogBook(
             bookUrl = localCatalogUrl(uri, catalogId),
+            installId = LocalSources.idOfKind(kind),
             title = title,
             rating = 0f,
             chapters = chapterCount ?: 0,

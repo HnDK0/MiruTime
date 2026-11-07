@@ -704,6 +704,7 @@ class PluginFinderDataProvider(
                 val file = repo.localBookFile(book.bookId) ?: return@mapNotNull null
                 LocalBook(
                     bookUrl = book.url,
+                    installId = book.installId,
                     fileName = file.displayName,
                     title = book.title,
                     format = file.format,
@@ -720,7 +721,7 @@ class PluginFinderDataProvider(
         if (books.isEmpty()) return books
         return try {
             val membership = libraryMembership(books.map { it.bookUrl }, books.map { it.title })
-            books.applyMembership(membership.urls, membership.titles)
+            books.applyMembership(membership.urls, membership.titles, membership.keys)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -831,6 +832,7 @@ private fun PluginError.sharedDetail(): String =
 
 internal fun LocalBook.toCatalogBook(): CatalogBook = CatalogBook(
     bookUrl = bookUrl,
+    installId = installId,
     title = title,
     rating = 0f,
     chapters = count,

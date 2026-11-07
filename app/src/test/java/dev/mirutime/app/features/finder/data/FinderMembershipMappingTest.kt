@@ -2,7 +2,9 @@ package dev.mirutime.app.features.finder.data
 
 import dev.mirutime.app.features.finder.domain.CatalogBook
 import dev.mirutime.app.features.finder.domain.applyLibraryUrls
+import dev.mirutime.app.features.finder.domain.applyMembership
 import dev.mirutime.app.features.finder.domain.setMembership
+import dev.mirutime.data.library.libraryBookKey
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -42,6 +44,20 @@ class FinderMembershipMappingTest {
         assertTrue(
             listOf(entry).applyLibraryUrls(setOf("local-file://abc")).single().inLibrary,
         )
+    }
+
+    @Test
+    fun `install-aware keys distinguish two sources with one url`() {
+        val first = catalog("https://site/1").copy(installId = "a")
+        val second = catalog("https://site/1").copy(installId = "b")
+
+        val applied = listOf(first, second).applyMembership(
+            libraryUrls = emptySet(),
+            titleCounts = emptyMap(),
+            libraryKeys = setOf(libraryBookKey("a", "https://site/1")),
+        )
+
+        assertEquals(listOf(true, false), applied.map { it.inLibrary })
     }
 
     @Test

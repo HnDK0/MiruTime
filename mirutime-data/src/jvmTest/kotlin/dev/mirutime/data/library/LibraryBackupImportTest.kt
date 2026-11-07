@@ -380,6 +380,194 @@ class LibraryBackupImportTest {
         assertNotNull(target.libraryDao().sourceIcon("plugin-one", "1", "icon"))
     }
 
+    @Test
+    fun `restore normalizes key urls and preserves live membership`() = runTest {
+        val realUrl = "https://s/keyed"
+        val keyUrl = libraryBookKey("local-books", realUrl)
+
+        val source = openRoom()
+        LibraryRepository(source.libraryDao()).saveBook(
+            book(keyUrl).copy(inLibrary = false, title = ""),
+        )
+
+        val target = openRoom()
+        val targetRepo = LibraryRepository(target.libraryDao())
+        val live = targetRepo.saveBook(book(realUrl).copy(inLibrary = true, title = "Live"))
+
+        target.importLibraryBackup(source.libraryDao())
+
+        val imported = assertNotNull(target.libraryDao().book(live))
+        assertEquals(realUrl, imported.url)
+        assertEquals("Live", imported.title)
+        assertTrue(imported.inLibrary)
+        assertEquals(1, target.libraryDao().bookCount())
+    }
+
+    @Test
+    fun `restore imports history and backfills only inserted books`() = runTest {
+        val source = openRoom()
+        val sourceRepo = LibraryRepository(source.libraryDao())
+
+        val inserted = sourceRepo.saveBook(book("https://s/inserted").copy(lastReadAt = 10L))
+        val matchedExplicit = sourceRepo.saveBook(book("https://s/matched").copy(lastReadAt = 10L))
+        source.libraryDao().touchHistoryAndRecord(matchedExplicit, null, 1, 20L)
+        sourceRepo.saveBook(book("https://s/quiet").copy(lastReadAt = 10L))
+
+        val target = openRoom()
+        val targetRepo = LibraryRepository(target.libraryDao())
+        targetRepo.saveBook(book("https://s/matched").copy(inLibrary = true))
+        targetRepo.saveBook(book("https://s/quiet").copy(inLibrary = true))
+
+        target.importLibraryBackup(source.libraryDao())
+
+        val historyUrls = target.libraryDao().history(10).map { it.url }.toSet()
+        // Inserted: backfilled from lastReadAt. Matched with an explicit row:
+        // imported. Matched without one: not backfilled.
+        assertEquals(setOf("https://s/inserted", "https://s/matched"), historyUrls)
+    }
+
+    @Test
+    fun `restore keeps a newer live reading position over an older archive`() = runTest {
+        val source = openRoom()
+        val sourceRepo = LibraryRepository(source.libraryDao())
+        val sourceBook = sourceRepo.saveBook(book("https://s/continue").copy(lastReadAt = 10L))
+        val sourceChapter = sourceRepo.replaceChapters(
+            sourceBook,
+            listOf(ChapterSeed(1, "https://s/continue/1", "One")),
+            at = 1L,
+        ).single()
+        sourceRepo.saveBook(
+            book("https://s/continue").copy(
+                lastChapterId = sourceChapter.chapterId,
+                lastChapterIndex = 1,
+                lastReadAt = 10L,
+            ),
+        )
+
+        val target = openRoom()
+        val targetRepo = LibraryRepository(target.libraryDao())
+        val targetBook = targetRepo.saveBook(book("https://s/continue").copy(lastReadAt = 20L))
+        val liveChapter = targetRepo.replaceChapters(
+            targetBook,
+            listOf(ChapterSeed(1, "https://s/continue/1", "One")),
+            at = 1L,
+        ).single()
+        targetRepo.saveBook(
+            book("https://s/continue").copy(
+                lastChapterId = liveChapter.chapterId,
+                lastChapterIndex = 1,
+                lastReadAt = 20L,
+            ),
+        )
+
+        target.importLibraryBackup(source.libraryDao())
+
+        assertEquals(liveChapter.chapterId, target.libraryDao().book(targetBook)?.lastChapterId)
+        assertEquals(20L, target.libraryDao().book(targetBook)?.lastReadAt)
+    }
+
+    @Test
+    fun `restore applies a newer archive reading position over an older live row`() = runTest {
+        val source = openRoom()
+        val sourceRepo = LibraryRepository(source.libraryDao())
+        val sourceBook = sourceRepo.saveBook(book("https://s/continue").copy(lastReadAt = 30L))
+        val sourceChapter = sourceRepo.replaceChapters(
+            sourceBook,
+            listOf(ChapterSeed(1, "https://s/continue/1", "One")),
+            at = 1L,
+        ).single()
+        sourceRepo.saveBook(
+            book("https://s/continue").copy(
+                lastChapterId = sourceChapter.chapterId,
+                lastChapterIndex = 1,
+                lastReadAt = 30L,
+            ),
+        )
+
+        val target = openRoom()
+        val targetRepo = LibraryRepository(target.libraryDao())
+        val targetBook = targetRepo.saveBook(book("https://s/continue").copy(lastReadAt = 20L))
+        val liveChapter = targetRepo.replaceChapters(
+            targetBook,
+            listOf(ChapterSeed(1, "https://s/continue/1", "One")),
+            at = 1L,
+        ).single()
+        targetRepo.saveBook(
+            book("https://s/continue").copy(
+                lastChapterId = liveChapter.chapterId,
+                lastChapterIndex = 1,
+                lastReadAt = 20L,
+            ),
+        )
+
+        target.importLibraryBackup(source.libraryDao())
+
+        assertEquals(30L, target.libraryDao().book(targetBook)?.lastReadAt)
+        assertEquals(liveChapter.chapterId, target.libraryDao().book(targetBook)?.lastChapterId)
+    }
+
+    @Test
+    fun `restore resets downloaded flags without a local body`() = runTest {
+        val source = openRoom()
+        val sourceRepo = LibraryRepository(source.libraryDao())
+
+        val pluginBook = sourceRepo.saveBook(book("https://s/plugin").copy(installId = "plugin-x"))
+        val pluginChapter = sourceRepo.replaceChapters(
+            pluginBook,
+            listOf(ChapterSeed(1, "https://s/plugin/1", "One")),
+            at = 1L,
+        ).single()
+        source.libraryDao().upsertChapter(pluginChapter.copy(downloaded = true))
+
+        val localBook = sourceRepo.saveBook(book("https://s/local"))
+        val localChapter = sourceRepo.replaceChapters(
+            localBook,
+            listOf(ChapterSeed(1, "https://s/local/1", "One")),
+            at = 1L,
+        ).single()
+        source.libraryDao().upsertChapter(localChapter.copy(downloaded = true))
+        sourceRepo.saveChapterBody(
+            ChapterBodyEntity(
+                chapterId = localChapter.chapterId,
+                format = "html",
+                path = "chapter_bodies/local.html",
+                bytes = 3,
+                sha256 = "c".repeat(64),
+                fetchedAt = 1L,
+            ),
+        )
+        sourceRepo.saveLocalBookFile(
+            LocalBookFileEntity(
+                bookId = localBook,
+                uri = "content://local/book2.epub",
+                displayName = "book2.epub",
+                format = "EPUB",
+                mime = "application/epub+zip",
+                sizeBytes = 3L,
+                sha256 = "d".repeat(64),
+                copyPath = "local_books/book2.epub",
+                importedAt = 1L,
+            ),
+        )
+
+        val target = openRoom()
+        target.importLibraryBackup(source.libraryDao())
+
+        val importedPlugin = assertNotNull(
+            target.libraryDao().bookByInstallAndUrl("plugin-x", "https://s/plugin"),
+        )
+        assertTrue(
+            target.libraryDao().chapters(importedPlugin.bookId).none { it.downloaded },
+        )
+
+        val importedLocal = assertNotNull(
+            target.libraryDao().bookByInstallAndUrl("local-books", "https://s/local"),
+        )
+        assertTrue(
+            target.libraryDao().chapters(importedLocal.bookId).single().downloaded,
+        )
+    }
+
     private fun openRoom(): LibraryDatabase =
         Room.inMemoryDatabaseBuilder<LibraryDatabase>(
             factory = LibraryDatabaseConstructor::initialize,

@@ -11,8 +11,23 @@ import kotlinx.coroutines.withContext
 // source). Returned by LibraryRepository.libraryMembership in one batch.
 data class LibraryMembership(
     val urls: Set<String> = emptySet(),
+    // Install-aware keys: two plugins may expose different works under one URL.
+    val keys: Set<String> = emptySet(),
     val titles: Map<String, Int> = emptyMap(),
 )
+
+/** Outcome of the one-shot repair of rows whose URL is an opaque route key. */
+data class RepairReport(
+    val rewrittenInPlace: Int = 0,
+    val deletedEmpty: Int = 0,
+    val ambiguous: Int = 0,
+    val ambiguousSoftRemoved: Int = 0,
+    val unrepairable: Int = 0,
+    val failed: Int = 0,
+    val orphanPaths: List<String> = emptyList(),
+) {
+    val changed: Int get() = rewrittenInPlace + deletedEmpty
+}
 
 /**
  * Repository over the v2 library schema. Identity is [BookEntity.bookId] and
@@ -204,16 +219,20 @@ class LibraryRepository(
         val cleanUrls = urls.asSequence().map { it.trim() }.filter { it.isNotEmpty() }.distinct().toList()
         val cleanTitles = titles.asSequence().map { it.trim() }.filter { it.isNotEmpty() }.distinct().toList()
         val foundUrls = LinkedHashSet<String>()
+        val foundKeys = LinkedHashSet<String>()
         val titleCounts = LinkedHashMap<String, Int>()
         for (chunk in cleanUrls.chunked(SqliteIdChunk)) {
             currentCoroutineContext().ensureActive()
-            foundUrls += dao.libraryUrls(chunk)
+            dao.bookKeysByUrls(chunk).forEach { row ->
+                foundUrls += row.url
+                foundKeys += libraryBookKey(row.installId, row.url)
+            }
         }
         for (chunk in cleanTitles.chunked(SqliteIdChunk)) {
             currentCoroutineContext().ensureActive()
             dao.libraryTitleCounts(chunk).forEach { titleCounts[it.title] = it.count }
         }
-        return LibraryMembership(urls = foundUrls, titles = titleCounts)
+        return LibraryMembership(urls = foundUrls, keys = foundKeys, titles = titleCounts)
     }
 
     /** Dashboard next-up candidates in library order, finished books excluded. */
@@ -226,10 +245,13 @@ class LibraryRepository(
      * take the generated id so the index rowid matches the books row.
      */
     suspend fun saveBook(book: BookEntity): Long {
-        val id = dao.upsertBook(book)
-        val saved = if (book.bookId == 0L) book.copy(bookId = id) else book
-        indexBookWithTags(saved)
-        return id
+        val result = dao.upsertBookByIdentity(book)
+        if (result.id > 0L) {
+            // Index what the store actually holds: the merge may keep the
+            // stored title when the incoming one is blank.
+            indexBookWithTags(dao.book(result.id) ?: book.copy(bookId = result.id))
+        }
+        return result.id
     }
 
     /**
@@ -462,7 +484,7 @@ class LibraryRepository(
 
     /** Writes the FTS row without loading tags/translation. */
     suspend fun indexBook(book: BookEntity) {
-        if (book.bookId == 0L) return
+        if (book.bookId <= 0L) return
         dao.upsertBookSearch(
             book.toSearchRow(tags = "", translatedTitle = ""),
         )
@@ -478,7 +500,7 @@ class LibraryRepository(
         source: String? = null,
         target: String? = null,
     ) {
-        if (book.bookId == 0L) return
+        if (book.bookId <= 0L) return
         val tags = dao.tagsForBook(book.bookId).joinToString(" ") { it.name }
         val translatedTitle = dao.latestBookTranslationTitle(book.bookId, source, target).orEmpty()
         dao.upsertBookSearch(book.toSearchRow(tags, translatedTitle))
@@ -1476,6 +1498,92 @@ class LibraryRepository(
         return paths
     }
 
+    /**
+     * Repairs rows created by the identity regression, where `books.url` holds
+     * an opaque route key instead of the real URL. A row that owns any child is
+     * never deleted: when one side is childless it is merged into the other,
+     * and a row with children on both sides is only reported.
+     */
+    suspend fun repairKeyUrls(
+        onBookKeyRewritten: suspend (oldKey: String, newUrl: String) -> Unit = { _, _ -> },
+    ): RepairReport {
+        var report = RepairReport()
+        val orphanPaths = mutableListOf<String>()
+        var afterId = 0L
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val page = dao.keyUrlBooks(afterId, LibraryBookKeyPrefix, RepairPageSize)
+            if (page.isEmpty()) break
+            for (keyRow in page) {
+                currentCoroutineContext().ensureActive()
+                val identity = decodeLibraryBookKey(keyRow.url)
+                if (identity == null) {
+                    report = report.copy(unrepairable = report.unrepairable + 1)
+                    continue
+                }
+                val outcome = try {
+                    repairBookKeyRow(keyRow, identity, onBookKeyRewritten, orphanPaths)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    RepairOutcome(failed = 1)
+                }
+                report = report.copy(
+                    rewrittenInPlace = report.rewrittenInPlace + outcome.rewritten,
+                    deletedEmpty = report.deletedEmpty + outcome.deleted,
+                    ambiguous = report.ambiguous + outcome.ambiguous,
+                    ambiguousSoftRemoved = report.ambiguousSoftRemoved + outcome.ambiguousSoft,
+                    failed = report.failed + outcome.failed,
+                )
+            }
+            afterId = page.last().bookId
+        }
+        dao.deleteOrphanBookSearch()
+        return report.copy(orphanPaths = orphanPaths.toList())
+    }
+
+    private suspend fun repairBookKeyRow(
+        keyRow: BookEntity,
+        identity: BookIdentity,
+        onBookKeyRewritten: suspend (String, String) -> Unit,
+        orphanPaths: MutableList<String>,
+    ): RepairOutcome {
+        val twin = dao.bookByInstallAndUrl(identity.installId, identity.url)
+            ?: dao.legacyBookByUrl(identity.url)
+        val locks = buildList {
+            add(bookLocks.bookKey(keyRow.bookId))
+            twin?.let { add(bookLocks.bookKey(it.bookId)) }
+            add(bookLocks.targetKey(identity.installId, identity.url))
+        }
+        val action = bookLocks.withLocks(locks) {
+            // One transaction per book; the twin is re-read inside it.
+            dao.repairBookKeyRow(keyRow, identity.installId, identity.url, orphanPaths)
+        }
+        return when (action) {
+            BookKeyRepairAction.REWRITTEN -> {
+                onBookKeyRewritten(keyRow.url, identity.url)
+                RepairOutcome(rewritten = 1)
+            }
+            BookKeyRepairAction.DELETED -> {
+                // The surviving row kept the real URL; move the settings that
+                // were saved under the opaque key too.
+                onBookKeyRewritten(keyRow.url, identity.url)
+                RepairOutcome(deleted = 1)
+            }
+            BookKeyRepairAction.AMBIGUOUS -> RepairOutcome(ambiguous = 1)
+            BookKeyRepairAction.AMBIGUOUS_SOFT -> RepairOutcome(ambiguousSoft = 1)
+            BookKeyRepairAction.NONE -> RepairOutcome()
+        }
+    }
+
+    private data class RepairOutcome(
+        val rewritten: Int = 0,
+        val deleted: Int = 0,
+        val ambiguous: Int = 0,
+        val ambiguousSoft: Int = 0,
+        val failed: Int = 0,
+    )
+
     private suspend fun reindexBook(bookId: Long) {
         dao.book(bookId)?.let { indexBookWithTags(it) }
     }
@@ -1521,6 +1629,8 @@ private fun BookEntity.toSearchRow(tags: String, translatedTitle: String) = Book
 )
 
 private val Whitespace = Regex("\\s+")
+
+private const val RepairPageSize = 200
 
 data class ChapterSeed(
     val index: Int,

@@ -17,6 +17,12 @@ data class BookUrlRow(val bookId: Long, val url: String)
 
 data class BookKeyRow(val bookId: Long, val installId: String, val url: String)
 
+/** Result of an identity-based book upsert; [created] is false for a merge. */
+data class UpsertResult(val id: Long, val created: Boolean)
+
+/** Outcome of repairing one row whose URL is an opaque route key. */
+enum class BookKeyRepairAction { REWRITTEN, DELETED, AMBIGUOUS, AMBIGUOUS_SOFT, NONE }
+
 @Dao
 interface LibraryDao {
     // --- shelves -------------------------------------------------------------
@@ -74,6 +80,9 @@ interface LibraryDao {
 
     @Query("SELECT * FROM books WHERE bookId = :bookId")
     suspend fun book(bookId: Long): BookEntity?
+
+    @Query("SELECT * FROM books WHERE bookId IN (:bookIds)")
+    suspend fun booksByIds(bookIds: List<Long>): List<BookEntity>
 
     // Compatibility path for the URL-based navigation while screens migrate
     // to bookId. New code should use book(installId, url).
@@ -256,6 +265,46 @@ interface LibraryDao {
     @Upsert
     suspend fun upsertHistory(row: HistoryEntity)
 
+    @Query(
+        "INSERT OR IGNORE INTO history(bookId, readAt, chapterIndex, chapterId) " +
+            "VALUES(:bookId, :readAt, :chapterIndex, :chapterId)",
+    )
+    suspend fun insertHistoryIfAbsent(
+        bookId: Long,
+        readAt: Long,
+        chapterIndex: Int?,
+        chapterId: Long?,
+    )
+
+    @Query(
+        "UPDATE history SET readAt = :readAt, chapterIndex = :chapterIndex, " +
+            "chapterId = :chapterId WHERE bookId = :bookId AND readAt < :readAt",
+    )
+    suspend fun updateHistoryIfNewer(
+        bookId: Long,
+        readAt: Long,
+        chapterIndex: Int?,
+        chapterId: Long?,
+    )
+
+    @Transaction
+    suspend fun upsertHistoryMerged(
+        bookId: Long,
+        readAt: Long,
+        chapterIndex: Int?,
+        chapterId: Long?,
+    ) {
+        insertHistoryIfAbsent(bookId, readAt, chapterIndex, chapterId)
+        updateHistoryIfNewer(bookId, readAt, chapterIndex, chapterId)
+    }
+
+    @Query(
+        "INSERT OR IGNORE INTO history(bookId, readAt, chapterIndex, chapterId) " +
+            "SELECT bookId, lastReadAt, lastChapterIndex, lastChapterId FROM books " +
+            "WHERE bookId IN (:bookIds) AND lastReadAt IS NOT NULL",
+    )
+    suspend fun backfillHistoryFromBooks(bookIds: List<Long>)
+
     @Query("DELETE FROM history WHERE bookId = :bookId")
     suspend fun deleteHistory(bookId: Long)
 
@@ -264,6 +313,151 @@ interface LibraryDao {
 
     @Query("DELETE FROM history")
     suspend fun clearHistory()
+
+    // Legacy rows from before per-install identity carry no installId. They can
+    // be adopted by the first write that resolves the same URL.
+    @Query("SELECT * FROM books WHERE url = :url AND installId = '' LIMIT 1")
+    suspend fun legacyBookByUrl(url: String): BookEntity?
+
+    @Query(
+        "SELECT * FROM books WHERE bookId > :afterId AND url LIKE :prefix || '%' " +
+            "ORDER BY bookId LIMIT :limit",
+    )
+    suspend fun keyUrlBooks(afterId: Long, prefix: String, limit: Int): List<BookEntity>
+
+    @Query(
+        """
+        SELECT CASE WHEN
+            EXISTS(SELECT 1 FROM chapters WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM progress WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM history WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM reading_sessions WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM highlights WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM video_progress WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM download_tasks WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM book_covers WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM local_book_files WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM book_tags WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM book_translations WHERE bookId = :bookId)
+        THEN 1 ELSE 0 END
+        """,
+    )
+    suspend fun hasBookChildren(bookId: Long): Int
+
+    @Query(
+        """
+        SELECT CASE WHEN
+            EXISTS(SELECT 1 FROM chapters WHERE bookId = :bookId AND removedAt IS NULL) OR
+            EXISTS(SELECT 1 FROM progress WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM history WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM reading_sessions WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM highlights WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM video_progress WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM download_tasks WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM book_covers WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM local_book_files WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM book_tags WHERE bookId = :bookId) OR
+            EXISTS(SELECT 1 FROM book_translations WHERE bookId = :bookId)
+        THEN 1 ELSE 0 END
+        """,
+    )
+    suspend fun hasLiveBookChildren(bookId: Long): Int
+
+    @Query("UPDATE books SET installId = :installId, url = :url WHERE bookId = :bookId")
+    suspend fun updateBookIdentity(bookId: Long, installId: String, url: String)
+
+    @Query("DELETE FROM book_search WHERE rowid NOT IN (SELECT bookId FROM books)")
+    suspend fun deleteOrphanBookSearch()
+
+    @Query("SELECT chapterId FROM chapters WHERE chapterId = :chapterId AND bookId = :bookId LIMIT 1")
+    suspend fun chapterIdForBook(bookId: Long, chapterId: Long): Long?
+
+    /**
+     * One write identity for every book upsert: a positive id or the
+     * (installId, url) pair, with blank-installId legacy rows adopted. A found
+     * row is merged, never overwritten: membership, shelf, history and the
+     * unseen badge stay local. `created` drives the direct-SAF rollback.
+     */
+    @Transaction
+    suspend fun upsertBookByIdentity(book: BookEntity): UpsertResult {
+        if (book.bookId > 0) {
+            val byId = book(book.bookId)
+            // A stale or foreign id must never merge into an unrelated row.
+            // A blank-install legacy row is adopted only when no real-identity
+            // row already holds the same URL (the unique index would reject it).
+            val adoptable = byId != null &&
+                byId.url == book.url &&
+                (byId.installId.isNotBlank() || bookByInstallAndUrl(book.installId, book.url) == null)
+            if (adoptable && byId != null) {
+                upsertBook(mergeBookRow(byId, book, this))
+                return UpsertResult(byId.bookId, false)
+            }
+        }
+        val incoming = book.copy(bookId = 0)
+        val existing = bookByInstallAndUrl(incoming.installId, incoming.url)
+            ?: legacyBookByUrl(incoming.url)
+        if (existing != null) {
+            upsertBook(mergeBookRow(existing, incoming, this))
+            return UpsertResult(existing.bookId, false)
+        }
+        val inserted = upsertBook(incoming)
+        if (inserted > 0) return UpsertResult(inserted, true)
+        val raced = bookByInstallAndUrl(incoming.installId, incoming.url)
+            ?: legacyBookByUrl(incoming.url)
+        if (raced != null) {
+            upsertBook(mergeBookRow(raced, incoming, this))
+            return UpsertResult(raced.bookId, false)
+        }
+        error("Cannot resolve book identity")
+    }
+
+    /**
+     * One key-URL row repair in a single transaction. A row that owns a child is
+     * never deleted: the childless side is merged into the other, and children
+     * on both sides are left untouched.
+     */
+    @Transaction
+    suspend fun repairBookKeyRow(
+        keyRow: BookEntity,
+        installId: String,
+        url: String,
+        orphanPaths: MutableList<String>,
+    ): BookKeyRepairAction {
+        val twin = bookByInstallAndUrl(installId, url) ?: legacyBookByUrl(url)
+        if (twin == null) {
+            updateBookIdentity(keyRow.bookId, installId, url)
+            return BookKeyRepairAction.REWRITTEN
+        }
+        val keyHasChildren = hasBookChildren(keyRow.bookId) > 0
+        val twinHasChildren = hasBookChildren(twin.bookId) > 0
+        return when {
+            !keyHasChildren -> {
+                upsertBook(mergeRepairRow(twin, keyRow, this))
+                if (twin.installId.isBlank()) updateBookIdentity(twin.bookId, installId, url)
+                bookCover(keyRow.bookId)?.localPath?.takeIf { it.isNotBlank() }
+                    ?.let(orphanPaths::add)
+                localBookFile(keyRow.bookId)?.copyPath?.takeIf { it.isNotBlank() }
+                    ?.let(orphanPaths::add)
+                deleteBookWithSearch(keyRow.bookId)
+                BookKeyRepairAction.DELETED
+            }
+            !twinHasChildren -> {
+                upsertBook(mergeRepairRow(keyRow, twin, this))
+                deleteBookWithSearch(twin.bookId)
+                updateBookIdentity(keyRow.bookId, installId, url)
+                BookKeyRepairAction.REWRITTEN
+            }
+            else -> {
+                val keyLive = hasLiveBookChildren(keyRow.bookId) > 0
+                val twinLive = hasLiveBookChildren(twin.bookId) > 0
+                if (!keyLive && !twinLive) {
+                    BookKeyRepairAction.AMBIGUOUS_SOFT
+                } else {
+                    BookKeyRepairAction.AMBIGUOUS
+                }
+            }
+        }
+    }
 
     @Upsert
     suspend fun upsertBook(book: BookEntity): Long
@@ -343,17 +537,9 @@ interface LibraryDao {
         book: BookEntity,
         file: LocalBookFileEntity,
     ): DirectBookWrite {
-        val inserted = upsertBook(book)
-        // Room @Upsert returns -1 when it updated an existing row. A failed
-        // earlier direct-open may have left the book row without a
-        // local_book_files row, so resolve the real id before the FK insert.
-        val id = inserted.takeIf { it > 0 }
-            ?: book.bookId.takeIf { it > 0 }
-            ?: bookByInstallAndUrl(book.installId, book.url)?.bookId
-            ?: bookByUrl(book.url)?.bookId
-            ?: error("Cannot resolve book id for ${book.url}")
-        upsertLocalBookFile(file.copy(bookId = id))
-        return DirectBookWrite(bookId = id, created = inserted > 0)
+        val result = upsertBookByIdentity(book)
+        upsertLocalBookFile(file.copy(bookId = result.id))
+        return DirectBookWrite(bookId = result.id, created = result.created)
     }
 
     @Query("UPDATE books SET totalChapters = :total WHERE bookId = :bookId")
@@ -1356,6 +1542,9 @@ interface LibraryDao {
     @Query("SELECT * FROM progress WHERE bookId > :afterId ORDER BY bookId LIMIT :limit")
     suspend fun backupProgress(afterId: Long, limit: Int): List<ProgressEntity>
 
+    @Query("SELECT * FROM history WHERE bookId > :afterId ORDER BY bookId LIMIT :limit")
+    suspend fun backupHistory(afterId: Long, limit: Int): List<HistoryEntity>
+
     @Query(
         "SELECT * FROM video_progress " +
             "WHERE bookId > :afterBookId " +
@@ -1441,6 +1630,17 @@ interface LibraryDao {
 
     @Query("UPDATE books SET lastChapterId = :chapterId WHERE bookId = :bookId")
     suspend fun setLastChapterId(bookId: Long, chapterId: Long?)
+
+    @Query(
+        "UPDATE books SET lastReadAt = :readAt, lastChapterId = :chapterId, " +
+            "lastChapterIndex = :chapterIndex WHERE bookId = :bookId",
+    )
+    suspend fun setLastRead(
+        bookId: Long,
+        readAt: Long?,
+        chapterId: Long?,
+        chapterIndex: Int?,
+    )
 
     @Query(
         "SELECT id FROM highlights WHERE bookId = :bookId AND chapterId = :chapterId " +
@@ -1557,6 +1757,13 @@ interface LibraryDao {
     suspend fun resetOrphanedDownloadedFlags()
 
     @Query(
+        "UPDATE chapters SET downloaded = 0 WHERE bookId IN (:bookIds) AND downloaded = 1 " +
+            "AND chapterId NOT IN (SELECT chapterId FROM chapter_bodies) " +
+            "AND chapterId NOT IN (SELECT chapterId FROM chapter_pages)",
+    )
+    suspend fun resetOrphanedDownloadedFlagsFor(bookIds: List<Long>): Int
+
+    @Query(
         "SELECT pagePathsJson FROM chapter_pages WHERE chapterId IN " +
             "(SELECT c.chapterId FROM chapters c " +
             "LEFT JOIN local_book_files l ON l.bookId = c.bookId WHERE l.bookId IS NULL)",
@@ -1639,6 +1846,111 @@ internal suspend fun reconcileChapterRows(
     }
     updateTotal(incoming.size)
     return readChapters()
+}
+
+// A fresh metadata write must never reset local user state: membership, shelf,
+// added time, the unseen badge and a valid last-read position stay with the
+// stored row; metadata fields take the incoming value when it is meaningful.
+internal suspend fun mergeBookRow(
+    row: BookEntity,
+    incoming: BookEntity,
+    dao: LibraryDao,
+): BookEntity {
+    val incomingChapterValid = incoming.lastChapterId != null &&
+        dao.chapterIdForBook(row.bookId, incoming.lastChapterId) != null
+    val incomingNotOlder =
+        (incoming.lastReadAt ?: Long.MIN_VALUE) >= (row.lastReadAt ?: Long.MIN_VALUE)
+    val takeIncomingRead = incomingChapterValid && incomingNotOlder
+    val lastChapterId = if (takeIncomingRead) incoming.lastChapterId else row.lastChapterId
+    val lastChapterIndex = if (takeIncomingRead) incoming.lastChapterIndex else row.lastChapterIndex
+    val incomingChapterDropped = incoming.lastChapterId != null && !incomingChapterValid
+    val lastReadAt = if (incomingChapterDropped) {
+        row.lastReadAt
+    } else {
+        listOfNotNull(row.lastReadAt, incoming.lastReadAt).maxOrNull()
+    }
+    return row.copy(
+        installId = row.installId.ifBlank { incoming.installId },
+        title = incoming.title.ifBlank { row.title },
+        author = incoming.author.ifBlank { row.author },
+        coverUrl = incoming.coverUrl ?: row.coverUrl,
+        contentType = incoming.contentType.ifBlank { row.contentType },
+        rating = if (incoming.rating != 0.0) incoming.rating else row.rating,
+        inLibrary = row.inLibrary || incoming.inLibrary,
+        addedAt = minOf(row.addedAt, incoming.addedAt),
+        addedToLibraryAt = listOfNotNull(row.addedToLibraryAt, incoming.addedToLibraryAt)
+            .minOrNull(),
+        updatedAt = maxOf(row.updatedAt, incoming.updatedAt),
+        lastReadAt = lastReadAt,
+        lastChapterId = lastChapterId,
+        lastChapterIndex = lastChapterIndex,
+        subtitle = incoming.subtitle ?: row.subtitle,
+        altTitlesJson = incoming.altTitlesJson.takeIf { it != "[]" } ?: row.altTitlesJson,
+        authorRaw = incoming.authorRaw.ifBlank { row.authorRaw },
+        authorsJson = incoming.authorsJson.takeIf { it != "[]" } ?: row.authorsJson,
+        description = incoming.description.ifBlank { row.description },
+        originLanguage = incoming.originLanguage ?: row.originLanguage,
+        ratingRaw = incoming.ratingRaw.ifBlank { row.ratingRaw },
+        statusRaw = incoming.statusRaw.ifBlank { row.statusRaw },
+        statusNormalized = incoming.statusNormalized
+            .takeIf { it != "UNKNOWN" } ?: row.statusNormalized,
+        lastUpdatedRaw = incoming.lastUpdatedRaw.ifBlank { row.lastUpdatedRaw },
+        lastUpdatedAt = incoming.lastUpdatedAt ?: row.lastUpdatedAt,
+        genresJson = incoming.genresJson.takeIf { it != "[]" } ?: row.genresJson,
+        extrasJson = incoming.extrasJson.takeIf { it != "{}" } ?: row.extrasJson,
+        metadataSource = incoming.metadataSource.ifBlank { row.metadataSource },
+        metadataUpdatedAt = maxOf(row.metadataUpdatedAt, incoming.metadataUpdatedAt),
+        metadataHash = incoming.metadataHash.ifBlank { row.metadataHash },
+    )
+}
+
+internal suspend fun mergeRepairRow(
+    survivor: BookEntity,
+    loser: BookEntity,
+    dao: LibraryDao,
+): BookEntity {
+    val merged = mergeBookRow(survivor, loser, dao)
+    val inLibrary = survivor.inLibrary || loser.inLibrary
+    return merged.copy(
+        // The survivor's metadata wins; the other row only fills blanks.
+        title = survivor.title.ifBlank { loser.title },
+        author = survivor.author.ifBlank { loser.author },
+        coverUrl = survivor.coverUrl ?: loser.coverUrl,
+        contentType = survivor.contentType.ifBlank { loser.contentType },
+        rating = if (survivor.rating != 0.0) survivor.rating else loser.rating,
+        description = survivor.description.ifBlank { loser.description },
+        subtitle = survivor.subtitle ?: loser.subtitle,
+        altTitlesJson = survivor.altTitlesJson.takeIf { it != "[]" } ?: loser.altTitlesJson,
+        genresJson = survivor.genresJson.takeIf { it != "[]" } ?: loser.genresJson,
+        authorRaw = survivor.authorRaw.ifBlank { loser.authorRaw },
+        authorsJson = survivor.authorsJson.takeIf { it != "[]" } ?: loser.authorsJson,
+        originLanguage = survivor.originLanguage ?: loser.originLanguage,
+        ratingRaw = survivor.ratingRaw.ifBlank { loser.ratingRaw },
+        statusRaw = survivor.statusRaw.ifBlank { loser.statusRaw },
+        statusNormalized = survivor.statusNormalized
+            .takeIf { it != "UNKNOWN" } ?: loser.statusNormalized,
+        lastUpdatedRaw = survivor.lastUpdatedRaw.ifBlank { loser.lastUpdatedRaw },
+        lastUpdatedAt = survivor.lastUpdatedAt ?: loser.lastUpdatedAt,
+        extrasJson = survivor.extrasJson.takeIf { it != "{}" } ?: loser.extrasJson,
+        metadataSource = survivor.metadataSource.ifBlank { loser.metadataSource },
+        metadataUpdatedAt = maxOf(survivor.metadataUpdatedAt, loser.metadataUpdatedAt),
+        metadataHash = survivor.metadataHash.ifBlank { loser.metadataHash },
+        addedAt = minOf(survivor.addedAt, loser.addedAt),
+        addedToLibraryAt = if (inLibrary) {
+            listOfNotNull(survivor.addedToLibraryAt, loser.addedToLibraryAt)
+                .ifEmpty { listOf(minOf(survivor.addedAt, loser.addedAt)) }
+                .minOrNull()
+        } else {
+            null
+        },
+        shelfId = when {
+            survivor.inLibrary -> survivor.shelfId
+            loser.inLibrary -> loser.shelfId
+            else -> survivor.shelfId
+        },
+        totalChapters = maxOf(survivor.totalChapters, loser.totalChapters),
+        newChapters = maxOf(survivor.newChapters, loser.newChapters),
+    )
 }
 
 private const val ReadingShelfId = "reading"

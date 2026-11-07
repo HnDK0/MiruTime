@@ -344,23 +344,23 @@ fun SourceCatalogScreen(
     // Explicit target, optimistic flag, no page reload: the card flips now and
     // is reverted only when the data layer reports a real failure.
     fun toggleMembership(book: CatalogBook) {
-        val url = book.bookUrl
-        if (url in membershipPending) return
+        val key = book.bookKey
+        if (key in membershipPending) return
         val target = !book.inLibrary
-        membershipPending = membershipPending + url
-        books = books.setMembership(url, target)
+        membershipPending = membershipPending + key
+        books = books.setMembership(key, target)
         scope.launch {
             val result = try {
-                provider.setInLibrary(url, target)
+                provider.setInLibrary(key, target)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 MembershipResult(success = false)
             }
-            membershipPending = membershipPending - url
+            membershipPending = membershipPending - key
             if (result.success) {
                 books = books.map {
-                    if (it.bookUrl != url) {
+                    if (it.bookKey != key) {
                         it
                     } else {
                         // The optimistic setMembership already carries the
@@ -377,7 +377,7 @@ fun SourceCatalogScreen(
                 onLibraryChanged()
                 Toast.makeText(context, resources.getString(message), Toast.LENGTH_SHORT).show()
             } else {
-                books = books.setMembership(url, !target)
+                books = books.setMembership(key, !target)
                 Toast.makeText(
                     context,
                     resources.getString(R.string.book_library_update_failed),

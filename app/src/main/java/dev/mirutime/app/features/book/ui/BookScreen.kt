@@ -277,6 +277,8 @@ private fun enqueueMessage(context: Context, result: EnqueueResult): String = wh
 fun BookScreen(
     bookUrl: String,
     contentPadding: PaddingValues,
+    // Restore-only revision: reload the row when a live restore replaced it.
+    refreshKey: Int = 0,
     readerGraph: ReaderGraph,
     provider: BookDataProvider,
     // Null in previews/tests: the EPUB row then reports "unavailable".
@@ -342,6 +344,8 @@ fun BookScreen(
     // Survives the reader round-trip (nav saveable state). On return the
     // provider cache answers immediately, so no skeleton/source refresh.
     var loadedOnce by rememberSaveable(bookUrl) { mutableStateOf(false) }
+    // One "page really opened" notification per open, never per retry.
+    var openedNotified by rememberSaveable(bookUrl) { mutableStateOf(false) }
     SideEffect {
         book?.let { current ->
             if (BookPageSnapshotStore.get(bookUrl) != current) {
@@ -614,6 +618,19 @@ fun BookScreen(
         book = book?.copy(chapters = loaded, totalChapters = loaded.size)
     }
 
+    // A live restore replaces rows behind this page. Reload only then; the
+    // membership/open revisions must not re-run the chapter window.
+    val seenRefreshKey = remember(bookUrl) { mutableIntStateOf(refreshKey) }
+    LaunchedEffect(refreshKey) {
+        if (refreshKey == seenRefreshKey.intValue) return@LaunchedEffect
+        provider.invalidateBookCache(bookUrl)
+        reload()
+        reloadChapters()
+        // Mark the revision only after both reads completed; a cancelled
+        // effect retries on the next composition instead of losing the reload.
+        seenRefreshKey.intValue = refreshKey
+    }
+
     // One report shape for both the initial chapter load and an explicit
     // refresh, so every chapter failure names the same source/operation.
     fun chapterReport(error: PluginError): PluginErrorReport = buildPluginErrorReport(
@@ -807,7 +824,10 @@ fun BookScreen(
                 book = metadata.copy(chapters = loaded, totalChapters = loaded.size)
                 loadedOnce = true
                 confirmedInLibrary = metadata.inLibrary
-                onBookOpened(bookUrl)
+                if (!openedNotified) {
+                    openedNotified = true
+                    onBookOpened(bookUrl)
+                }
                 MiruLog.event(
                     "book",
                     "load",
@@ -837,7 +857,10 @@ fun BookScreen(
             confirmedInLibrary = metadata.inLibrary
             // The page really opened: the shell can clear its new-chapter
             // badge after this point (never for a failed metadata load).
-            onBookOpened(bookUrl)
+            if (!openedNotified) {
+                openedNotified = true
+                onBookOpened(bookUrl)
+            }
             // Persisted rows open the book immediately; only an empty store
             // pays for the plugin call here. A typed failure keeps the rows
             // already shown and reaches the error card instead of being
