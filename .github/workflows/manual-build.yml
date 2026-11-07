@@ -61,6 +61,20 @@ jobs:
           keyPassword=$KEY_PASSWORD
           EOF
 
+      - name: Set build metadata
+        run: |
+          set -euo pipefail
+          APP_VERSION=$(sed -n 's/^[[:space:]]*versionName = "\(.*\)"$/\1/p' app/build.gradle.kts | head -n 1)
+          if [ -z "$APP_VERSION" ]; then
+            echo "::warning::versionName not found in app/build.gradle.kts; using 'dev'"
+            APP_VERSION=dev
+          fi
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "SHORT_SHA=$SHORT_SHA" >> "$GITHUB_ENV"
+          # Maven version of the core artifact: unique per nightly build.
+          echo "CORE_VERSION=$APP_VERSION-$SHORT_SHA" >> "$GITHUB_ENV"
+
       - name: Build
         run: |
           chmod +x gradlew
@@ -75,19 +89,11 @@ jobs:
             :image-loader:testDebugUnitTest :image-loader:lintDebug \
             :app:testDebugUnitTest :app:lintDebug \
             :app:assembleRelease \
+            :mirutime-core:publishToMavenLocal \
             -PabiSplits=true \
+            -Pgroup=com.github.HnDK0.MiruTime \
+            -Pversion="$CORE_VERSION" \
             -PlocalPropertiesFilePath="$GITHUB_WORKSPACE/custom.properties"
-
-      - name: Set build metadata
-        run: |
-          set -euo pipefail
-          APP_VERSION=$(sed -n 's/^[[:space:]]*versionName = "\(.*\)"$/\1/p' app/build.gradle.kts | head -n 1)
-          if [ -z "$APP_VERSION" ]; then
-            echo "::warning::versionName not found in app/build.gradle.kts; using 'dev'"
-            APP_VERSION=dev
-          fi
-          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
-          echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
 
       - name: Collect artifacts
         run: |
@@ -103,6 +109,19 @@ jobs:
             exit 1
           fi
           gzip -9 -c "$mapping" > "release-artifacts/mapping-${SHORT_SHA}.txt.gz"
+
+          # Publishable core for the plugin tester: raw JAR/AAR plus a Maven
+          # repository layout so POMs and transitive dependencies are kept.
+          core_repo="$HOME/.m2/repository/com/github/HnDK0/MiruTime"
+          core_jvm="$core_repo/mirutime-core-jvm/$CORE_VERSION/mirutime-core-jvm-$CORE_VERSION.jar"
+          core_android="$core_repo/mirutime-core-android/$CORE_VERSION/mirutime-core-android-$CORE_VERSION.aar"
+          test -f "$core_jvm"
+          test -f "$core_android"
+          cp "$core_jvm" "release-artifacts/mirutime-core-jvm-${CORE_VERSION}.jar"
+          cp "$core_android" "release-artifacts/mirutime-core-android-${CORE_VERSION}.aar"
+          (cd "$HOME/.m2/repository" && \
+            zip -qr "$GITHUB_WORKSPACE/release-artifacts/mirutime-core-maven-${CORE_VERSION}.zip" \
+              "com/github/HnDK0/MiruTime")
           ls -lah release-artifacts
 
       - name: Verify APKs
@@ -188,6 +207,8 @@ jobs:
             echo ""
             echo "- \`MiruTime-${SHORT_SHA}-arm64-v8a.apk\` — for modern 64-bit devices (most phones); this is the normal download."
             echo "- \`MiruTime-${SHORT_SHA}-universal.apk\` — for x86_64 targets (Android emulators, Chromebooks, Windows Subsystem for Android) and 32-bit-only devices; it contains all four ABIs, so it is larger."
+            echo "- \`mirutime-core-maven-${CORE_VERSION}.zip\` — Maven repository with the core JVM JAR and Android AAR for the plugin tester (it fetches this automatically)."
+            echo "- \`mirutime-core-jvm-${CORE_VERSION}.jar\`, \`mirutime-core-android-${CORE_VERSION}.aar\` — raw core artifacts."
             echo ""
             if [ -n "$BASE_REF" ]; then
               echo "## $BASE_LABEL"
@@ -230,8 +251,10 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$SHORT_SHA"
-          # Keep only the APK pair from this run; older mappings stay so crashes
-          # from previous nightlies can still be deobfuscated.
+          test -n "$CORE_VERSION"
+          # Keep only the APK pair and core artifacts from this run; older
+          # mappings stay so crashes from previous nightlies can still be
+          # deobfuscated.
           if ! assets=$(gh release view nightly --json assets 2>&1); then
             if printf '%s' "$assets" | grep -qi 'not found'; then
               echo "nightly release does not exist yet; nothing to delete"
@@ -240,9 +263,14 @@ jobs:
             printf '%s\n' "$assets" >&2
             exit 1
           fi
-          stale=$(printf '%s' "$assets" | jq -r '.assets[].name' \
-            | grep -E '\.apk$' \
-            | grep -vF -- "-${SHORT_SHA}-" || true)
+          names=$(printf '%s' "$assets" | jq -r '.assets[].name')
+          stale=$(
+            {
+              printf '%s\n' "$names" | grep -E '\.apk$' | grep -vF -- "-${SHORT_SHA}-" || true
+              printf '%s\n' "$names" | grep -E '^mirutime-core-.*\.(jar|aar|zip)$' \
+                | grep -vF -- "-${CORE_VERSION}." || true
+            } | sort -u
+          )
           if [ -n "$stale" ]; then
             printf '%s\n' "$stale" | xargs -r -I{} gh release delete-asset nightly "{}" --yes
           fi

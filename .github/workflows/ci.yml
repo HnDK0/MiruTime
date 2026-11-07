@@ -44,6 +44,7 @@ jobs:
             :core-log:testDebugUnitTest :core-log:lintDebug \
             :feature-tts:testDebugUnitTest :feature-tts:lintDebug \
             :feature-reader:testDebugUnitTest :feature-reader:lintDebug \
-            :mirutime-core:jvmTest :mirutime-data:jvmTest :translator:jvmTest \
+            :mirutime-core:jvmTest :mirutime-core:jvmJar :mirutime-core:assembleAndroidMain \
+            :mirutime-data:jvmTest :translator:jvmTest \
             :image-loader:testDebugUnitTest :image-loader:lintDebug \
             :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
