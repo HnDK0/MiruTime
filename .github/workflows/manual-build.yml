@@ -1,31 +1,36 @@
 name: Manual nightly build
 
 # Deliberately workflow_dispatch only: there is no push or schedule trigger.
-# Start it manually from the Actions page when a nightly is wanted.
+# Start it manually from the Actions page when a nightly is wanted. The
+# nightly tag and release are global, so only the default branch may publish.
 on:
   workflow_dispatch:
-    inputs:
-      publish_nightly:
-        description: Publish/update the prerelease named nightly
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: write
 
+# The nightly tag and release are shared by every run, so runs must be
+# serialized even when dispatched from different refs. Never cancel: a
+# half-finished run can leave a moved tag with missing assets.
 concurrency:
-  group: manual-nightly-${{ github.ref }}
+  group: manual-nightly
   cancel-in-progress: false
 
 jobs:
   build:
-    name: Signed release artifact
+    name: Signed nightly artifact
+    # workflow_dispatch can target any branch; only main may publish nightly.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Full history is required for the changelog (git log between tags)
+          # and for force-moving the nightly tag.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up JDK
         uses: actions/setup-java@v6
@@ -73,22 +78,32 @@ jobs:
             -PabiSplits=true \
             -PlocalPropertiesFilePath="$GITHUB_WORKSPACE/custom.properties"
 
+      - name: Set build metadata
+        run: |
+          set -euo pipefail
+          APP_VERSION=$(sed -n 's/^[[:space:]]*versionName = "\(.*\)"$/\1/p' app/build.gradle.kts | head -n 1)
+          if [ -z "$APP_VERSION" ]; then
+            echo "::warning::versionName not found in app/build.gradle.kts; using 'dev'"
+            APP_VERSION=dev
+          fi
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
       - name: Collect artifacts
         run: |
           set -euo pipefail
           mkdir -p release-artifacts
-          echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
           cp app/build/outputs/apk/release/app-arm64-v8a-release.apk \
-            "release-artifacts/MiruTime-${GITHUB_SHA::7}-arm64-v8a.apk"
+            "release-artifacts/MiruTime-${SHORT_SHA}-arm64-v8a.apk"
           cp app/build/outputs/apk/release/app-universal-release.apk \
-            "release-artifacts/MiruTime-${GITHUB_SHA::7}-universal.apk"
+            "release-artifacts/MiruTime-${SHORT_SHA}-universal.apk"
           mapping=app/build/outputs/mapping/release/mapping.txt
-          if [ -f "$mapping" ]; then
-            gzip -9 -c "$mapping" > "release-artifacts/mapping-${GITHUB_SHA::7}.txt.gz"
-          else
-            echo "::warning::R8 mapping.txt is missing; this release ships without a deobfuscation mapping"
+          if [ ! -f "$mapping" ]; then
+            echo "::error::R8 mapping.txt is missing; nightly cannot ship without deobfuscation mapping"
+            exit 1
           fi
-          ls release-artifacts
+          gzip -9 -c "$mapping" > "release-artifacts/mapping-${SHORT_SHA}.txt.gz"
+          ls -lah release-artifacts
 
       - name: Verify APKs
         run: |
@@ -137,19 +152,120 @@ jobs:
           path: release-artifacts/
           retention-days: 14
 
-      - name: Publish optional nightly prerelease
-        if: inputs.publish_nightly
+      - name: Build changelog
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git fetch origin --tags --force
+
+          # Baseline = newest reachable stable tag (v*). Without one, diff
+          # against the previous nightly commit so the notes follow recent
+          # work instead of a fixed window.
+          STABLE_TAG=$(git tag --sort=-v:refname --merged "$COMMIT_SHA" \
+            | grep -E '^v[0-9]' | head -n1 || true)
+          PREV_NIGHTLY=$(git rev-parse -q --verify 'nightly^{commit}' || true)
+
+          BASE_REF=""
+          BASE_LABEL=""
+          if [ -n "$STABLE_TAG" ]; then
+            BASE_REF="$STABLE_TAG"
+            BASE_LABEL="Changes since $STABLE_TAG"
+          elif [ -n "$PREV_NIGHTLY" ] && [ "$PREV_NIGHTLY" != "$COMMIT_SHA" ] \
+               && git merge-base --is-ancestor "$PREV_NIGHTLY" "$COMMIT_SHA"; then
+            BASE_REF="$PREV_NIGHTLY"
+            BASE_LABEL="Changes since previous nightly ($(git rev-parse --short "$PREV_NIGHTLY"))"
+          fi
+
+          {
+            echo "Automated build from the latest commit on the \`$REF_NAME\` branch."
+            echo "Commit: $COMMIT_SHA"
+            echo "This is not a stable release and may contain bugs."
+            echo ""
+            echo "⚠️ A Room migration may happen: back up the library before updating;"
+            echo "rolling back to an older version may not work."
+            echo ""
+            echo "- \`MiruTime-${SHORT_SHA}-arm64-v8a.apk\` — for modern 64-bit devices (most phones); this is the normal download."
+            echo "- \`MiruTime-${SHORT_SHA}-universal.apk\` — for x86_64 targets (Android emulators, Chromebooks, Windows Subsystem for Android) and 32-bit-only devices; it contains all four ABIs, so it is larger."
+            echo ""
+            if [ -n "$BASE_REF" ]; then
+              echo "## $BASE_LABEL"
+              CHANGES=$(git log --no-merges --pretty=format:'- %s (%h)' "$BASE_REF".."$COMMIT_SHA")
+              if [ -n "$CHANGES" ]; then echo "$CHANGES"; else echo "- No code changes since the previous build."; fi
+            else
+              echo "## Recent changes"
+              git log --no-merges -20 --pretty=format:'- %s (%h)' "$COMMIT_SHA"
+            fi
+            echo ""
+          } > "$RUNNER_TEMP/release-body.md"
+
+          cat "$RUNNER_TEMP/release-body.md"
+
+      - name: Create/update nightly release
         uses: softprops/action-gh-release@v3
         with:
+          # Publish the assets first; the tag is moved in the next step only
+          # after this succeeds.
+          name: MiruTime nightly v${{ env.APP_VERSION }} (${{ env.SHORT_SHA }})
           tag_name: nightly
-          name: MiruTime nightly
-          prerelease: true
           target_commitish: ${{ github.sha }}
+          prerelease: true
+          draft: false
+          body_path: ${{ runner.temp }}/release-body.md
           files: release-artifacts/*
-          body: |
-            Manual nightly build from `${{ github.sha }}`.
 
-            - `MiruTime-${{ env.SHORT_SHA }}-arm64-v8a.apk` — for modern 64-bit devices (most phones); this is the normal download.
-            - `MiruTime-${{ env.SHORT_SHA }}-universal.apk` — for x86_64 targets (Android emulators, Chromebooks, Windows Subsystem for Android) and 32-bit-only devices; it contains all four ABIs, so it is larger.
+      - name: Move nightly tag
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Source archives and the release must point at the built commit.
+          git tag -f nightly "$COMMIT_SHA"
+          git push origin nightly --force
 
-            This is not a stable release. Back up the library before installing.
+      - name: Delete stale nightly APK assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$SHORT_SHA"
+          # Keep only the APK pair from this run; older mappings stay so crashes
+          # from previous nightlies can still be deobfuscated.
+          if ! assets=$(gh release view nightly --json assets 2>&1); then
+            if printf '%s' "$assets" | grep -qi 'not found'; then
+              echo "nightly release does not exist yet; nothing to delete"
+              exit 0
+            fi
+            printf '%s\n' "$assets" >&2
+            exit 1
+          fi
+          stale=$(printf '%s' "$assets" | jq -r '.assets[].name' \
+            | grep -E '\.apk$' \
+            | grep -vF -- "-${SHORT_SHA}-" || true)
+          if [ -n "$stale" ]; then
+            printf '%s\n' "$stale" | xargs -r -I{} gh release delete-asset nightly "{}" --yes
+          fi
+
+      - name: Prune old mapping assets (keep last 20)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Keep the 20 most recent mapping-<sha>.txt.gz; older ones no longer
+          # need deobfuscation because their builds are long gone.
+          if ! assets=$(gh release view nightly --json assets 2>&1); then
+            if printf '%s' "$assets" | grep -qi 'not found'; then
+              echo "nightly release does not exist yet; nothing to prune"
+              exit 0
+            fi
+            printf '%s\n' "$assets" >&2
+            exit 1
+          fi
+          stale=$(printf '%s' "$assets" | jq -r \
+            '(.assets | map(select(.name | test("^mapping-.*\\.txt\\.gz$"))) | sort_by(.createdAt)) as $m
+             | ($m | length) as $n
+             | if $n > 20 then $m[0:($n - 20)][].name else empty end')
+          if [ -n "$stale" ]; then
+            printf '%s\n' "$stale" | xargs -r -I{} gh release delete-asset nightly "{}" --yes
+          fi
