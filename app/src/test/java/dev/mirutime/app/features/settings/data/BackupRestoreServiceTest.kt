@@ -72,15 +72,14 @@ class BackupRestoreServiceTest {
         var importedBooks = -1
         var importedTranslations = -1
         env.service = env.serviceWithImport(
-            importDatabase = { source, _, _, _, onBooksReady ->
+            importDatabase = { source, _, _, _ ->
                 BundledSQLiteDriver().open(source.absolutePath).use { connection ->
                     importedVersion = connection.int("PRAGMA user_version")
                     importedBooks = connection.int("SELECT COUNT(*) FROM books")
                     importedTranslations =
                         connection.int("SELECT COUNT(*) FROM chapter_translations")
                 }
-                onBooksReady(emptyMap(), emptySet())
-                LibraryImportReport()
+                LibraryImportReport(bookIdMap = mapOf(1L to 1L))
             },
             verifyDatabase = { verifyDatabaseSnapshot(it.absolutePath) },
             inspectDatabase = { inspectBackupDatabase(it.absolutePath) },
@@ -130,9 +129,9 @@ class BackupRestoreServiceTest {
         }
         var imported = false
         env.service = env.serviceWithImport(
-            importDatabase = { _, _, _, _, _ ->
+            importDatabase = { _, _, _, _ ->
                 imported = true
-                LibraryImportReport()
+                LibraryImportReport(bookIdMap = mapOf(1L to 1L))
             },
             verifyDatabase = { verifyDatabaseSnapshot(it.absolutePath) },
             inspectDatabase = { inspectBackupDatabase(it.absolutePath) },
@@ -161,9 +160,8 @@ class BackupRestoreServiceTest {
         val env = environment()
         val migrated = mutableListOf<Int>()
         env.service = env.serviceWithImport(
-            importDatabase = { _, _, _, _, onBooksReady ->
-                onBooksReady(emptyMap(), emptySet())
-                LibraryImportReport()
+            importDatabase = { _, _, _, _ ->
+                LibraryImportReport(bookIdMap = mapOf(1L to 1L))
             },
             inspectDatabase = { LibrarySchemaVersion },
             migrateDatabase = { _, from -> migrated += from },
@@ -309,8 +307,7 @@ class BackupRestoreServiceTest {
         env.file("local_books/book.epub").writeText("old-copy")
         env.settingsStore.save(PersistedSettings(openAiKeys = "old-key"))
         env.service = env.serviceWithImport(
-            importDatabase = { _, _, _, _, onBooksReady ->
-                onBooksReady(mapOf(1L to 1L), emptySet())
+            importDatabase = { _, _, _, _ ->
                 error("database write failed")
             },
         )
@@ -329,31 +326,29 @@ class BackupRestoreServiceTest {
     }
 
     @Test
-    fun `failed live import keeps staging when rollback fails`() {
+    fun `failed import before DB commit leaves no staged files`() {
         val env = environment()
         env.file("local_books/book.epub").writeText("old-copy")
         env.service = env.serviceWithImport(
-            importDatabase = { _, _, _, _, onBooksReady ->
-                onBooksReady(emptyMap(), emptySet())
+            importDatabase = { _, _, _, _ ->
                 error("database write failed")
             },
-            movePath = { _, _ -> error("rollback disk failure") },
         )
         val archive = archive(files = listOf(fileEntry("files/local_books/book.epub", "new-copy")))
 
         val result = env.service.restoreNow(archive.inputStream())
 
         assertFalse(result.applied)
-        assertTrue(env.stagingRoot.exists())
-        assertTrue(env.rollbackRoot.exists())
+        assertEquals("old-copy", env.file("local_books/book.epub").readText())
+        assertFalse(env.stagingRoot.exists())
+        assertFalse(env.rollbackRoot.exists())
     }
 
     @Test
     fun `new files are removed when the live import fails`() {
         val env = environment()
         env.service = env.serviceWithImport(
-            importDatabase = { _, _, _, _, onBooksReady ->
-                onBooksReady(mapOf(1L to 1L), emptySet())
+            importDatabase = { _, _, _, _ ->
                 error("database write failed")
             },
         )
@@ -405,7 +400,7 @@ class BackupRestoreServiceTest {
         )
         val deleted = mutableListOf<Long>()
         env.service = env.serviceWithImport(
-            importDatabase = { _, _, _, _, _ -> LibraryImportReport() },
+            importDatabase = { _, _, _, _ -> LibraryImportReport(bookIdMap = mapOf(1L to 1L)) },
             journalExists = { it == 77L },
             deleteJournal = { deleted += it },
         )
@@ -467,9 +462,8 @@ class BackupRestoreServiceTest {
         val env = environment()
         val deleted = mutableListOf<Long>()
         env.service = env.serviceWithImport(
-            importDatabase = { _, _, _, _, onBooksReady ->
-                onBooksReady(emptyMap(), emptySet())
-                LibraryImportReport()
+            importDatabase = { _, _, _, _ ->
+                LibraryImportReport(bookIdMap = mapOf(1L to 1L))
             },
             deleteJournal = { deleted += it },
         )
@@ -487,9 +481,8 @@ class BackupRestoreServiceTest {
     fun `cancellation after database commit still reports applied`() {
         val env = environment()
         env.service = env.serviceWithImport(
-            importDatabase = { _, _, _, _, onBooksReady ->
-                onBooksReady(emptyMap(), emptySet())
-                LibraryImportReport()
+            importDatabase = { _, _, _, _ ->
+                LibraryImportReport(bookIdMap = mapOf(1L to 1L))
             },
             deleteJournal = { throw CancellationException("cancelled in tail") },
         )
@@ -498,6 +491,25 @@ class BackupRestoreServiceTest {
         val result = env.service.restoreNow(archive.inputStream())
 
         assertTrue(result.applied)
+    }
+
+    @Test
+    fun `recovery resumes db-files phase and copies staged files`() = runBlocking {
+        val env = environment()
+        val archive = archive(files = listOf(fileEntry("files/local_books/book.epub", "new-copy")))
+        val staged = env.service.stage(archive.inputStream())
+        assertTrue(staged.success)
+
+        env.rollbackRoot.mkdirs()
+        File(env.rollbackRoot, "progress").writeText("db-files\n42")
+        File(env.rollbackRoot, "files.journal").writeText("v1\nb 1 1")
+
+        val result = env.service.recoverInterruptedRestore()
+
+        assertTrue(result.applied)
+        assertEquals("new-copy", env.file("local_books/book.epub").readText())
+        assertFalse(env.stagingRoot.exists())
+        assertFalse(env.rollbackRoot.exists())
     }
 
     @Test
@@ -510,9 +522,8 @@ class BackupRestoreServiceTest {
         File(env.rollbackRoot, "files/local_books").mkdirs()
         File(env.rollbackRoot, "files/local_books/book.epub").writeText("old-copy")
         env.service = env.serviceWithImport(
-            importDatabase = { _, _, _, _, onBooksReady ->
-                onBooksReady(emptyMap(), emptySet())
-                LibraryImportReport()
+            importDatabase = { _, _, _, _ ->
+                LibraryImportReport(bookIdMap = mapOf(1L to 1L))
             },
             movePath = { _, _ -> error("rollback disk failure") },
         )
@@ -564,9 +575,8 @@ class BackupRestoreServiceTest {
         env.file("mirutime_plugins/lua_libs/shared.lua").writeText("old-lib")
         var reloads = 0
         env.service = env.serviceWithImport(
-            importDatabase = { _, _, _, _, onBooksReady ->
-                onBooksReady(emptyMap(), emptySet())
-                LibraryImportReport()
+            importDatabase = { _, _, _, _ ->
+                LibraryImportReport(bookIdMap = mapOf(1L to 1L))
             },
             reloadPlugins = { reloads++ },
         )
@@ -614,8 +624,7 @@ class BackupRestoreServiceTest {
         val env = environment()
         env.file("mirutime_plugins/lua_plugins/existing.lua").writeText("old")
         env.service = env.serviceWithImport(
-            importDatabase = { _, _, _, _, onBooksReady ->
-                onBooksReady(emptyMap(), emptySet())
+            importDatabase = { _, _, _, _ ->
                 error("database write failed")
             },
         )
@@ -760,8 +769,7 @@ class BackupRestoreServiceTest {
         val env = environment()
         env.file("reader/fonts/custom.ttf").writeText("old-font")
         env.service = env.serviceWithImport(
-            importDatabase = { _, _, _, _, onBooksReady ->
-                onBooksReady(emptyMap(), emptySet())
+            importDatabase = { _, _, _, _ ->
                 error("database write failed")
             },
         )
@@ -816,9 +824,8 @@ class BackupRestoreServiceTest {
         maxEntryBytes: Long,
         maxTotalBytes: Long,
         readerStore: ReaderBackupStore = NoopReaderBackupStore,
-        importDatabase: ImportDatabase = { _, _, _, _, onBooksReady ->
-            onBooksReady(emptyMap(), emptySet())
-            LibraryImportReport()
+        importDatabase: ImportDatabase = { _, _, _, _ ->
+            LibraryImportReport(bookIdMap = mapOf(1L to 1L))
         },
         reloadPlugins: suspend () -> Unit = {},
         journalExists: suspend (Long) -> Boolean = { false },

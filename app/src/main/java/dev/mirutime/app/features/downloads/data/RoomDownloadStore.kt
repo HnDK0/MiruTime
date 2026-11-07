@@ -36,6 +36,9 @@ class RoomDownloadStore(
     override suspend fun saveTask(task: DownloadTaskEntity): Long =
         repository.saveDownloadTask(task)
 
+    override suspend fun saveTasks(tasks: List<DownloadTaskEntity>) =
+        repository.saveDownloadTasks(tasks)
+
     override suspend fun deleteTask(id: Long) = repository.deleteDownloadTask(id)
 
     override suspend fun deleteTasks(bookId: Long) =

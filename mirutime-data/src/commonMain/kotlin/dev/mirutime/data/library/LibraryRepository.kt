@@ -21,6 +21,7 @@ data class LibraryMembership(
  */
 class LibraryRepository(
     private val dao: LibraryDao,
+    private val bookLocks: BookWriteLocks = BookWriteLocks(),
     // Runs before a book row disappears; the app uses it to cancel unique
     // download/translation work so a worker cannot resurrect deleted rows.
     private val onBeforeDelete: suspend (List<Long>) -> Unit = {},
@@ -300,8 +301,10 @@ class LibraryRepository(
     }
 
     suspend fun deleteBook(bookId: Long) {
-        notifyBeforeDelete(listOf(bookId))
-        dao.deleteBookWithSearch(bookId)
+        bookLocks.withLock(bookLocks.bookKey(bookId)) {
+            notifyBeforeDelete(listOf(bookId))
+            dao.deleteBookWithSearch(bookId)
+        }
     }
 
     suspend fun deleteBook(bookUrl: String) {
@@ -331,9 +334,11 @@ class LibraryRepository(
         } else {
             dao.bookByUrl(targetUrl)
         } ?: return BulkDeleteResult(emptySet(), setOf(bookUrl), emptyList())
-        notifyBeforeDelete(listOf(row.bookId))
-        val files = groupBookFiles(dao.deleteBooksWithFiles(listOf(row.bookId)))
-        return BulkDeleteResult(deleted = setOf(row.url), missing = emptySet(), files = files)
+        return bookLocks.withLock(bookLocks.bookKey(row.bookId)) {
+            notifyBeforeDelete(listOf(row.bookId))
+            val files = groupBookFiles(dao.deleteBooksWithFiles(listOf(row.bookId)))
+            BulkDeleteResult(deleted = setOf(row.url), missing = emptySet(), files = files)
+        }
     }
 
     /**
@@ -392,8 +397,10 @@ class LibraryRepository(
             for (chunk in ids.chunked(SqliteIdChunk)) {
                 currentCoroutineContext().ensureActive()
                 val chunkFiles = try {
-                    notifyBeforeDelete(chunk)
-                    groupBookFiles(dao.deleteBooksWithFiles(chunk))
+                    bookLocks.withLocks(chunk.map(bookLocks::bookKey)) {
+                        notifyBeforeDelete(chunk)
+                        groupBookFiles(dao.deleteBooksWithFiles(chunk))
+                    }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
@@ -878,6 +885,9 @@ class LibraryRepository(
 
     suspend fun saveDownloadTask(task: DownloadTaskEntity) = dao.upsertDownloadTask(task)
 
+    suspend fun saveDownloadTasks(tasks: List<DownloadTaskEntity>) =
+        dao.upsertDownloadTasks(tasks)
+
     suspend fun downloadTasks(): List<DownloadTaskEntity> = dao.downloadTasks()
 
     suspend fun downloadTasks(state: String): List<DownloadTaskEntity> =
@@ -1079,7 +1089,9 @@ class LibraryRepository(
                 // calling notifyBeforeDelete per row would queue thousands of
                 // pointless cancelUniqueWork writes.
                 val chunkFiles = try {
-                    groupBookFiles(dao.deleteBooksWithFiles(chunk))
+                    bookLocks.withLocks(chunk.map(bookLocks::bookKey)) {
+                        groupBookFiles(dao.deleteBooksWithFiles(chunk))
+                    }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {

@@ -15,8 +15,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import dev.mirutime.data.library.BookWriteLocks
 import kotlinx.coroutines.withContext
 
 /**
@@ -42,9 +41,8 @@ class BookMigrationCoordinator(
     private val settings: BookMigrationSettingsStore,
     private val planner: BookMigrationPlanner = BookMigrationPlanner(),
     private val now: () -> Long,
+    private val bookLocks: BookWriteLocks = BookWriteLocks(),
 ) {
-    private val lockGuard = Mutex()
-    private val bookLocks = HashMap<String, Mutex>()
 
     suspend fun plan(
         oldBookId: Long,
@@ -71,8 +69,8 @@ class BookMigrationCoordinator(
             ?: return BookMigrationOutcome.Failure(
                 "Target chapters are empty, blank or duplicated",
             )
-        val oldKey = lockKey("book", oldBookId)
-        val newKey = lockKey("target", normalized.book.installId, normalized.book.url)
+        val oldKey = bookLocks.bookKey(oldBookId)
+        val newKey = bookLocks.targetKey(normalized.book.installId, normalized.book.url)
         return withLocks(listOf(oldKey, newKey)) {
             migrateLocked(oldBookId, normalized, options)
         }
@@ -602,21 +600,8 @@ class BookMigrationCoordinator(
     private fun batchId(oldBook: BookEntity, target: BookMigrationTarget): String =
         "book:${oldBook.bookId}:${target.book.installId}:${target.book.url}"
 
-    private fun lockKey(vararg parts: Any): String = parts.joinToString("|")
-
-    private suspend fun lockFor(key: String): Mutex = lockGuard.withLock {
-        bookLocks.getOrPut(key) { Mutex() }
-    }
-
-    private suspend fun <T> withLocks(keys: List<String>, block: suspend () -> T): T {
-        val locks = keys.distinct().sorted().map { lockFor(it) }
-        suspend fun acquire(index: Int): T = if (index == locks.size) {
-            block()
-        } else {
-            locks[index].withLock { acquire(index + 1) }
-        }
-        return acquire(0)
-    }
+    private suspend fun <T> withLocks(keys: List<String>, block: suspend () -> T): T =
+        bookLocks.withLocks(keys, block)
 
     private fun mergeBook(
         target: BookEntity,

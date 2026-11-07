@@ -31,6 +31,7 @@ import java.nio.charset.Charset
 import kotlin.system.measureTimeMillis
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
@@ -54,6 +55,7 @@ class LuaPluginSourceTest {
         options: HostOptionsRegistry? = null,
         cache: ResponseCache? = null,
         defaultHttpTimeoutMs: Long = NetworkBindings.DEFAULT_TIMEOUT_MS,
+        callTimeoutMs: Long = 30_000,
     ) = LuaPluginSourceFactory(
         systemInfo = FakeSystemInfo(),
         cookieStore = FakeCookieStore(),
@@ -67,6 +69,7 @@ class LuaPluginSourceTest {
         ssrfGuard = null,
         cache = cache,
         defaultHttpTimeoutMs = defaultHttpTimeoutMs,
+        callTimeoutMs = callTimeoutMs,
     )
 
     private fun metadata(
@@ -94,6 +97,24 @@ class LuaPluginSourceTest {
         (this as Outcome.Err).error
 
     // ── chapters: adapter never reorders ─────────────────────────────────────
+
+    @Test
+    fun `infinite lua call times out and disables the source`() = runBlocking {
+        val s = factory(callTimeoutMs = 100).create(
+            PluginDescriptor(
+                metadata(id = "loop.plugin"),
+                """
+                function getCatalogList(index)
+                    while true do end
+                end
+                """.trimIndent(),
+            ),
+        )
+
+        assertFailsWith<LuaCallTimeoutException> { s.catalog(0) }
+        assertFailsWith<LuaCallTimeoutException> { s.catalog(0) }
+        Unit
+    }
 
     @Test
     fun `chapter list keeps plugin order without sorting`() {

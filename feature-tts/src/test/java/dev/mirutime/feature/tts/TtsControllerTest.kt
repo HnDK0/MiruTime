@@ -196,6 +196,19 @@ class TtsControllerTest {
     }
 
     @Test
+    fun `play persists the cursor immediately in the background`() = runTest {
+        val store = RecordingSessionStore()
+        val controller = TtsController(FakeEngine(), this, store)
+
+        controller.play(document, emptyMap())
+
+        assertNotNull(store.saved)
+        assertTrue(store.savedImmediate)
+        assertTrue(store.savedBackground)
+        assertEquals(true, store.saved?.wasPlaying)
+    }
+
+    @Test
     fun `speed changes update the live time estimate`() = runTest {
         val controller = TtsController(FakeEngine(), this, InMemoryTtsSessionStore())
         controller.play(document, emptyMap())
@@ -1159,4 +1172,25 @@ class TtsControllerTest {
         assertEquals(document.chapterIndex, stopped?.chapterIndex)
     }
 
+}
+
+private class RecordingSessionStore : TtsSessionStore {
+    var saved: TtsSession? = null
+        private set
+    var savedImmediate = false
+        private set
+    var savedBackground = false
+        private set
+
+    override fun load(): TtsSession? = saved
+
+    override fun save(session: TtsSession, immediate: Boolean, background: Boolean) {
+        saved = session
+        savedImmediate = immediate
+        savedBackground = background
+    }
+
+    override fun clear(immediate: Boolean, background: Boolean) {
+        saved = null
+    }
 }

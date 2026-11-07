@@ -494,6 +494,17 @@ class DownloadEngineTest {
     }
 
     @Test
+    fun `large enqueue upserts in bounded chunks`() = runTest {
+        val chapters = (1..450).map { testChapter(it.toLong(), idx = it) }
+        store = FakeDownloadStore(bookRow = testBook(totalChapters = 450), chapters = chapters)
+
+        engine().enqueueNow(bookUrl, null)
+
+        assertEquals(listOf(200, 200, 50), store.saveTaskChunks)
+        assertEquals(450, store.tasksById.size)
+    }
+
+    @Test
     fun `one middle chapter failure does not abort the remaining queue`() = runTest {
         val chapters = (1..100).map { testChapter(it.toLong(), idx = it) }
         store = FakeDownloadStore(bookRow = testBook(totalChapters = 100), chapters = chapters)

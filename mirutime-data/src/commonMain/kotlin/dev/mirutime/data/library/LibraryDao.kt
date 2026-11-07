@@ -859,6 +859,9 @@ interface LibraryDao {
     @Upsert
     suspend fun upsertDownloadTask(task: DownloadTaskEntity): Long
 
+    @Upsert
+    suspend fun upsertDownloadTasks(tasks: List<DownloadTaskEntity>)
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertDownloadTasks(tasks: List<DownloadTaskEntity>): List<Long>
 

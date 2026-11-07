@@ -56,6 +56,14 @@ import io.ktor.client.engine.HttpClientEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 // Adapts a sandboxed LuaSession to the PluginSource contract.
@@ -94,9 +102,14 @@ class LuaPluginSource(
     private val logger: Logger? = null,
     // Diagnostic label shared with PluginHttpClient (operation + arg names).
     private val callContext: NetworkCallContext? = null,
+    private val callTimeoutMs: Long = 90_000,
+    private val callExecutor: ExecutorService = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "lua-${metadata.id}").apply { isDaemon = true }
+    },
 ) : PluginSource {
 
     private val mutex = Mutex()
+    private val timedOut = AtomicBoolean(false)
 
     // NoveLA SourceInterface.referer (LuaSourceAdapter.kt:99
     // `override val referer: String = readReferer()`): the ready-made Referer
@@ -465,8 +478,25 @@ class LuaPluginSource(
     // NetworkBindings bridges suspend HTTP via runBlocking inside Lua
     // functions — hop off the caller's dispatcher so a plugin's network I/O
     // never blocks the host's main thread (ANR).
-    private suspend fun <T> locked(block: suspend () -> T): T =
-        withContext(Dispatchers.IO) { mutex.withLock { block() } }
+    private suspend fun <T> locked(block: suspend () -> T): T = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            if (timedOut.get()) throw LuaCallTimeoutException(metadata.id)
+            // LuaJ cannot be interrupted. Run the script on its own single
+            // thread; on timeout mark this source dead and reject later calls
+            // immediately instead of queueing behind a hung thread forever.
+            val future = callExecutor.submit(Callable { runBlocking { block() } })
+            val timeout = callTimeoutMs.takeIf { it > 0 } ?: 90_000
+            try {
+                future.get(timeout, TimeUnit.MILLISECONDS)
+            } catch (e: TimeoutException) {
+                timedOut.set(true)
+                future.cancel(true)
+                throw LuaCallTimeoutException(metadata.id)
+            } catch (e: ExecutionException) {
+                throw e.cause ?: e
+            }
+        }
+    }
 
     // Diagnostic label around one Lua entry point; only the operation and its
     // ARGUMENT NAMES reach the trace, never the argument values.
@@ -794,6 +824,9 @@ class ForceNetworkScope {
     }
 }
 
+class LuaCallTimeoutException(sourceId: String) :
+    RuntimeException("Lua source '$sourceId' timed out and is disabled")
+
 // Factory seam for PluginRegistry: owns the bindings-before-execute
 // ordering — sandbox globals, ALL engine bindings (network, storage, html,
 // crypto, json, string, url, pow) and require_lib are installed BEFORE the
@@ -839,6 +872,9 @@ class LuaPluginSourceFactory(
     // from the plugin's own preset (PluginUserAgentRegistry.resolve(sourceId,
     // host)). null = `webview_fetch` is not installed (JVM tester).
     private val webviewFetcher: ((sourceId: String) -> WebviewFetcher)? = null,
+    // Hard wall-clock ceiling per Lua entry point. A hung plugin is disabled
+    // after one timeout; LuaJ 3.0.1 cannot kill the worker thread.
+    private val callTimeoutMs: Long = 90_000,
 ) : PluginSourceFactory {
     private val libraryLoader = LibraryLoader(fileSystem, libDir)
 
@@ -905,9 +941,33 @@ class LuaPluginSourceFactory(
         OsBindings.install(session)
         MiscBindings.install(session)
         libraryLoader.install(session)
-        globals.load(descriptor.script, "@${metadata.id}").call()
+        // Top-level script code can also loop forever; put the load itself
+        // behind the same wall clock instead of hanging the factory.
+        val loadExecutor = Executors.newSingleThreadExecutor { task ->
+            Thread(task, "lua-load-${metadata.id}").apply { isDaemon = true }
+        }
+        try {
+            val loaded = loadExecutor.submit(Callable {
+                globals.load(descriptor.script, "@${metadata.id}").call()
+            })
+            val timeout = callTimeoutMs.takeIf { it > 0 } ?: 90_000
+            loaded.get(timeout, TimeUnit.MILLISECONDS)
+        } catch (e: TimeoutException) {
+            throw LuaCallTimeoutException(metadata.id)
+        } finally {
+            loadExecutor.shutdownNow()
+        }
         registerLoadTimeOptions(session, metadata)
-        return LuaPluginSource(session, metadata, getMemo, forceNetwork, failureFlag, logger, callContext)
+        return LuaPluginSource(
+            session,
+            metadata,
+            getMemo,
+            forceNetwork,
+            failureFlag,
+            logger,
+            callContext,
+            callTimeoutMs,
+        )
     }
 
     // Reads the script's own load-time globals from the LIVE session (the

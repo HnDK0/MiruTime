@@ -63,6 +63,7 @@ internal class FakeDownloadStore(
 ) : DownloadStore {
     val chapterRows = chapters.toMutableList()
     val tasksById = LinkedHashMap<Long, DownloadTaskEntity>()
+    val saveTaskChunks = mutableListOf<Int>()
     val bodies = HashMap<Long, ChapterBodyEntity>()
     val pages = HashMap<Long, ChapterPageEntity>()
     val downloaded = HashSet<Long>()
@@ -148,6 +149,11 @@ internal class FakeDownloadStore(
         tasksById.values.filter { it.bookId == bookId }
 
     override suspend fun task(id: Long): DownloadTaskEntity? = tasksById[id]
+
+    override suspend fun saveTasks(tasks: List<DownloadTaskEntity>) {
+        saveTaskChunks += tasks.size
+        tasks.forEach { saveTask(it) }
+    }
 
     override suspend fun saveTask(task: DownloadTaskEntity): Long {
         val id = if (task.id == 0L) nextId++ else task.id

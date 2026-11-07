@@ -64,6 +64,7 @@ import dev.mirutime.app.features.translation.domain.ManagerTranslationEngine
 import dev.mirutime.app.features.updates.data.AppUpdateScheduler
 import dev.mirutime.app.features.video.data.VideoDownloadManager
 import dev.mirutime.data.library.LibraryDatabase
+import dev.mirutime.data.library.BookWriteLocks
 import dev.mirutime.data.library.LibraryRepository
 import dev.mirutime.data.library.bookKeyUrl
 import dev.mirutime.data.library.buildLibraryDatabase
@@ -103,7 +104,7 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
         )
     }
     val libraryRepository: LibraryRepository by lazy {
-        LibraryRepository(libraryDatabase.libraryDao()) { bookIds ->
+        LibraryRepository(libraryDatabase.libraryDao(), bookLocks = bookWriteLocks) { bookIds ->
             // Deleting a book must cancel its unique work before the row
             // disappears; otherwise a worker can race the cascade.
             bookIds.forEach { bookId ->
@@ -163,6 +164,8 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
     // chain per book, bytes under filesDir/downloads. Not a singleton queue.
     private val downloadFiles by lazy { LocalDownloadFileStore(File(filesDir, "downloads")) }
     // One real book provider shared by the book screen and the reader.
+    private val bookWriteLocks = BookWriteLocks()
+
     val pluginBookProvider: PluginBookDataProvider by lazy {
         PluginBookDataProvider(
             pluginGraph,
@@ -172,6 +175,7 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             localSaf = localSafSource,
             chapterFiles = downloadFiles,
             onBookRemoved = { bookUrl -> removeVideoDownloads(setOf(bookUrl)) },
+            bookLocks = bookWriteLocks,
         )
     }
     // One Finder provider shared by the Finder tab and migration search; it
@@ -206,6 +210,7 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
                 files = files,
                 settings = settings,
                 now = System::currentTimeMillis,
+                bookLocks = bookWriteLocks,
             ),
             search = MigrationSearch(finderProvider, sourceGate),
             targets = BookMigrationTargets(pluginBookProvider, libraryRepository, sourceGate),
@@ -313,6 +318,7 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             },
             translationQueue = downloadTranslationQueue,
             scheduleTranslation = { bookId -> translationScheduler.enqueue(bookId) },
+            bookLocks = bookWriteLocks,
         )
     }
 

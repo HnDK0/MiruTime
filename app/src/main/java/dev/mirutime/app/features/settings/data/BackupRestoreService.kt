@@ -54,7 +54,7 @@ class BackupRestoreService(
     private val migrateDatabase: (File, Int) -> Unit = { file, fromVersion ->
         migrateBackupDatabase(file.absolutePath, fromVersion, LibrarySchemaVersion)
     },
-    private val importDatabase: ImportDatabase = { _, _, _, _, _ ->
+    private val importDatabase: ImportDatabase = { _, _, _, _ ->
         error("Live database import is not configured")
     },
     private val journalExists: suspend (Long) -> Boolean = { false },
@@ -87,13 +87,12 @@ class BackupRestoreService(
         readerStore = readerStore,
         appDataDir = context.applicationContext.filesDir.parentFile
             ?: context.applicationContext.filesDir,
-        importDatabase = { sourceFile, coverPathFor, journalId, journalNow, onBooksReady ->
+        importDatabase = { sourceFile, coverPathFor, journalId, journalNow ->
             val source = libraryDatabaseAt(context, sourceFile)
             try {
                 database.importLibraryBackup(
                     source = source.libraryDao(),
                     coverPathFor = coverPathFor,
-                    onBooksReady = onBooksReady,
                     journalId = journalId,
                     journalNow = journalNow,
                 )
@@ -250,9 +249,28 @@ class BackupRestoreService(
             val marker = readMarker(markerFile)
             // A marker written just before the transaction can be missing its
             // commit line; the journal row is the authoritative commit proof.
-            val dbCommitted = marker.phase == PHASE_DB_COMMITTED ||
+            val fileJournal = File(rollbackRoot, FILE_JOURNAL).isFile
+            val needsFileResume = marker.phase == PHASE_DB_FILES || fileJournal
+            val dbCommitted = marker.phase == PHASE_DB_FILES ||
+                marker.phase == PHASE_DB_COMMITTED ||
                 (marker.operationId?.let { journalExists(it) } ?: false)
             val result = if (dbCommitted) {
+                if (!needsFileResume && stagingRoot.isDirectory) {
+                    // DB committed but no file mapping exists (crash between
+                    // commit and journal write). Never delete the only staged
+                    // files; a later build can recover from them.
+                    return RestoreApplyResult(applied = true)
+                }
+                if (needsFileResume) {
+                    val resumed = runCatching { resumeFilePhase() }.getOrDefault(false)
+                    if (!resumed) {
+                        // DB is committed; keep staging + mapping for another
+                        // attempt instead of dropping the only local files.
+                        return RestoreApplyResult(applied = true)
+                    }
+                    writeMarker(PHASE_DB_COMMITTED, marker.operationId ?: 0L)
+                    File(rollbackRoot, FILE_JOURNAL).delete()
+                }
                 val restored = File(rollbackRoot, RESTORED_SETTINGS_ENTRY)
                 val settings = if (restored.isFile) parseSettings(restored) else null
                 val restoredReader = File(rollbackRoot, RESTORED_READER_ENTRY)
@@ -295,6 +313,59 @@ class BackupRestoreService(
         } catch (_: Exception) {
             RestoreApplyResult(applied = false)
         }
+    }
+
+    private fun writeMarker(phase: String, operationId: Long) {
+        File(rollbackRoot, PROGRESS_MARKER).writeText("$phase\n$operationId")
+    }
+
+    private fun writeFileJournal(bookIds: Map<Long, Long>, preservedCovers: Set<Long>) {
+        val lines = ArrayList<String>(bookIds.size + preservedCovers.size + 1)
+        lines += FILE_JOURNAL_VERSION
+        bookIds.forEach { (oldId, newId) -> lines += "b $oldId $newId" }
+        preservedCovers.forEach { lines += "p $it" }
+        File(rollbackRoot, FILE_JOURNAL).writeText(lines.joinToString("\n"))
+    }
+
+    private fun readFileJournal(): Pair<Map<Long, Long>, Set<Long>>? {
+        val file = File(rollbackRoot, FILE_JOURNAL)
+        if (!file.isFile) return null
+        val lines = file.readLines()
+        if (lines.firstOrNull() != FILE_JOURNAL_VERSION) return null
+        val ids = LinkedHashMap<Long, Long>()
+        val preserved = LinkedHashSet<Long>()
+        for (line in lines.drop(1)) {
+            val parts = line.split(' ')
+            when {
+                parts.size == 3 && parts[0] == "b" -> {
+                    val oldId = parts[1].toLongOrNull() ?: return null
+                    val newId = parts[2].toLongOrNull() ?: return null
+                    ids[oldId] = newId
+                }
+                parts.size == 2 && parts[0] == "p" -> {
+                    preserved += parts[1].toLongOrNull() ?: return null
+                }
+                line.isBlank() -> Unit
+                else -> return null
+            }
+        }
+        return ids to preserved
+    }
+
+    private fun resumeFilePhase(): Boolean {
+        if (!stagingRoot.isDirectory) return false
+        val manifest = readStagedManifest()
+        val (ids, preserved) = readFileJournal() ?: return false
+        copyStagedFiles(
+            manifest = manifest,
+            bookIds = ids,
+            preservedCovers = preserved,
+            rollbacks = mutableListOf(),
+            created = mutableListOf(),
+            onStage = null,
+            resume = true,
+        )
+        return true
     }
 
     private data class RestoreMarker(
@@ -363,33 +434,37 @@ class BackupRestoreService(
             onProgress(STAGING_PROGRESS * 0.99f)
 
             onStage?.invoke(RestoreProgress(RestoreStage.DATABASE, 0, 1))
-            importDatabase(
+            // DB phase: rows + the reserved journal commit here. File copying
+            // must never run inside this transaction (long WAL, no resume).
+            val report = importDatabase(
                 stagedDb,
                 { oldBookId, newBookId, oldPath ->
                     coverPathFor(filesDir, oldBookId, newBookId, oldPath)
                 },
                 operationId,
                 System.currentTimeMillis(),
-            ) { bookIds, preservedCovers ->
-                copyStagedFiles(
-                    manifest = manifest,
-                    bookIds = bookIds,
-                    preservedCovers = preservedCovers,
-                    rollbacks = rollbacks,
-                    created = created,
-                    onStage = onStage,
-                )
-            }
+            )
             onStage?.invoke(RestoreProgress(RestoreStage.DATABASE, 1, 1))
-            phase = PHASE_DB_COMMITTED
-            // The DB is durable from here on. Cancellation must never reach
-            // the file rollback path; finish settings/journal/cleanup and
-            // report the restore as applied even if the caller was cancelled.
+            phase = PHASE_DB_FILES
+            // From here the DB is durable. Cancellation must never roll it
+            // back; keep the marker + mapping so the file phase can resume.
             return withContext(NonCancellable) {
                 try {
-                    File(rollbackRoot, PROGRESS_MARKER).writeText(
-                        "$PHASE_DB_COMMITTED\n$operationId",
+                    // Journal first: a kill before the marker must still be
+                    // recoverable via the journal row + files.journal.
+                    writeFileJournal(report.bookIdMap, report.preservedCoverBookIds)
+                    writeMarker(PHASE_DB_FILES, operationId)
+                    copyStagedFiles(
+                        manifest = manifest,
+                        bookIds = report.bookIdMap,
+                        preservedCovers = report.preservedCoverBookIds,
+                        rollbacks = mutableListOf(),
+                        created = mutableListOf(),
+                        onStage = onStage,
                     )
+                    phase = PHASE_DB_COMMITTED
+                    writeMarker(PHASE_DB_COMMITTED, operationId)
+                    File(rollbackRoot, FILE_JOURNAL).delete()
                     onProgress(0.99f)
 
                     if (settings != null) {
@@ -419,8 +494,8 @@ class BackupRestoreService(
                         pluginsRestored = manifest.plugins.size,
                     )
                 } catch (e: Exception) {
-                    // Leave the DB_COMMITTED marker + journal + rollback for
-                    // the next start; recovery completes settings/cleanup.
+                    // DB is committed; keep db-files marker + staging + mapping
+                    // for the next-start retry. Never call the rollback path.
                     RestoreApplyResult(
                         applied = true,
                         settings = settings,
@@ -463,6 +538,11 @@ class BackupRestoreService(
         previousReader: ReaderBackupPrefs?,
         operationId: Long,
     ) {
+        if (phase == PHASE_DB_FILES) {
+            // DB committed but files are not materialized yet. Keep the marker,
+            // staging and mapping for the next-start file-phase retry.
+            return
+        }
         if (phase == PHASE_DB_COMMITTED) {
             // The database transaction is already durable; only settings may
             // still need to land. Leave the marker for next-start recovery if
@@ -539,13 +619,21 @@ class BackupRestoreService(
         rollbacks: MutableList<FileRollback>,
         created: MutableList<File>,
         onStage: ((RestoreProgress) -> Unit)?,
+        resume: Boolean = false,
     ) {
         val total = manifest.files.size + manifest.plugins.size + manifest.readerAssets.size
         var done = 0
         manifest.files.forEach { entry ->
             val source = resolveInside(stagingRoot, entry.path)
-            requireEntryFile(source, entry, entry.path)
             val target = remapFileTarget(filesDir, entry, bookIds, preservedCovers)
+            if (resume && !source.isFile && target?.isFile == true) {
+                // A previous file-phase attempt already moved the source;
+                // target presence is the resume token.
+                done++
+                onStage?.invoke(RestoreProgress(RestoreStage.FILES, done, total))
+                return@forEach
+            }
+            requireEntryFile(source, entry, entry.path)
             if (target != null) {
                 copyFileWithRollback(source, target, entry.path, rollbacks, created)
             }
@@ -555,20 +643,30 @@ class BackupRestoreService(
         val pluginRoot = File(filesDir, PLUGIN_ROOT)
         manifest.plugins.forEach { entry ->
             val source = resolveInside(stagingRoot, entry.path)
-            requireEntryFile(source, entry, entry.path)
             val relative = validateRelative(entry.path).removePrefix("$PLUGINS_ENTRY/")
             val target = resolveInside(pluginRoot, relative)
+            if (resume && !source.isFile && target.isFile) {
+                done++
+                onStage?.invoke(RestoreProgress(RestoreStage.FILES, done, total))
+                return@forEach
+            }
+            requireEntryFile(source, entry, entry.path)
             copyFileWithRollback(source, target, entry.path, rollbacks, created)
             done++
             onStage?.invoke(RestoreProgress(RestoreStage.FILES, done, total))
         }
         manifest.readerAssets.forEach { entry ->
             val source = resolveInside(stagingRoot, entry.path)
-            requireEntryFile(source, entry, entry.path)
             val relativeAsset = readerAssetTarget(filesDir, entry.path)
                 .relativeTo(filesDir)
                 .invariantSeparatorsPath
             val target = resolveInside(filesDir, relativeAsset)
+            if (resume && !source.isFile && target.isFile) {
+                done++
+                onStage?.invoke(RestoreProgress(RestoreStage.FILES, done, total))
+                return@forEach
+            }
+            requireEntryFile(source, entry, entry.path)
             copyFileWithRollback(source, target, entry.path, rollbacks, created)
             done++
             onStage?.invoke(RestoreProgress(RestoreStage.FILES, done, total))
@@ -1106,7 +1204,10 @@ class BackupRestoreService(
         private const val RESTORED_READER_ENTRY = "reader.restore.json"
         private const val PROGRESS_MARKER = "progress"
         private const val PHASE_FILES_COPIED = "files"
+        private const val PHASE_DB_FILES = "db-files"
         private const val PHASE_DB_COMMITTED = "db"
+        private const val FILE_JOURNAL = "files.journal"
+        private const val FILE_JOURNAL_VERSION = "v1"
         private const val RESTORE_CHUNK_BYTES = 64 * 1024
         private const val MAX_RESTORE_MANIFEST_BYTES = 1024L * 1024
         private const val MAX_RESTORE_SETTINGS_BYTES = 16L * 1024 * 1024
@@ -1161,7 +1262,6 @@ internal typealias ImportDatabase = suspend (
     coverPathFor: (oldBookId: Long, newBookId: Long, oldPath: String?) -> String?,
     journalId: Long,
     journalNow: Long,
-    onBooksReady: suspend (bookIds: Map<Long, Long>, preservedCovers: Set<Long>) -> Unit,
 ) -> LibraryImportReport
 
 data class RestoreStageResult(

@@ -41,6 +41,7 @@ import dev.mirutime.data.library.BookEntity
 import dev.mirutime.data.library.ChapterStatusSnapshot
 import dev.mirutime.data.library.ChapterSeed
 import dev.mirutime.data.library.LibraryBookFiles
+import dev.mirutime.data.library.BookWriteLocks
 import dev.mirutime.data.library.LibraryRepository
 import dev.mirutime.data.library.bookKeyUrl
 import dev.mirutime.data.library.libraryBookKey
@@ -96,6 +97,7 @@ class PluginBookDataProvider(
     private val pluginSourceFor: suspend (String) -> PluginSource? = { id ->
         graphOrNull?.source(id)
     },
+    private val bookLocks: BookWriteLocks = BookWriteLocks(),
 ) : BookDataProvider {
     private val graph: PluginGraph
         get() = requireNotNull(graphOrNull) { "plugin graph is not configured" }
@@ -155,7 +157,7 @@ class PluginBookDataProvider(
     private val chapterCache: ChapterCacheStore? by lazy {
         val repo = library ?: return@lazy null
         val files = chapterFiles ?: return@lazy null
-        ChapterCacheStore(LibraryChapterCacheRepository(repo), files, now)
+        ChapterCacheStore(LibraryChapterCacheRepository(repo), files, now, bookLocks)
     }
 
     override suspend fun book(bookUrl: String): BookDetails? =

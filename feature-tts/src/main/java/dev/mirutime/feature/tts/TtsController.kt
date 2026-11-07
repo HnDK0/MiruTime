@@ -227,7 +227,7 @@ class TtsController(
             "block" to blockIndex,
             "startChunk" to current,
         )
-        persist(wasPlaying = true)
+        persist(wasPlaying = true, immediate = true, background = true)
         if (!ready) {
             setState(chunkState(current, TtsStatus.Loading))
             pending = { speakFrom(current) }
@@ -362,7 +362,7 @@ class TtsController(
         if (chunks.isEmpty()) return
         active = true
         applyPlaybackSettings()
-        persist(wasPlaying = true)
+        persist(wasPlaying = true, immediate = true, background = true)
         if (!ready) {
             setState(chunkState(current, TtsStatus.Loading))
             pending = { speakFrom(current) }
@@ -597,7 +597,7 @@ class TtsController(
         setState(chunkState(current, TtsStatus.Playing))
         // Persist before the platform callback so skipping cannot lose the
         // cursor if speech never starts (engine race, process death).
-        persist(wasPlaying = true)
+        persist(wasPlaying = true, immediate = true, background = true)
         engine.stop()
         for (i in current until chunks.size) {
             val utteranceId = ++nextUtteranceId
@@ -747,7 +747,11 @@ class TtsController(
         )
     }
 
-    private fun persist(wasPlaying: Boolean, immediate: Boolean = false) {
+    private fun persist(
+        wasPlaying: Boolean,
+        immediate: Boolean = false,
+        background: Boolean = false,
+    ) {
         val chunk = chunks.getOrNull(current) ?: return
         if (bookUrl.isBlank()) return
         sessions.save(
@@ -767,6 +771,7 @@ class TtsController(
                 updatedAt = System.currentTimeMillis(),
             ),
             immediate,
+            background,
         )
     }
 
@@ -792,7 +797,7 @@ class TtsController(
             if (!active || index < current) return
             current = index
             setState(chunkState(index, TtsStatus.Playing))
-            persist(wasPlaying = true)
+            persist(wasPlaying = true, immediate = true, background = true)
         }
 
         override fun onDone(utteranceId: Int) {

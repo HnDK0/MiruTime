@@ -252,13 +252,12 @@ class BackupRestoreInstrumentedTest {
         databasePath = liveDbFile,
         settingsStore = settingsStore,
         appDataDir = root,
-        importDatabase = { sourceFile, coverPathFor, journalId, journalNow, onBooksReady ->
+        importDatabase = { sourceFile, coverPathFor, journalId, journalNow ->
             val source = libraryDatabaseAt(context, sourceFile)
             try {
                 live.importLibraryBackup(
                     source = source.libraryDao(),
                     coverPathFor = coverPathFor,
-                    onBooksReady = onBooksReady,
                     journalId = journalId,
                     journalNow = journalNow,
                 )

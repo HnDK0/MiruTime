@@ -40,9 +40,10 @@ data class LibraryImportReport(
  * Imports [source] into this database inside a single transaction.
  *
  * [coverPathFor] lets the host rewrite a cover path whose file name depends on
- * `bookId` (the app stores covers under `covers/<bookId>/cover`). [onBooksReady]
+ * `bookId` (the app stores covers under `covers/<bookId>/cover`). The caller
+ * copies staged files after this transaction commits, using the returned maps.
  * runs after book/cover ids are known and before the transaction commits, so
- * callers can copy the matching files and still roll everything back together.
+ * callers can copy the matching files after the transaction commits.
  * [preservedCovers] are existing user-override covers whose file must not be
  * overwritten by the backup.
  */
@@ -51,10 +52,6 @@ suspend fun LibraryDatabase.importLibraryBackup(
     pageSize: Int = DEFAULT_IMPORT_PAGE_SIZE,
     coverPathFor: (oldBookId: Long, newBookId: Long, oldPath: String?) -> String? =
         { _, _, path -> path },
-    onBooksReady: suspend (
-        bookIds: Map<Long, Long>,
-        preservedCovers: Set<Long>,
-    ) -> Unit = { _, _ -> },
     journalId: Long? = null,
     journalNow: Long = 0L,
 ): LibraryImportReport {
@@ -64,7 +61,6 @@ suspend fun LibraryDatabase.importLibraryBackup(
             target = libraryDao(),
             pageSize = pageSize,
             coverPathFor = coverPathFor,
-            onBooksReady = onBooksReady,
             journalId = journalId,
             journalNow = journalNow,
         )
@@ -86,7 +82,6 @@ private suspend fun importLibraryBackupRows(
     target: LibraryDao,
     pageSize: Int,
     coverPathFor: (Long, Long, String?) -> String?,
-    onBooksReady: suspend (Map<Long, Long>, Set<Long>) -> Unit,
     journalId: Long?,
     journalNow: Long,
 ): LibraryImportReport {
@@ -136,7 +131,6 @@ private suspend fun importLibraryBackupRows(
             ),
         )
     }
-    onBooksReady(bookIds.toMap(), preservedCovers.toSet())
 
     val localBookTargetIds = localBookIds.mapNotNull { bookIds[it] }.toHashSet()
     val chapterIds = LinkedHashMap<Long, Long>()

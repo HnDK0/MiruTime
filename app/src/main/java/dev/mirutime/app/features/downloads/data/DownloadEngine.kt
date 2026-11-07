@@ -9,6 +9,7 @@ import dev.mirutime.app.features.book.data.ChapterFailureKind
 import dev.mirutime.app.features.finder.data.isLocalFileBook
 import dev.mirutime.app.features.library.data.LocalBookProvider
 import dev.mirutime.data.library.BookEntity
+import dev.mirutime.data.library.BookWriteLocks
 import dev.mirutime.data.library.ChapterBodyEntity
 import dev.mirutime.data.library.ChapterEntity
 import dev.mirutime.data.library.ChapterPageEntity
@@ -19,6 +20,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -53,11 +55,11 @@ class DownloadEngine(
     // in tests/previews that do not exercise translation.
     private val translationQueue: dev.mirutime.app.features.translation.data.DownloadTranslationQueue? = null,
     private val scheduleTranslation: ((Long) -> Unit)? = null,
+    private val bookLocks: BookWriteLocks = BookWriteLocks(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     // Serializes the small commit/cancel windows only; network work stays
     // outside the lock so pause/cancel is never blocked by a slow page.
-    private val bookLocks = ConcurrentHashMap<Long, Mutex>()
 
     fun observeAll(): Flow<List<DownloadTaskEntity>> = store.tasksFlow()
 
@@ -107,13 +109,15 @@ class DownloadEngine(
             return@withContext EnqueueResult(reason = EnqueueFailure.NO_CHAPTERS)
         }
         val kind = kindOf(book)
-        val existing = store.tasks(book.bookId).associateBy { it.chapterId }
-        val byIndex = chapters.associateBy { it.idx }
-        val requested = indexes ?: chapters.map { it.idx }
         var queued = 0
         var skipped = 0
         var unknown = 0
         val requestedChapters = ArrayList<ChapterEntity>()
+        val pendingTasks = ArrayList<DownloadTaskEntity>()
+        val requested = indexes ?: chapters.map { it.idx }
+        lockFor(book.bookId).withLock {
+        val existing = store.tasks(book.bookId).associateBy { it.chapterId }
+        val byIndex = chapters.associateBy { it.idx }
         requested.asSequence().filter { it > 0 }.distinct().forEach { index ->
             val chapter = byIndex[index]
             if (chapter == null) {
@@ -124,13 +128,11 @@ class DownloadEngine(
             val current = existing[chapter.chapterId]
             if (isStored(kind, chapter.chapterId)) {
                 if (current != null && current.state != DownloadState.COMPLETED.wire) {
-                    store.saveTask(
-                        current.copy(
-                            state = DownloadState.COMPLETED.wire,
-                            progress = 1.0,
-                            error = null,
-                            updatedAt = clock(),
-                        ),
+                    pendingTasks += current.copy(
+                        state = DownloadState.COMPLETED.wire,
+                        progress = 1.0,
+                        error = null,
+                        updatedAt = clock(),
                     )
                 }
                 skipped++
@@ -158,10 +160,22 @@ class DownloadEngine(
                 createdAt = now,
                 updatedAt = now,
             )
-            store.saveTask(task)
+            pendingTasks += task
             queued++
         }
-        if (queued > 0) scheduler.enqueue(book.bookId)
+        // Large books must not issue one Room upsert per chapter. Chunks stay
+        // short and cancellation is checked between them.
+        try {
+            for (chunk in pendingTasks.chunked(DOWNLOAD_TASK_CHUNK)) {
+                currentCoroutineContext().ensureActive()
+                store.saveTasks(chunk)
+            }
+        } finally {
+            // A cancellation between chunks must not leave QUEUED rows with no
+            // worker; reconcile would otherwise wait until the next process start.
+            if (queued > 0) scheduler.enqueue(book.bookId)
+        }
+        }
         val translation = if (!translateAfter) {
             null
         } else if (translationQueue == null) {
@@ -1069,7 +1083,7 @@ class DownloadEngine(
         }
 
     private fun lockFor(bookId: Long): Mutex =
-        bookLocks.getOrPut(bookId) { Mutex() }
+        bookLocks.mutex(bookLocks.bookKey(bookId))
 
     // Legacy FAILED rows from before NEEDS_SOURCE_ACTION existed still carry
     // the CF/login reason; only those are re-armed by the source-action flow.
@@ -1116,3 +1130,5 @@ class DownloadEngine(
         )
     }
 }
+
+private const val DOWNLOAD_TASK_CHUNK = 200

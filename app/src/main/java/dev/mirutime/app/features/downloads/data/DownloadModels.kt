@@ -234,6 +234,9 @@ interface DownloadStore {
     suspend fun tasks(bookId: Long): List<DownloadTaskEntity>
     suspend fun task(id: Long): DownloadTaskEntity?
     suspend fun saveTask(task: DownloadTaskEntity): Long
+    suspend fun saveTasks(tasks: List<DownloadTaskEntity>) {
+        tasks.forEach { saveTask(it) }
+    }
     suspend fun deleteTask(id: Long)
     suspend fun deleteTasks(bookId: Long)
     suspend fun activeBookIds(): List<Long>
