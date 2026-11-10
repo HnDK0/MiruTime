@@ -2,6 +2,7 @@ package dev.mirutime.uikit
 
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Shapes
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 // === Shape scale ===
@@ -45,9 +46,9 @@ object MiruSpace {
 val CoverInset = 4.dp
 
 // === Size grid ===
-// Rule: visual size and touch size are separate. Primary actions keep a
-// 48dp hit area; dense list rows keep 40dp. The visible shape may be smaller
-// (40 / 32). Text: body 12sp, labels 11sp, meta 10sp.
+// Rule: visual size and touch size are separate. Comfortable actions keep a
+// 48dp hit area; dense surfaces use the compact ladder below. The visible
+// shape may be smaller. Text: body 12sp, labels 11sp, meta 10sp.
 object MiruSize {
     val Touch = 48.dp
     val Control = 40.dp      // round icon buttons and field rows (visual), 6dp radius
@@ -59,6 +60,10 @@ object MiruSize {
     val ButtonPrimary = 48.dp // the one loud action of a screen
     val Row = 48.dp          // single-line list rows (tools, settings)
     val RowDense = 40.dp     // dense list rows (chapters) with compact meta
+    val RowCompact = 32.dp   // compact list rows (dense chapters, metadata)
+    val ControlCompact = 28.dp // smallest compact control face
+    val ControlCompactLarge = 32.dp // compact control face with a text label
+    val ChipCompact = Chip   // compact chip face in a dense rail
     val IconSlot = 20.dp     // non-interactive glyph slot next to a row title
     val NarrowContent = 340.dp // stack paired actions below this content width
     val StatStripHeight = 56.dp // compact stat row; heightIn lets it grow at large text
@@ -90,6 +95,12 @@ object MiruSize {
     val SliderLabelWidth = 56.dp
     val SliderValueWidth = 56.dp
 }
+
+// Touch target for compact controls: the interactive surface plus 8dp, clamped
+// to [32dp, 48dp]. Surfaces larger than 48dp keep their own size.
+// Full-row targets use the row height directly; sliders use the thumb.
+fun compactTouchTarget(surface: Dp): Dp =
+    maxOf(surface, (surface + 8.dp).coerceIn(32.dp, 48.dp))
 
 val MiruShapes = Shapes(
     extraSmall = RoundedCornerShape(MiruRadius.Cover),

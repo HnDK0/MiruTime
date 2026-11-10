@@ -34,6 +34,10 @@ import kotlin.math.roundToInt
 // MiruTime's slider: an 8dp pill track and a 26dp iOS/Telegram-style white
 // knob with a soft shadow, inside the 48dp touch lane. The value label lives
 // in the settings row (right side), never above the thumb.
+//
+// [compact] is the same control at plate scale for the floating TTS strip: a
+// 24dp lane, a 2dp track and a 4dp accent knob. The white knob and its shadow
+// are dropped there — at 24dp they read as dirt, not as depth.
 @Composable
 fun MiruSlider(
     value: Float,
@@ -44,13 +48,19 @@ fun MiruSlider(
     enabled: Boolean = true,
     contentDescription: String? = null,
     onValueChangeFinished: (() -> Unit)? = null,
+    compact: Boolean = false,
 ) {
     val extra = LocalMiruExtraColors.current
     val currentOnValueChange by rememberUpdatedState(onValueChange)
     val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
     val density = LocalDensity.current
-    val thumbRadius = with(density) { 13.dp.toPx() }
-    val trackHeight = with(density) { 8.dp.toPx() }
+    val thumbRadius = with(density) {
+        (if (compact) MiruSpace.Xs else 13.dp).toPx()
+    }
+    val trackHeight = with(density) {
+        (if (compact) MiruSpace.Xxs else 8.dp).toPx()
+    }
+    val laneHeight = if (compact) MiruSize.Chip else MiruSize.Touch
     val activeColor = if (enabled) extra.accent else extra.muted
     val trackColor = extra.muted.copy(alpha = 0.20f)
     var dragValue by remember { mutableStateOf<Float?>(null) }
@@ -68,7 +78,7 @@ fun MiruSlider(
     Canvas(
         modifier = modifier
             .fillMaxWidth()
-            .height(MiruSize.Touch)
+            .height(laneHeight)
             .semantics {
                 if (!enabled) disabled()
                 if (contentDescription != null) this.contentDescription = contentDescription
@@ -178,24 +188,30 @@ fun MiruSlider(
         val pressed = dragValue != null
         val radius = thumbRadius * if (pressed) 1.08f else 1f
         val thumbCenter = Offset(trackLeft + activeWidth, centerY)
-        // iOS/Telegram knob: white circle, hairline ring and a soft drop shadow,
-        // so it reads on both light and dark sheets.
-        drawCircle(
-            color = Color.Black.copy(alpha = 0.18f),
-            radius = radius,
-            center = Offset(thumbCenter.x, thumbCenter.y + 1.5.dp.toPx()),
-        )
-        drawCircle(
-            color = if (enabled) Color.White else extra.muted.copy(alpha = 0.55f),
-            radius = radius,
-            center = thumbCenter,
-        )
-        drawCircle(
-            color = extra.muted.copy(alpha = 0.28f),
-            radius = radius,
-            center = thumbCenter,
-            style = Stroke(width = 1.dp.toPx()),
-        )
+        if (compact) {
+            // A filled accent dot: at 24dp a white knob, a ring and a shadow
+            // have no room to read as depth and just look dirty.
+            drawCircle(color = activeColor, radius = radius, center = thumbCenter)
+        } else {
+            // iOS/Telegram knob: white circle, hairline ring and a soft drop
+            // shadow, so it reads on both light and dark sheets.
+            drawCircle(
+                color = Color.Black.copy(alpha = 0.18f),
+                radius = radius,
+                center = Offset(thumbCenter.x, thumbCenter.y + 1.5.dp.toPx()),
+            )
+            drawCircle(
+                color = if (enabled) Color.White else extra.muted.copy(alpha = 0.55f),
+                radius = radius,
+                center = thumbCenter,
+            )
+            drawCircle(
+                color = extra.muted.copy(alpha = 0.28f),
+                radius = radius,
+                center = thumbCenter,
+                style = Stroke(width = 1.dp.toPx()),
+            )
+        }
     }
 }
 

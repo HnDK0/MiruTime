@@ -132,12 +132,7 @@ fun AppBottomSheet(
         onDismissRequest = onClose,
         modifier = modifier
             .widthIn(max = MiruSize.ContentMaxWidth)
-            .padding(start = MiruSpace.S, end = MiruSpace.S, bottom = MiruSpace.S)
-            // Lift the whole sheet above the on-screen keyboard so a focused
-            // field and the footer stay visible (FR-129/FR-130). This also
-            // shrinks BoxWithConstraints.maxHeight, so the 70% cap is computed
-            // against the keyboard-reduced height.
-            .imePadding(),
+            .padding(start = MiruSpace.S, end = MiruSpace.S, bottom = MiruSpace.S),
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         sheetMaxWidth = MiruSize.ContentMaxWidth,
         shape = RoundedCornerShape(MiruRadius.Sheet),
@@ -171,14 +166,20 @@ fun AppBottomSheet(
                 }
             }
         },
-        // Native IME padding still bounds the modal window. Navigation padding
-        // moves inside our footer so it cannot sit outside the seventy-percent cap.
+        // IME inset is applied inside the dialog content below; navigation
+        // padding moves inside our footer so it cannot sit outside the cap.
         contentWindowInsets = { WindowInsets(0) },
         // User rule: scrims stay semi-transparent (content shows through),
         // pinned explicitly instead of relying on the M3 default.
         scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.32f),
     ) {
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
+        BoxWithConstraints(
+            Modifier
+                .fillMaxWidth()
+                // Insets must be applied inside the dialog content; on the
+                // ModalBottomSheet window the IME inset is not delivered.
+                .imePadding(),
+        ) {
             val contentMaxHeight = sheetContentMaxHeight(
                 availableHeight = maxHeight,
                 dragHandleHeight = with(density) { dragHandleHeightPx.toDp() },
