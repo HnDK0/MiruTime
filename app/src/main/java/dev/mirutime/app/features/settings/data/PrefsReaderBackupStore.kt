@@ -16,6 +16,7 @@ class PrefsReaderBackupStore(
     context: Context,
     private val readerConfig: PrefsReaderConfigStore,
     private val onThemeRestored: () -> Unit = ::notifyThemePrefsChanged,
+    private val onRestored: () -> Unit = {},
 ) : ReaderBackupStore {
     private val appContext = context.applicationContext
 
@@ -46,6 +47,7 @@ class PrefsReaderBackupStore(
         if (!config || !tts || !theme) error("Could not save reader preferences")
         readerConfig.reload()
         onThemeRestored()
+        onRestored()
     }
 
     private fun prefs(name: String): SharedPreferences =

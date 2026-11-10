@@ -103,7 +103,7 @@ data class PersistedSettings(
     val backupDirectory: String = "",
     val backupMaxCount: Int = 5,
     val backupIntervalMinutes: Int = 1440,
-    val backupIncludeImages: Boolean = false,
+    val backupIncludeImages: Boolean = true,
     val backupIncludeSettings: Boolean = true,
     val backupIncludePlugins: Boolean = true,
     val backupIncludeHistoryOnly: Boolean = false,

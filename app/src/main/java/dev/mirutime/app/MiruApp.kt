@@ -2,8 +2,15 @@ package dev.mirutime.app
 
 import android.app.Application
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
+import android.os.Looper
+import android.os.StrictMode
 import androidx.compose.runtime.snapshotFlow
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import dev.mirutime.app.core.AndroidCoverDecoder
@@ -11,14 +18,19 @@ import dev.mirutime.app.core.RecoverySweeper
 import dev.mirutime.core.log.CrashReporter
 import dev.mirutime.core.log.MiruFileLogger
 import dev.mirutime.core.log.MiruLog
+import dev.mirutime.feature.tts.TtsAppVisibility
 import dev.mirutime.app.di.MigrationGraph
 import dev.mirutime.app.di.PluginGraph
 import dev.mirutime.app.di.ReaderGraph
 import dev.mirutime.app.di.TranslationGraph
 import dev.mirutime.app.di.host.AndroidFileSystem
 import dev.mirutime.app.features.book.data.BookEpubExporter
+import dev.mirutime.app.features.book.data.BookCbzExporter
+import dev.mirutime.app.features.book.data.CbzBookInfo
 import dev.mirutime.app.features.book.data.PluginBookDataProvider
 import dev.mirutime.app.features.book.data.PluginBookIndex
+import dev.mirutime.app.features.book.data.pageBytesFor
+import dev.mirutime.app.features.book.data.pageFailureFor
 import dev.mirutime.app.features.book.data.cachedTranslationRequest
 import dev.mirutime.app.features.downloads.data.DownloadEngine
 import dev.mirutime.app.features.downloads.data.DownloadNotifier
@@ -27,6 +39,8 @@ import dev.mirutime.app.features.downloads.data.LocalDownloadFileStore
 import dev.mirutime.app.features.downloads.data.RoomDownloadStore
 import dev.mirutime.app.features.downloads.data.WorkManagerDownloadScheduler
 import dev.mirutime.app.features.finder.data.AndroidSafResolver
+import dev.mirutime.app.features.finder.data.CatalogSessionRegistry
+import dev.mirutime.app.features.finder.data.isLocalFileBook
 import dev.mirutime.app.features.finder.data.LocalCatalogMetadataCache
 import dev.mirutime.app.features.finder.data.PluginFinderDataProvider
 import dev.mirutime.app.features.finder.data.LocalSafBookSource
@@ -46,6 +60,8 @@ import dev.mirutime.app.features.migration.data.MigrationSourceGate
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.settings.data.BackupRestoreService
 import dev.mirutime.app.features.settings.data.BackupService
+import dev.mirutime.app.features.settings.data.LocalSourcesBackup
+import dev.mirutime.app.features.settings.data.LocalSourcesBackupStore
 import dev.mirutime.app.features.settings.data.PrefsReaderBackupStore
 import dev.mirutime.app.features.settings.data.SettingsStore
 import dev.mirutime.app.features.settings.data.SharedPreferencesKeyValueStore
@@ -85,6 +101,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 
 class MiruApp : Application(), SingletonImageLoader.Factory {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -194,6 +211,15 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             bookProvider = pluginBookProvider,
         )
     }
+    // One catalogue visit outlives its composable: an in-flight page keeps
+    // loading while a book is open and lands when the user comes back.
+    internal val catalogSessions: CatalogSessionRegistry by lazy {
+        CatalogSessionRegistry(
+            page = finderProvider::page,
+            localSnapshot = finderProvider::localCatalogSnapshot,
+            localPage = finderProvider::localCatalogPage,
+        )
+    }
     // Migration writes DB rows and app-private files; per-novel settings live
     // in AppSettings and are flushed through the same SettingsStore.
     val migrationGraph: MigrationGraph by lazy {
@@ -232,6 +258,19 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
     }
     val localSourceFolders: LocalSourceFolders by lazy {
         LocalSourceFolders(this, localSafRegistry)
+    }
+    private val localSourcesBackupStore: LocalSourcesBackupStore by lazy {
+        object : LocalSourcesBackupStore {
+            override fun snapshot(): LocalSourcesBackup {
+                val (books, manga) = localSourceFolders.snapshotFolders()
+                return LocalSourcesBackup(books, manga, localSafRegistry.snapshot())
+            }
+
+            override fun restore(backup: LocalSourcesBackup) {
+                localSourceFolders.restoreFolders(backup.books, backup.manga)
+                localSafRegistry.restore(backup.registry)
+            }
+        }
     }
     // Embedded metadata/covers for unimported catalogue cards. Cache-only:
     // clearing cacheDir just re-reads the SAF documents.
@@ -310,11 +349,24 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             },
             chapterDelayMs = { AppSettings.downloadDelayMs.toLong() },
             fetchPage = { bookUrl, url ->
-                PluginBookIndex.sourceForBook(bookUrl)?.let { sourceId ->
-                    pluginGraph.fetchImage(sourceId, url, pluginGraph.imageHeadersFor(url))
-                        .takeIf { it.status in 200..299 }
-                        ?.bytes
-                }
+                // An image needs no plugin handle; the reader fetches covers and
+                // pages the same way. The status is the only reliable failure
+                // signal, so map it before it becomes a generic null.
+                val sourceId = PluginBookIndex.sourceForBook(bookUrl).orEmpty()
+                val host = runCatching { java.net.URI(url).host }.getOrNull().orEmpty()
+                val image = pluginGraph.fetchImage(
+                    sourceId,
+                    url,
+                    pluginGraph.imageHeadersFor(url),
+                    timeoutMs = MangaPageFetchTimeoutMs,
+                )
+                MiruLog.event(
+                    "downloads",
+                    "page",
+                    "host" to host,
+                    "status" to image.status,
+                )
+                pageBytesFor(image.status, image.bytes)
             },
             translationQueue = downloadTranslationQueue,
             scheduleTranslation = { bookId -> translationScheduler.enqueue(bookId) },
@@ -322,16 +374,36 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
         )
     }
 
+    /** A real network return owns the WAITING_NETWORK resume. */
+    private fun registerNetworkRetry() {
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return
+        runCatching {
+            manager.registerDefaultNetworkCallback(
+                object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        MiruLog.event("downloads", "network-available")
+                        appScope.launch { downloadEngine.retryWaitingNetwork() }
+                    }
+                },
+            )
+        }.onFailure {
+            MiruLog.w("downloads", "network-callback failed ${it.javaClass.simpleName}")
+        }
+    }
+
     /** Schedules the translation queue only when a PENDING intent exists. */
-    suspend fun schedulePendingTranslations(bookId: Long) {
-        val pending = libraryRepository.chapterTranslationQueueRows(bookId)
+    suspend fun schedulePendingTranslations(bookId: Long) {        val pending = libraryRepository.chapterTranslationQueueRows(bookId)
             .any { it.status.equals(DownloadTranslationQueue.STATUS_PENDING, ignoreCase = true) }
         if (pending) translationScheduler.enqueue(bookId)
     }
     // Manual backup: consistent DB snapshot + settings + in-library local
     // book files. Restore is a separate lane.
     val readerBackupStore: PrefsReaderBackupStore by lazy {
-        PrefsReaderBackupStore(this, readerGraph.configStore)
+        PrefsReaderBackupStore(
+            context = this,
+            readerConfig = readerGraph.configStore,
+            onRestored = { readerGraph.tts.reloadSettings() },
+        )
     }
     val backupService: BackupService by lazy {
         BackupService(
@@ -339,6 +411,8 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             databasePath = getDatabasePath("mirutime.db"),
             library = libraryRepository,
             readerSnapshot = readerBackupStore::snapshot,
+            pluginKvSnapshot = pluginGraph.keyValueStore::snapshot,
+            localSourcesSnapshot = localSourcesBackupStore::snapshot,
         )
     }
     // Live restore: imports into the open Room database in one transaction.
@@ -358,6 +432,8 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             database = libraryDatabase,
             reloadPlugins = { pluginGraph.reload() },
             readerStore = readerBackupStore,
+            pluginKvStore = pluginGraph.keyValueStore,
+            localSourcesStore = localSourcesBackupStore,
             clearImageCaches = ::clearImageCaches,
             repair = {
                 libraryRepository.repairKeyUrls(
@@ -409,6 +485,38 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
         withContext(Dispatchers.Main.immediate) {
             videoDownloadManager.removeForBooks(bookUrls)
         }
+    }
+    // CBZ export: only downloaded remote chapters. Local manga is already files
+    // on the device, so the exporter refuses it instead of copying it around.
+    internal val bookCbzExporter: BookCbzExporter by lazy {
+        BookCbzExporter(
+            isLocalBook = { url ->
+                isLocalFileBook(url) || LocalBookProvider.isLocalBook(url)
+            },
+            bookInfo = { url ->
+                pluginBookProvider.book(url)?.let { book ->
+                    CbzBookInfo(
+                        title = book.title,
+                        description = book.description.orEmpty(),
+                        author = book.author,
+                        genres = book.genres,
+                    )
+                }
+            },
+            chapters = { url ->
+                pluginBookProvider.cachedChapters(url) ?: pluginBookProvider.chapters(url)
+            },
+            pagePaths = { url, index ->
+                val book = libraryRepository.book(url)
+                val chapter = book?.let { libraryRepository.chapterByIndex(it.bookId, index) }
+                val pages = chapter?.let { libraryRepository.chapterPage(it.chapterId) }
+                runCatching {
+                    val array = JSONArray(pages?.pagePathsJson.orEmpty())
+                    List(array.length()) { array.optString(it) }
+                }.getOrDefault(emptyList()).filter { it.isNotBlank() }
+            },
+            tempDir = cacheDir,
+        )
     }
     // EPUB export: provider + local-cover-only + cached translations. Remote
     // artwork goes through the plugin graph (same UA/Referer registry). The
@@ -489,20 +597,24 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        installStrictMode()
         // Verbose network/diagnostic lines exist in debug builds only; release
         // keeps warn/error/event. Core/KMP cannot read BuildConfig.
         MiruLog.debugEnabled = BuildConfig.DEBUG
         // Install logging before everything else: a startup failure must still
         // leave a FATAL record the user can export.
-        MiruFileLogger.install(this)
+        runBlocking(Dispatchers.IO) {
+            MiruFileLogger.install(this@MiruApp)
+            PluginBookIndex.attach(this@MiruApp)
+        }
         CrashReporter.install()
         MiruLog.i("app", startupMarker())
         // Only crash recovery runs here: live restores are applied immediately
         // from Settings. If a process death interrupted one, finish it before
         // the first provider read.
-        val restoredSettings = try {
+        val recovered = try {
             runBlocking(Dispatchers.IO) {
-                restoreService.recoverInterruptedRestore().settings
+                restoreService.recoverInterruptedRestore()
             }
         } catch (e: CancellationException) {
             throw e
@@ -512,11 +624,25 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             MiruLog.e("app", "event=restore_recovery_failed", e)
             null
         }
+        if (recovered != null) {
+            MiruLog.event(
+                "backup",
+                "recovery",
+                "applied" to recovered.applied,
+                "error" to (recovered.error != null),
+            )
+            if (recovered.applied) {
+                // Early-return recovery does not rescan a half-written plugin
+                // dir; refresh the cheap repo URL now, bootstrap handles the rest.
+                pluginGraph.refreshRepoUrl()
+            }
+        }
+        val restoredSettings = recovered?.settings
         // Synchronous read: every screen must see saved keys/provider/backup
         // settings on its first composition. Writes stay on appScope (IO).
         AppSettings.applyPersisted(restoredSettings ?: settingsStore.load())
         startSettingsPersistence()
-        PluginBookIndex.attach(this)
+        registerNetworkRetry()
         appScope.launch {
             // Each step is independent: one recoverable failure must not skip
             // download reconciliation or translation re-arm for the session.
@@ -570,6 +696,19 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
         }
         // Warm the installed-plugin list once; screens read graph.installed.
         pluginGraph.bootstrap()
+        // The TTS overlay must know when the whole app leaves the foreground:
+        // one Activity stopping (reader -> library) is not "left the app".
+        ProcessLifecycleOwner.get().lifecycle.addObserver(
+            object : DefaultLifecycleObserver {
+                override fun onStart(owner: LifecycleOwner) {
+                    TtsAppVisibility.setForeground(true)
+                }
+
+                override fun onStop(owner: LifecycleOwner) {
+                    TtsAppVisibility.setForeground(false)
+                }
+            },
+        )
     }
 
     /**
@@ -587,6 +726,31 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
         }.getOrNull() ?: "unknown"
         return "STARTUP package=$packageName version=$version " +
             "sdk=${Build.VERSION.SDK_INT} device=${Build.MANUFACTURER} ${Build.MODEL}"
+    }
+
+    // Debug only: surface main-thread disk/network work as it happens. Known
+    // activity-level callbacks are allowlisted; everything else is a finding.
+    private fun installStrictMode() {
+        if (!BuildConfig.DEBUG) return
+        val builder = StrictMode.ThreadPolicy.Builder()
+            .detectDiskReads()
+            .detectDiskWrites()
+            .detectNetwork()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            builder.penaltyListener(java.util.concurrent.Executor { it.run() }) { violation ->
+                // The policy is process-wide; only the main thread is the bug.
+                if (Looper.myLooper() != Looper.getMainLooper()) return@penaltyListener
+                val stack = violation.stackTrace.joinToString("\n")
+                if (STRICT_MODE_ALLOWLIST.any { stack.contains(it) }) {
+                    MiruLog.d("strict-mode", "allowed policy violation")
+                } else {
+                    MiruLog.w("strict-mode", "policy violation\n$stack")
+                }
+            }
+        } else {
+            builder.penaltyLog()
+        }
+        StrictMode.setThreadPolicy(builder.build())
     }
 
     // One snapshotFlow over the persisted fields: settings screens keep
@@ -610,8 +774,19 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
     // Sequential, bounded pass over library books with no local cover. The
     // per-book mutex plus the local fast path mean a screen-triggered ensure
     // and this pass cannot double-fetch the same book.
+    /**
+     * Called after a live restore. Missing cover files were cleared from the
+     * DB by the restore service; this pass downloads them again without a
+     * process restart.
+     */
+    internal fun refreshCoversAfterRestore() {
+        MiruLog.event("covers", "backfill-after-restore")
+        appScope.launch { backfillCovers() }
+    }
+
     private suspend fun backfillCovers() {
         val books = runCatching { libraryRepository.libraryBooks() }.getOrNull() ?: return
+        MiruLog.event("covers", "backfill-start", "books" to books.size)
         val seen = HashSet<String>()
         var attempted = 0
         for (book in books) {
@@ -632,6 +807,7 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
                 }
             }
         }
+        MiruLog.event("covers", "backfill-end", "attempted" to attempted)
     }
 
     // Trim target for memory-pressure callbacks. Captured here instead of
@@ -689,5 +865,12 @@ private const val MAX_COVER_BACKFILL = 30
 // long enough to collapse a slider drag or a multi-field pair edit into one
 // SharedPreferences commit.
 private const val SETTINGS_DEBOUNCE_MS = 400L
+
+// StrictMode allowlist: activity-level preference writes predate the reader
+// scopes and are tracked separately; new stacks must not be added here.
+private val STRICT_MODE_ALLOWLIST = listOf(
+    "dev.mirutime.app.MainActivity",
+    "ImageLoaderFactoryKt.buildImageLoader",
+)
 
 private const val MangaPageFetchTimeoutMs = 30_000L

@@ -53,6 +53,7 @@ class SettingsStoreTest {
         assertEquals(2, loaded.backupMaxCount)
         assertEquals(PersistedSettings().geminiModel, loaded.geminiModel)
         assertEquals(PersistedSettings().backupIntervalMinutes, loaded.backupIntervalMinutes)
+        assertTrue(loaded.backupIncludeImages)
     }
 
     @Test

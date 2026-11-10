@@ -136,6 +136,9 @@ dependencies {
     implementation(libs.compose.material.icons.extended)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.activity.compose)
+    // ProcessLifecycleOwner: the TTS overlay reacts to the whole app leaving the
+    // foreground, not to one Activity stopping.
+    implementation(libs.androidx.lifecycle.process)
     implementation(libs.navigation.compose)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.coil.compose)

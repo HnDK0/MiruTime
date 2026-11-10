@@ -57,9 +57,6 @@ class BackupServiceTest {
                 format = "EPUB",
                 coverLocalPath = cover.absolutePath,
                 bodyPaths = listOf("local_books/local-books/novel/chapters/1.html"),
-                pagePathsJson = listOf(
-                    """["local_books/local-manga/folder/chapters/1/00001.jpg"]""",
-                ),
             ),
             LocalBackupBook(
                 bookId = 8,
@@ -70,7 +67,6 @@ class BackupServiceTest {
                 format = "CBZ",
                 coverLocalPath = null,
                 bodyPaths = emptyList(),
-                pagePathsJson = emptyList(),
             ),
             LocalBackupBook(
                 bookId = 9,
@@ -81,7 +77,6 @@ class BackupServiceTest {
                 format = "EPUB",
                 coverLocalPath = null,
                 bodyPaths = emptyList(),
-                pagePathsJson = emptyList(),
             ),
             LocalBackupBook(
                 bookId = 10,
@@ -92,7 +87,6 @@ class BackupServiceTest {
                 format = "EPUB",
                 coverLocalPath = outside.absolutePath,
                 bodyPaths = emptyList(),
-                pagePathsJson = emptyList(),
             ),
         )
 
@@ -103,7 +97,20 @@ class BackupServiceTest {
             cacheDir = cacheDir,
             appVersion = "1.2.3",
             localBooks = { books },
+            localCovers = {
+                listOf(
+                    LocalBackupCover(
+                        bookId = 10,
+                        installId = "plugin-one",
+                        title = "Outside",
+                        coverLocalPath = outside.absolutePath,
+                        isUserOverride = false,
+                    ),
+                )
+            },
             settingsSnapshot = { settings },
+            pluginKvSnapshot = { PluginKvBackup() },
+            localSourcesSnapshot = { LocalSourcesBackup() },
             snapshotDatabase = { target, _ ->
                 snapshotTarget = target
                 target.writeText("db-bytes")
@@ -117,9 +124,9 @@ class BackupServiceTest {
 
         assertTrue(result.error, result.success)
         assertEquals(3, result.localBookCount)
-        assertEquals(5, result.localFileCount)
+        assertEquals(4, result.localFileCount)
         assertEquals(0, result.readerFileCount)
-        assertEquals(9, result.entryCount)
+        assertEquals(10, result.entryCount)
         assertFalse(snapshotTarget!!.exists())
 
         val entries = readZip(output.toByteArray())
@@ -128,17 +135,19 @@ class BackupServiceTest {
                 "manifest.json",
                 "settings.json",
                 "reader.json",
+                "settings/plugin-kv.json",
+                "settings/local-sources.json",
                 "database/mirutime.db",
                 "files/local_books/local-books/novel.epub",
                 "files/local_books/local-books/novel/chapters/1.html",
                 "files/covers/7/cover",
-                "files/local_books/local-manga/folder/chapters/1/00001.jpg",
                 "files/_external/10/cover/cover.jpg",
             ),
             entries.keys.filterNot { it.endsWith("/") }.toSet(),
         )
         assertTrue(entries.keys.none { it.contains("hidden.epub") })
         assertTrue(entries.keys.none { it.contains("image_cache") })
+        assertTrue(entries.keys.none { it.contains("local-manga") })
         assertTrue(entries.keys.any { it == "files/covers/7/cover" })
 
         val manifest = BackupJson.decodeFromString(
@@ -157,7 +166,7 @@ class BackupServiceTest {
         assertEquals(sha256Hex(entries.getValue("database/mirutime.db")), manifest.database.sha256)
         assertEquals(sha256Hex(entries.getValue("settings.json")), manifest.settings?.sha256)
         assertEquals(3, manifest.counts.localBooks)
-        assertEquals(5, manifest.counts.localFiles)
+        assertEquals(4, manifest.counts.localFiles)
         manifest.files.forEach { file ->
             assertEquals(file.sha256, sha256Hex(entries.getValue(file.path)))
             assertEquals(file.size, entries.getValue(file.path).size.toLong())
@@ -179,6 +188,51 @@ class BackupServiceTest {
         )
     }
 
+
+    @Test
+    fun `archive does not carry device-local backup folders`() = runBlocking {
+        val root = tempDir()
+        val filesDir = File(root, "files").apply { mkdirs() }
+        val cacheDir = File(root, "cache").apply { mkdirs() }
+        val service = BackupService(
+            databasePath = File(root, "live.db"),
+            filesDir = filesDir,
+            cacheDir = cacheDir,
+            appVersion = "test",
+            localBooks = { emptyList() },
+            localCovers = { emptyList() },
+            settingsSnapshot = {
+                PersistedSettings(
+                    openAiKeys = "key",
+                    backupDirectory = "content://tree/device-backup",
+                    exportDirectory = "content://tree/device-export",
+                )
+            },
+            pluginKvSnapshot = { PluginKvBackup() },
+            localSourcesSnapshot = { LocalSourcesBackup() },
+            snapshotDatabase = { target, _ ->
+                target.writeText("db")
+                DatabaseSnapshot(
+                    file = target,
+                    size = target.length(),
+                    sha256 = sha256Hex("db".encodeToByteArray()),
+                    totalBooks = 0,
+                    libraryBooks = 0,
+                )
+            },
+        )
+
+        val output = ByteArrayOutputStream()
+        val result = service.createBackup(output)
+
+        assertTrue(result.error, result.success)
+        val settings = Json.parseToJsonElement(
+            readZip(output.toByteArray()).getValue("settings.json").decodeToString(),
+        ).jsonObject
+        assertEquals("", settings.getValue("backupDirectory").jsonPrimitive.content)
+        assertEquals("", settings.getValue("exportDirectory").jsonPrimitive.content)
+        assertEquals("key", settings.getValue("openAiKeys").jsonPrimitive.content)
+    }
 
     @Test
     fun `reader preferences and assets are included with hashes`() = runBlocking {
@@ -297,6 +351,8 @@ class BackupServiceTest {
             cacheDir = cacheDir,
             appVersion = "test",
             localBooks = { emptyList() },
+            pluginKvSnapshot = { PluginKvBackup() },
+            localSourcesSnapshot = { LocalSourcesBackup() },
             snapshotDatabase = { file, _ ->
                 target = file
                 error("snapshot failed")
@@ -402,8 +458,8 @@ class BackupServiceTest {
             root,
             filesDir,
             cacheDir,
-            bookCount = 12,
-            libraryBookCount = 7,
+            snapshotBookCount = 12,
+            snapshotLibraryCount = 7,
         )
         val output = ByteArrayOutputStream()
 
@@ -480,8 +536,8 @@ class BackupServiceTest {
         cacheDir: File,
         books: List<LocalBackupBook> = emptyList(),
         covers: List<LocalBackupCover> = emptyList(),
-        bookCount: Int = 0,
-        libraryBookCount: Int = 0,
+        snapshotBookCount: Int = 0,
+        snapshotLibraryCount: Int = 0,
         seenHistoryFlags: MutableList<Boolean>? = null,
         readerSnapshot: () -> ReaderBackupPrefs = { ReaderBackupPrefs() },
     ) = BackupService(
@@ -491,13 +547,19 @@ class BackupServiceTest {
         appVersion = "test",
         localBooks = { books },
         localCovers = { covers },
-        bookCount = { bookCount },
-        libraryBookCount = { libraryBookCount },
         readerSnapshot = readerSnapshot,
+        pluginKvSnapshot = { PluginKvBackup() },
+        localSourcesSnapshot = { LocalSourcesBackup() },
         snapshotDatabase = { target, includeHistoryOnly ->
             seenHistoryFlags?.add(includeHistoryOnly)
             target.writeText("db")
-            DatabaseSnapshot(target, target.length(), sha256Hex("db".encodeToByteArray()))
+            DatabaseSnapshot(
+                file = target,
+                size = target.length(),
+                sha256 = sha256Hex("db".encodeToByteArray()),
+                totalBooks = snapshotBookCount,
+                libraryBooks = snapshotLibraryCount,
+            )
         },
     )
 
@@ -524,7 +586,6 @@ class BackupServiceTest {
                 format = "EPUB",
                 coverLocalPath = "covers/1/cover",
                 bodyPaths = listOf("local_books/book-body.html"),
-                pagePathsJson = listOf("""["local_books/book-page.jpg"]"""),
             ),
             LocalBackupBook(
                 bookId = 2,
@@ -535,7 +596,6 @@ class BackupServiceTest {
                 format = "CBZ",
                 coverLocalPath = null,
                 bodyPaths = emptyList(),
-                pagePathsJson = emptyList(),
             ),
             LocalBackupBook(
                 bookId = 3,
@@ -546,7 +606,6 @@ class BackupServiceTest {
                 format = "EPUB",
                 coverLocalPath = "covers/3/cover",
                 bodyPaths = emptyList(),
-                pagePathsJson = listOf("""["remote/pages/3.jpg"]"""),
             ),
         )
         val service = requiredService(root, filesDir, cacheDir, books)
@@ -558,7 +617,7 @@ class BackupServiceTest {
         )
 
         assertTrue(result.error, result.success)
-        assertEquals(4, result.localFileCount)
+        assertEquals(2, result.localFileCount)
         assertEquals(0, result.pluginFileCount)
         val entries = readZip(output.toByteArray())
         assertEquals(
@@ -567,11 +626,11 @@ class BackupServiceTest {
                 "database/mirutime.db",
                 "files/local_books/book.epub",
                 "files/local_books/book-body.html",
-                "files/local_books/book-page.jpg",
-                "files/local_books/manga/folder/001.jpg",
             ),
             entries.keys,
         )
+        assertFalse(entries.containsKey("files/local_books/book-page.jpg"))
+        assertFalse(entries.containsKey("files/local_books/manga/folder/001.jpg"))
         assertFalse(entries.containsKey("files/covers/1/cover"))
         assertFalse(entries.containsKey("files/covers/3/cover"))
         assertFalse(entries.containsKey("files/remote/pages/3.jpg"))
@@ -583,7 +642,7 @@ class BackupServiceTest {
         assertFalse(manifest.imagesIncluded)
         assertFalse(manifest.pluginsIncluded)
         assertEquals(null, manifest.settings)
-        assertEquals(4, manifest.files.size)
+        assertEquals(2, manifest.files.size)
         manifest.files.forEach { file ->
             assertEquals(file.sha256, sha256Hex(entries.getValue(file.path)))
             assertEquals(file.size, entries.getValue(file.path).size.toLong())
@@ -604,7 +663,6 @@ class BackupServiceTest {
             format = "EPUB",
             coverLocalPath = null,
             bodyPaths = emptyList(),
-            pagePathsJson = emptyList(),
         )
         val service = requiredService(root, filesDir, cacheDir, listOf(book))
 
@@ -631,7 +689,6 @@ class BackupServiceTest {
             format = "EPUB",
             coverLocalPath = null,
             bodyPaths = listOf("local_books/missing.html"),
-            pagePathsJson = emptyList(),
         )
         val service = requiredService(root, filesDir, cacheDir, listOf(book))
 
@@ -644,7 +701,7 @@ class BackupServiceTest {
     }
 
     @Test
-    fun `local manga with missing page fails backup`() = runBlocking {
+    fun `local manga content is never packed`() = runBlocking {
         val root = tempDir()
         val filesDir = File(root, "files").apply { mkdirs() }
         val cacheDir = File(root, "cache").apply { mkdirs() }
@@ -652,22 +709,21 @@ class BackupServiceTest {
         val book = LocalBackupBook(
             bookId = 43,
             installId = "local-manga",
-            title = "Broken manga",
+            title = "Manga",
             inLibrary = true,
             copyPath = "local_books/manga/folder",
             format = "CBZ",
             coverLocalPath = null,
             bodyPaths = emptyList(),
-            pagePathsJson = listOf("""["local_books/manga/missing-page.jpg"]"""),
         )
         val service = requiredService(root, filesDir, cacheDir, listOf(book))
+        val output = ByteArrayOutputStream()
 
-        val result = service.createBackup(ByteArrayOutputStream())
+        val result = service.createBackup(output)
 
-        assertFalse(result.success)
-        assertTrue(result.error!!.contains("chapter-page"))
-        assertTrue(result.error.contains("43"))
-        assertTrue(result.error.contains("local_books/manga/missing-page.jpg"))
+        assertTrue(result.error, result.success)
+        assertEquals(0, result.localFileCount)
+        assertTrue(readZip(output.toByteArray()).keys.none { it.contains("manga") })
     }
 
     @Test
@@ -684,7 +740,6 @@ class BackupServiceTest {
             format = "EPUB",
             coverLocalPath = "covers/missing",
             bodyPaths = listOf("remote/missing.html"),
-            pagePathsJson = listOf("""["remote/missing-page.jpg"]"""),
         )
         val service = requiredService(root, filesDir, cacheDir, listOf(book))
 
@@ -743,7 +798,6 @@ class BackupServiceTest {
                     format = "EPUB",
                     coverLocalPath = null,
                     bodyPaths = emptyList(),
-                    pagePathsJson = emptyList(),
                 ),
             ),
         )

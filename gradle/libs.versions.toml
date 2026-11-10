@@ -20,6 +20,9 @@ work = "2.12.0"
 # Window insets/controller compat used by the extracted reader fullscreen UI;
 # matches the version the app already resolves.
 core = "1.18.0"
+# Process-level lifecycle: the TTS overlay must know when the whole app (not one
+# Activity) leaves the foreground. Same release the project already resolves.
+lifecycle = "2.10.0"
 junit = "4.13.2"
 # Instrumentation test stack (cache-verified versions).
 androidxTest = "1.7.0"
@@ -66,6 +69,7 @@ palette = { module = "androidx.palette:palette", version.ref = "palette" }
 subsampling-scale-image-view = { module = "com.davemorrissey.labs:subsampling-scale-image-view", version.ref = "subsampling-scale-image-view" }
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 androidx-core = { module = "androidx.core:core", version.ref = "core" }
+androidx-lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "lifecycle" }
 junit = { module = "junit:junit", version.ref = "junit" }
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTest" }
 androidx-test-core-ktx = { module = "androidx.test:core-ktx", version.ref = "androidxTest" }

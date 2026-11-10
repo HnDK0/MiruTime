@@ -7,6 +7,9 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.mirutime.data.library.BookCoverEntity
 import dev.mirutime.data.library.BookEntity
+import dev.mirutime.data.library.ChapterBodyEntity
+import dev.mirutime.data.library.ChapterPageEntity
+import dev.mirutime.data.library.ChapterSeed
 import dev.mirutime.data.library.LibraryDatabase
 import dev.mirutime.data.library.LibraryDatabaseConstructor
 import dev.mirutime.data.library.LibraryRepository
@@ -232,6 +235,93 @@ class BackupRestoreInstrumentedTest {
         live.close()
     }
 
+    @Test
+    fun liveImportPrunesMangaContentWhoseFilesAreMissing() = runBlocking {
+        val sourceDbFile = File(root, "manga-source.db")
+        val source = openRoom(sourceDbFile)
+        val repo = LibraryRepository(source.libraryDao())
+        val bookId = repo.saveBook(
+            book("local://manga").copy(installId = "local-manga", contentType = "Manga"),
+        )
+        val chapter = repo.replaceChapters(
+            bookId,
+            listOf(ChapterSeed(1, "local://manga#chapter=1", "One")),
+            at = 1L,
+        ).single()
+        repo.saveLocalBookFile(
+            LocalBookFileEntity(
+                bookId = bookId,
+                uri = "content://local/manga",
+                displayName = "manga",
+                format = "CBZ",
+                mime = null,
+                sizeBytes = 10L,
+                sha256 = "m".repeat(64),
+                copyPath = "local_books/local-manga/missing-folder",
+                importedAt = 1L,
+            ),
+        )
+        repo.saveChapterPage(
+            ChapterPageEntity(
+                chapterId = chapter.chapterId,
+                format = "images",
+                pagePathsJson = """["local_books/local-manga/missing.jpg"]""",
+                totalBytes = 10,
+            ),
+        )
+        repo.saveChapterBody(
+            ChapterBodyEntity(
+                chapterId = chapter.chapterId,
+                format = "html",
+                path = "local_books/local-manga/missing.html",
+                bytes = 5,
+                sha256 = "b".repeat(64),
+                fetchedAt = 1L,
+            ),
+        )
+        repo.saveBookCover(
+            BookCoverEntity(
+                bookId = bookId,
+                remoteUrl = "https://example.test/cover.jpg",
+                localPath = "covers/$bookId/cover",
+                sha256 = "c".repeat(64),
+                bytes = 10L,
+                fetchedAt = 1L,
+            ),
+        )
+        source.close()
+
+        val snapshot = File(root, "manga-snapshot.db")
+        createDatabaseSnapshot(sourceDbFile.absolutePath, snapshot.absolutePath)
+        val liveDbFile = File(root, "databases/mirutime.db")
+        liveDbFile.parentFile?.mkdirs()
+        val live = openRoom(liveDbFile)
+        val sourceDb = libraryDatabaseAt(context, snapshot)
+        try {
+            live.importLibraryBackup(source = sourceDb.libraryDao())
+            live.libraryDao().pruneMissingRestoredContent { false }
+        } finally {
+            sourceDb.close()
+        }
+
+        val restored = LibraryRepository(live.libraryDao()).libraryBooks().single()
+        val restoredChapter = live.libraryDao().chapters(restored.bookId).single()
+        // Metadata survives; downloaded-content rows do not.
+        assertEquals("local://manga", restored.url)
+        assertEquals(restoredChapter.chapterId, chapter.chapterId)
+        assertEquals(null, live.libraryDao().chapterPage(restoredChapter.chapterId))
+        assertEquals(null, live.libraryDao().chapterBody(restoredChapter.chapterId))
+        assertEquals(null, live.libraryDao().localBookFile(restored.bookId))
+        // A DB-only backup must not leave a dead cover path: clearing it lets
+        // the library use remoteUrl and backfill the file.
+        assertEquals(null, live.libraryDao().bookCover(restored.bookId)?.localPath)
+        assertEquals(
+            "https://example.test/cover.jpg",
+            live.libraryDao().bookCover(restored.bookId)?.remoteUrl,
+        )
+        live.close()
+    }
+
     private suspend fun validSnapshot(): ByteArray {
         val sourceFile = File(root, "invalid-source.db")
         val source = openRoom(sourceFile)
@@ -251,8 +341,10 @@ class BackupRestoreInstrumentedTest {
         filesDir = filesDir,
         databasePath = liveDbFile,
         settingsStore = settingsStore,
+        pluginKvStore = NoopPluginKvBackupStore,
+        localSourcesStore = NoopLocalSourcesBackupStore,
         appDataDir = root,
-        importDatabase = { sourceFile, coverPathFor, journalId, journalNow ->
+        importDatabase = { sourceFile, coverPathFor, journalId, journalNow, onCommitted ->
             val source = libraryDatabaseAt(context, sourceFile)
             try {
                 live.importLibraryBackup(

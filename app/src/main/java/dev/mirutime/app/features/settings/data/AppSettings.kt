@@ -257,7 +257,7 @@ object AppSettings {
     var backupDirectory by mutableStateOf("")
     var backupMaxCount by mutableIntStateOf(5)
     var backupIntervalMinutes by mutableIntStateOf(1440)
-    var backupIncludeImages by mutableStateOf(false)
+    var backupIncludeImages by mutableStateOf(true)
     var backupIncludeSettings by mutableStateOf(true)
     var backupIncludePlugins by mutableStateOf(true)
     var backupIncludeHistoryOnly by mutableStateOf(false)

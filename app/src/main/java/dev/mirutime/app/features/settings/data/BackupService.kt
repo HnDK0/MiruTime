@@ -2,12 +2,15 @@ package dev.mirutime.app.features.settings.data
 
 import android.content.Context
 import dev.mirutime.core.log.MiruLog
+import dev.mirutime.app.features.library.data.LocalMangaInstallId
 import dev.mirutime.data.library.LibraryRepository
 import dev.mirutime.data.library.LibrarySchemaVersion
 import dev.mirutime.data.library.LocalBackupBook
 import dev.mirutime.data.library.LocalBackupCover
 import dev.mirutime.data.library.createDatabaseSnapshot
 import dev.mirutime.data.library.pruneHistoryOnlyBooks
+import dev.mirutime.data.library.pruneLocalMangaBooks
+import dev.mirutime.data.library.snapshotBookCounts
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -24,12 +27,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-// Backup archive format. v2 added optional settings/images/plugins; v3 adds
-// the reader payload (theme/reader/TTS prefs + user assets). Restore still
-// reads v1/v2 archives. Per-entry paths stay stable (`manifest.json`,
-// `settings.json`, `reader.json`, `database/mirutime.db`, `files/...`,
-// `plugins/...`, `reader/assets/...`).
-const val BackupFormatVersion = 3
+// Backup archive format. v2 added optional settings/images/plugins; v3 added
+// the reader payload (theme/reader/TTS prefs + user assets); v4 adds plugin KV
+// and SAF local sources. Restore still reads v1-v3 archives. Per-entry paths
+// stay stable (`manifest.json`, `settings.json`, `reader.json`,
+// `settings/plugin-kv.json`, `settings/local-sources.json`,
+// `database/mirutime.db`, `files/...`, `plugins/...`, `reader/assets/...`).
+const val BackupFormatVersion = 4
 val SupportedBackupFormats = 1..BackupFormatVersion
 
 @Serializable
@@ -73,6 +77,8 @@ data class BackupCounts(
     val localFiles: Int,
     val pluginFiles: Int = 0,
     val readerFiles: Int = 0,
+    val pluginKvEntries: Int = 0,
+    val localSourceFolders: Int = 0,
 )
 
 @Serializable
@@ -90,6 +96,8 @@ data class BackupManifest(
     val database: BackupEntry,
     val settings: BackupEntry? = null,
     val reader: BackupEntry? = null,
+    val pluginKv: BackupEntry? = null,
+    val localSources: BackupEntry? = null,
     val files: List<BackupFileEntry> = emptyList(),
     val plugins: List<BackupPluginEntry> = emptyList(),
     val readerAssets: List<BackupReaderAssetEntry> = emptyList(),
@@ -119,6 +127,10 @@ data class DatabaseSnapshot(
     val size: Long,
     val sha256: String,
     val schemaVersion: Int = LibrarySchemaVersion,
+    // Counted inside the pruned snapshot, so the manifest never claims books
+    // the archive dropped (local-manga rows, history-only rows).
+    val totalBooks: Int = 0,
+    val libraryBooks: Int = 0,
 )
 
 data class BackupResult(
@@ -157,10 +169,10 @@ class BackupService(
     private val appVersion: String,
     private val localBooks: suspend () -> List<LocalBackupBook>,
     private val localCovers: suspend () -> List<LocalBackupCover> = { emptyList() },
-    private val bookCount: suspend () -> Int = { 0 },
-    private val libraryBookCount: suspend () -> Int = { 0 },
     private val settingsSnapshot: () -> PersistedSettings = { AppSettings.persistedSnapshot() },
     private val readerSnapshot: () -> ReaderBackupPrefs = { ReaderBackupPrefs() },
+    private val pluginKvSnapshot: () -> PluginKvBackup,
+    private val localSourcesSnapshot: () -> LocalSourcesBackup,
     private val snapshotDatabase: suspend (File, Boolean) -> DatabaseSnapshot =
         { target, includeHistoryOnly ->
             createSnapshot(databasePath, target, includeHistoryOnly)
@@ -173,6 +185,8 @@ class BackupService(
         databasePath: File,
         library: LibraryRepository,
         readerSnapshot: () -> ReaderBackupPrefs = { ReaderBackupPrefs() },
+        pluginKvSnapshot: () -> PluginKvBackup,
+        localSourcesSnapshot: () -> LocalSourcesBackup,
     ) : this(
         databasePath = databasePath,
         filesDir = context.applicationContext.filesDir,
@@ -182,9 +196,9 @@ class BackupService(
         }.getOrNull() ?: "0.1",
         localBooks = { library.localBackupBooks() },
         localCovers = { library.localBackupCovers() },
-        bookCount = { library.bookCount() },
-        libraryBookCount = { library.libraryBookCount() },
         readerSnapshot = readerSnapshot,
+        pluginKvSnapshot = pluginKvSnapshot,
+        localSourcesSnapshot = localSourcesSnapshot,
     )
 
     /**
@@ -259,15 +273,16 @@ class BackupService(
             // Selection already filters in Room; keep the archive boundary
             // strict so a future caller cannot leak a history-only copy.
             val books = localBooks().filter { it.inLibrary }
-            val totalBooks = bookCount()
-            val libraryBooks = libraryBookCount()
-            val savedTotalBooks = if (options.includeHistoryOnly) totalBooks else libraryBooks
             onProgress(0.10f)
             val fileCandidates = books.flatMap(::collectBookFiles)
             // Plugin books own no local copy/bodies, but their covers (and
             // especially user overrides) are still user data. A user override
-            // is always packed; other covers follow includeImages.
-            val coverCandidates = localCovers().mapNotNull { cover ->
+            // is always packed; other covers follow includeImages. Local-manga
+            // books are pruned from the snapshot (their pages are never
+            // packed), so their covers would be dead weight in the archive.
+            val coverCandidates = localCovers()
+                .filter { it.installId != LocalMangaInstallId }
+                .mapNotNull { cover ->
                 val file = resolve(cover.coverLocalPath)
                 if (!file.isFile) {
                     if (cover.isUserOverride) {
@@ -280,15 +295,16 @@ class BackupService(
                     bookId = cover.bookId,
                     kind = KIND_COVER,
                     file = file,
-                    installId = cover.installId,
                     isUserOverride = cover.isUserOverride,
                 )
             }
+            // Covers follow includeImages (user overrides always ride along).
+            // Manga pages and video files are never candidates.
             val candidates = (fileCandidates + coverCandidates)
                 .filter {
                     options.includeImages ||
-                        it.isContentWithoutImages() ||
-                        (it.kind == KIND_COVER && it.isUserOverride)
+                        it.kind != KIND_COVER ||
+                        it.isUserOverride
                 }
                 .distinctBy { it.entryPath }
                 .sortedBy { it.entryPath }
@@ -305,7 +321,10 @@ class BackupService(
 
             val settingsBytes = if (options.includeSettings) {
                 BackupJson
-                    .encodeToString(PersistedSettings.serializer(), settingsSnapshot())
+                    .encodeToString(
+                        PersistedSettings.serializer(),
+                        settingsSnapshot().withDeviceLocalPathsFrom(current = null),
+                    )
                     .encodeToByteArray()
             } else {
                 null
@@ -316,6 +335,32 @@ class BackupService(
                     .encodeToByteArray()
             } else {
                 null
+            }
+            val pluginKvBackup = if (options.includeSettings || options.includePlugins) {
+                pluginKvSnapshot()
+            } else {
+                null
+            }
+            val localSourcesBackup = if (options.includeSettings) {
+                localSourcesSnapshot()
+            } else {
+                null
+            }
+            val pluginKvBytes = pluginKvBackup?.let {
+                BackupJson.encodeToString(PluginKvBackup.serializer(), it).encodeToByteArray()
+            }
+            val localSourcesBytes = localSourcesBackup?.let {
+                BackupJson.encodeToString(LocalSourcesBackup.serializer(), it).encodeToByteArray()
+            }
+            if (pluginKvBytes != null &&
+                pluginKvBytes.size.toLong() > MAX_ARCHIVE_PLUGIN_KV_BYTES
+            ) {
+                error("Plugin settings are too large for a backup")
+            }
+            if (localSourcesBytes != null &&
+                localSourcesBytes.size.toLong() > MAX_ARCHIVE_LOCAL_SOURCES_BYTES
+            ) {
+                error("Local sources are too large for a backup")
             }
             val fileEntries = candidates.map { candidate ->
                 val size = candidate.file.length()
@@ -357,7 +402,9 @@ class BackupService(
                 pluginEntries.sumOf { it.size } +
                 readerAssetEntries.sumOf { it.size } +
                 (settingsBytes?.size?.toLong() ?: 0L) +
-                (readerBytes?.size?.toLong() ?: 0L)
+                (readerBytes?.size?.toLong() ?: 0L) +
+                (pluginKvBytes?.size?.toLong() ?: 0L) +
+                (localSourcesBytes?.size?.toLong() ?: 0L)
             requireFreeSpace(target.parentFile ?: cacheDir, estimated, "backup archive")
 
             val manifest = BackupManifest(
@@ -386,16 +433,40 @@ class BackupService(
                         sha256 = sha256Hex(it),
                     )
                 },
+                pluginKv = pluginKvBytes?.let {
+                    BackupEntry(
+                        name = PLUGIN_KV_ENTRY,
+                        size = it.size.toLong(),
+                        sha256 = sha256Hex(it),
+                    )
+                },
+                localSources = localSourcesBytes?.let {
+                    BackupEntry(
+                        name = LOCAL_SOURCES_ENTRY,
+                        size = it.size.toLong(),
+                        sha256 = sha256Hex(it),
+                    )
+                },
                 files = fileEntries,
                 plugins = pluginEntries,
                 readerAssets = readerAssetEntries,
                 counts = BackupCounts(
                     localBooks = books.size,
-                    libraryBooks = libraryBooks,
-                    totalBooks = savedTotalBooks,
+                    libraryBooks = db.libraryBooks,
+                    // Without history-only rows the snapshot holds just the
+                    // in-library books; both numbers come from the snapshot.
+                    totalBooks = if (options.includeHistoryOnly) {
+                        db.totalBooks
+                    } else {
+                        db.libraryBooks
+                    },
                     localFiles = fileEntries.size,
                     pluginFiles = pluginEntries.size,
                     readerFiles = readerAssetEntries.size,
+                    pluginKvEntries = pluginKvBackup?.entries?.size ?: 0,
+                    localSourceFolders = localSourcesBackup?.let {
+                        it.books.size + it.manga.size
+                    } ?: 0,
                 ),
             )
             val manifestBytes = BackupJson
@@ -428,6 +499,22 @@ class BackupService(
                         zip.write(readerBytes)
                         zip.closeEntry()
                         bytes += readerBytes.size
+                        entries++
+                    }
+
+                    if (pluginKvBytes != null) {
+                        zip.putNextEntry(ZipEntry(PLUGIN_KV_ENTRY))
+                        zip.write(pluginKvBytes)
+                        zip.closeEntry()
+                        bytes += pluginKvBytes.size
+                        entries++
+                    }
+
+                    if (localSourcesBytes != null) {
+                        zip.putNextEntry(ZipEntry(LOCAL_SOURCES_ENTRY))
+                        zip.write(localSourcesBytes)
+                        zip.closeEntry()
+                        bytes += localSourcesBytes.size
                         entries++
                     }
 
@@ -468,8 +555,8 @@ class BackupService(
                 success = true,
                 bytes = target.length(),
                 entryCount = entries,
-                bookCount = savedTotalBooks,
-                libraryBookCount = libraryBooks,
+                bookCount = if (options.includeHistoryOnly) db.totalBooks else db.libraryBooks,
+                libraryBookCount = db.libraryBooks,
                 localBookCount = books.size,
                 localFileCount = fileEntries.size,
                 pluginFileCount = pluginEntries.size,
@@ -524,27 +611,16 @@ class BackupService(
         val bookId: Long,
         val kind: String,
         val file: File,
-        val installId: String,
         val isUserOverride: Boolean = false,
-    ) {
-        /**
-         * Local installs own real content: copy, bodies and manga pages are
-         * always backed up. Only cache covers and remote cached pages may be
-         * omitted by includeImages=false.
-         */
-        fun isContentWithoutImages(): Boolean = when (kind) {
-            KIND_COVER -> false
-            KIND_CHAPTER_PAGE -> installId in LOCAL_INSTALL_IDS
-            else -> true
-        }
-    }
+    )
 
-    // copyPath (file or folder), cover and all body/page paths of one local
-    // book. Directories recurse; duplicates (a page also under copyPath) are
-    // written once, first kind wins.
+    // copyPath (file or folder), cover and every body path of one novel.
+    // Directories recurse; duplicates are written once, first kind wins.
     private fun collectBookFiles(book: LocalBackupBook): List<FileCandidate> {
+        // Manga owns no files in the archive: only novels carry content.
+        if (book.installId !in LOCAL_INSTALL_IDS) return emptyList()
         val seen = LinkedHashMap<String, FileCandidate>()
-        val required = book.installId in LOCAL_INSTALL_IDS
+        val required = true
 
         fun missing(kind: String, path: String): Nothing = error(
             "Backup is missing required $kind for book ${book.bookId} " +
@@ -558,7 +634,7 @@ class BackupService(
             }
             val entry = entryPath(file, book.bookId, kind)
             if (seen.containsKey(entry)) return
-            seen[entry] = FileCandidate(entry, book.bookId, kind, file, book.installId)
+            seen[entry] = FileCandidate(entry, book.bookId, kind, file)
         }
 
         fun addPath(path: String?, kind: String, required: Boolean) {
@@ -583,9 +659,6 @@ class BackupService(
         addPath(book.copyPath, KIND_LOCAL_COPY, required)
         addPath(book.coverLocalPath, KIND_COVER, false)
         book.bodyPaths.forEach { addPath(it, KIND_CHAPTER_BODY, required) }
-        book.pagePathsJson.flatMap(::pagePaths).forEach {
-            addPath(it, KIND_CHAPTER_PAGE, required)
-        }
         return seen.values.toList()
     }
 
@@ -680,6 +753,19 @@ class BackupService(
     }
 }
 
+/**
+ * SAF tree URIs (auto-backup folder, export folder) are device-local: a tree
+ * picked on another device does not resolve here. The archive never carries
+ * them, and restore keeps the target device's own picks instead of blanking
+ * them with the archive value.
+ */
+internal fun PersistedSettings.withDeviceLocalPathsFrom(
+    current: PersistedSettings?,
+): PersistedSettings = copy(
+    backupDirectory = current?.backupDirectory.orEmpty(),
+    exportDirectory = current?.exportDirectory.orEmpty(),
+)
+
 private suspend fun createSnapshot(
     databasePath: File,
     target: File,
@@ -693,10 +779,16 @@ private suspend fun createSnapshot(
         if (!includeHistoryOnly) {
             pruneHistoryOnlyBooks(target.absolutePath)
         }
+        // Manga page files are never packed, so their DB rows would restore a
+        // book with no readable content.
+        pruneLocalMangaBooks(target.absolutePath)
+        val (totalBooks, libraryBooks) = snapshotBookCounts(target.absolutePath)
         DatabaseSnapshot(
             file = target,
             size = target.length(),
             sha256 = sha256File(target),
+            totalBooks = totalBooks,
+            libraryBooks = libraryBooks,
         )
     }
 
@@ -728,6 +820,8 @@ internal fun ByteArray.toHex(): String {
 
 internal const val MANIFEST_ENTRY = "manifest.json"
 internal const val SETTINGS_ENTRY = "settings.json"
+internal const val PLUGIN_KV_ENTRY = "settings/plugin-kv.json"
+internal const val LOCAL_SOURCES_ENTRY = "settings/local-sources.json"
 internal const val DATABASE_ENTRY = "database/mirutime.db"
 private const val KIND_LOCAL_COPY = "local-copy"
 internal const val KIND_COVER = "cover"
@@ -744,7 +838,7 @@ internal const val PLUGINS_ENTRY = "plugins"
 internal const val BACKUP_TEMP_PREFIX = "mirutime-backup-"
 internal const val DB_TEMP_PREFIX = "mirutime-db-"
 internal const val StaleDbTempAgeMs = 6L * 60 * 60 * 1000
-internal val LOCAL_INSTALL_IDS = setOf("local-books", "local-manga")
+internal val LOCAL_INSTALL_IDS = setOf("local-books")
 private val PLUGIN_DIRS = listOf("lua_plugins", "lua_libs")
 private const val FREE_SPACE_HEADROOM = 16L * 1024 * 1024
 
@@ -772,10 +866,14 @@ internal fun BackupManifest.payloadEntries(
     maxSettingsBytes: Long,
     maxReaderBytes: Long = MAX_ARCHIVE_READER_BYTES,
     maxReaderAssetBytes: Long = MAX_READER_ASSET_BYTES,
+    maxPluginKvBytes: Long = MAX_ARCHIVE_PLUGIN_KV_BYTES,
+    maxLocalSourcesBytes: Long = MAX_ARCHIVE_LOCAL_SOURCES_BYTES,
 ): List<ManifestPayload> = buildList {
     add(ManifestPayload(database.name, database.size, database.sha256, maxEntryBytes))
     settings?.let { add(ManifestPayload(it.name, it.size, it.sha256, maxSettingsBytes)) }
     reader?.let { add(ManifestPayload(it.name, it.size, it.sha256, maxReaderBytes)) }
+    pluginKv?.let { add(ManifestPayload(it.name, it.size, it.sha256, maxPluginKvBytes)) }
+    localSources?.let { add(ManifestPayload(it.name, it.size, it.sha256, maxLocalSourcesBytes)) }
     files.forEach { add(ManifestPayload(it.path, it.size, it.sha256, maxEntryBytes)) }
     plugins.forEach { add(ManifestPayload(it.path, it.size, it.sha256, maxEntryBytes)) }
     readerAssets.forEach { add(ManifestPayload(it.path, it.size, it.sha256, maxReaderAssetBytes)) }
@@ -821,10 +919,20 @@ internal fun validateBackupArchive(file: File) {
             if (manifest.formatVersion !in SupportedBackupFormats) {
                 error("Unsupported backup format ${manifest.formatVersion}")
             }
+            if (manifest.pluginKv != null &&
+                !manifest.settingsIncluded && !manifest.pluginsIncluded
+            ) {
+                error("Backup plugin settings flag does not match its payload")
+            }
+            if (manifest.localSources != null && !manifest.settingsIncluded) {
+                error("Backup local sources flag does not match its payload")
+            }
             val expected = manifest.payloadEntries(
                 maxEntryBytes = MAX_ENTRY_BYTES,
                 maxSettingsBytes = MAX_ARCHIVE_SETTINGS_BYTES,
                 maxReaderBytes = MAX_ARCHIVE_READER_BYTES,
+                maxPluginKvBytes = MAX_ARCHIVE_PLUGIN_KV_BYTES,
+                maxLocalSourcesBytes = MAX_ARCHIVE_LOCAL_SOURCES_BYTES,
             ).associateBy { it.path }
             val expectedNames = expected.keys + MANIFEST_ENTRY
             if (names.toSet() != expectedNames) {
@@ -858,9 +966,14 @@ internal fun validateBackupArchive(file: File) {
     }
 }
 
-private const val MAX_ARCHIVE_MANIFEST_BYTES = 1024 * 1024
+// A large novel library with covers can exceed the old 1 MB cap; the service
+// rejected its own valid archive. Manga pages are not backed up, so this is
+// headroom for many small novel/cover entries.
+private const val MAX_ARCHIVE_MANIFEST_BYTES = 16 * 1024 * 1024
 private const val MAX_ARCHIVE_SETTINGS_BYTES = 16L * 1024 * 1024
 internal const val MAX_ARCHIVE_READER_BYTES = 4L * 1024 * 1024
+internal const val MAX_ARCHIVE_PLUGIN_KV_BYTES = 4L * 1024 * 1024
+internal const val MAX_ARCHIVE_LOCAL_SOURCES_BYTES = 8L * 1024 * 1024
 internal const val MAX_READER_ASSET_BYTES = 64L * 1024 * 1024
 private const val MAX_READER_ASSETS = 500
 private const val MAX_READER_ASSETS_BYTES = 512L * 1024 * 1024

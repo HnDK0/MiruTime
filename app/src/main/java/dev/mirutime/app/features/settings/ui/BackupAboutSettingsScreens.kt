@@ -76,6 +76,7 @@ fun AboutSettingsScreen(contentPadding: PaddingValues) {
             exportingLogs = true
             val written = try {
                 withContext(Dispatchers.IO) {
+                    MiruFileLogger.flush()
                     runCatching {
                         val dir = MiruFileLogger.currentDirectory()
                             ?: return@runCatching 0L

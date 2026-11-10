@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import android.net.Uri
 import android.content.Intent
 import androidx.navigation.NavController
+import androidx.navigation.NavHostController
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -143,7 +144,7 @@ import dev.mirutime.app.features.webview.ui.WebViewScreen
 
 private data class NavTab(val destination: MiruDestination, val icon: ImageVector)
 
-private fun navigateFrom(navController: NavController, route: String) {
+private fun navigateFrom(navController: NavHostController, route: String) {
     navController.navigate(route) {
         popUpTo(navController.graph.findStartDestination().id) {
             saveState = true
@@ -175,6 +176,11 @@ fun MiruShell(
     bgLibrary: List<String>,
     onCustomBg: (String?) -> Unit,
     onRemoveBg: (String) -> Unit,
+    // Hoisted to MainActivity so the NavController (and its back stack) is
+    // created before the DB gate and survives process death / restore.
+    navController: NavHostController,
+    // Route to start on when the back stack was not restored (process death).
+    initialRoute: String? = null,
     // Notification "Open source": route straight to the in-app WebView so the
     // CF/login clearance lands in the same cookie store the solver uses.
     openWebViewUrl: String? = null,
@@ -184,7 +190,6 @@ fun MiruShell(
     openUpdates: Boolean = false,
     onOpenUpdatesHandled: () -> Unit = {},
 ) {
-    val navController = rememberNavController()
     val context = LocalContext.current
     val readerGraph = remember(context) {
         (context.applicationContext as dev.mirutime.app.MiruApp).readerGraph
@@ -212,6 +217,12 @@ fun MiruShell(
     }
     val bookEpubExporter = remember(context) {
         (context.applicationContext as dev.mirutime.app.MiruApp).bookEpubExporter
+    }
+    val bookCbzExporter = remember(context) {
+        (context.applicationContext as dev.mirutime.app.MiruApp).bookCbzExporter
+    }
+    val catalogSessions = remember(context) {
+        (context.applicationContext as dev.mirutime.app.MiruApp).catalogSessions
     }
     val migrationGraph = remember(context) {
         (context.applicationContext as dev.mirutime.app.MiruApp).migrationGraph
@@ -310,6 +321,7 @@ fun MiruShell(
     // failed write.
     val onLibraryChanged: () -> Unit = {
         FinderSearchCache.clear()
+        catalogSessions.invalidateAll()
         dataRevision++
         MiruLog.event("nav", "data-revision", "rev" to dataRevision, "reason" to "library")
     }
@@ -325,6 +337,8 @@ fun MiruShell(
                 FinderSearchCache.clear()
                 dataRevision++
                 restoreRevision++
+                (context.applicationContext as dev.mirutime.app.MiruApp)
+                    .refreshCoversAfterRestore()
                 MiruLog.event("nav", "data-revision", "rev" to dataRevision, "reason" to "restore")
             }
         }
@@ -522,7 +536,7 @@ fun MiruShell(
         CompositionLocalProvider(LocalImeBottom provides imeBottom) {
         NavHost(
             navController = navController,
-            startDestination = MiruDestination.Dashboard.route,
+            startDestination = initialRoute ?: MiruDestination.Dashboard.route,
             // Every destination (not only bottom sheets) lifts above the IME, so
             // full-screen text forms never have their fields/actions covered.
             modifier = Modifier.imePadding(),
@@ -718,6 +732,7 @@ fun MiruShell(
                     initialQuery = entry.arguments?.getString("q")?.let(Uri::decode).orEmpty(),
                     contentPadding = padding,
                     provider = pluginProvider,
+                    sessions = catalogSessions,
                     readerGraph = readerGraph,
                     onBookOpen = { bookUrl ->
                         navController.navigate("book/${Uri.encode(bookUrl)}")
@@ -808,6 +823,7 @@ fun MiruShell(
                     readerGraph = readerGraph,
                     provider = pluginBookProvider,
                     exporter = bookEpubExporter,
+                    cbzExporter = bookCbzExporter,
                     downloadEngine = downloadEngine,
                     videoDownloads = videoDownloadManager,
                     videoRepository = videoRepository,

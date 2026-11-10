@@ -5,6 +5,7 @@ import dev.mirutime.app.features.book.data.BookDataProvider
 import dev.mirutime.app.features.reader.data.AppReaderAssetPort
 import dev.mirutime.app.features.reader.data.AppReaderSettingsPort
 import dev.mirutime.app.features.reader.data.AppReaderTranslationPort
+import dev.mirutime.app.features.reader.data.ChapterRetranslator
 import dev.mirutime.app.features.reader.data.DefaultReaderRepository
 import dev.mirutime.app.features.reader.data.MangaPageFileCache
 import dev.mirutime.app.features.reader.data.PrefsReaderConfigStore
@@ -12,6 +13,7 @@ import dev.mirutime.app.features.reader.data.PrefsReadingPositionRepository
 import dev.mirutime.app.features.reader.data.ReadingPositionRepository
 import dev.mirutime.app.features.reader.data.RoomReadingPositionRepository
 import dev.mirutime.app.features.reader.data.ReaderRepository
+import dev.mirutime.app.features.reader.data.TranslationOnlyDocuments
 import dev.mirutime.app.features.reader.domain.ReadingSessionTracker
 import dev.mirutime.core.network.cf.CfGate
 import dev.mirutime.feature.reader.ReaderConfigStore
@@ -22,10 +24,13 @@ import dev.mirutime.feature.reader.api.ReaderTextRules
 import dev.mirutime.feature.reader.api.ReaderTranslationPort
 import dev.mirutime.feature.reader.api.ReaderUiGraph
 import dev.mirutime.feature.reader.session.ReadTracker
+import dev.mirutime.feature.reader.ChapterLoadStatus
 import dev.mirutime.feature.reader.session.ReaderSessionStore
 import dev.mirutime.feature.reader.session.TtsChapterCoordinator
 import dev.mirutime.feature.reader.ui.ReaderFontCatalog
+import dev.mirutime.app.features.translation.data.ChapterTranslationPlanner
 import dev.mirutime.app.features.translation.data.MetadataTranslationController
+import dev.mirutime.app.features.translation.data.activeTranslationMode
 import dev.mirutime.app.features.translation.data.RoomMetadataTranslationStore
 import dev.mirutime.app.features.translation.data.RoomTranslationCache
 import dev.mirutime.app.features.translation.data.TranslationController
@@ -33,6 +38,7 @@ import dev.mirutime.app.features.translation.domain.ManagerTranslationEngine
 import dev.mirutime.app.features.translation.domain.TranslationEngine
 import dev.mirutime.data.library.LibraryRepository
 import dev.mirutime.feature.tts.AndroidTtsEngine
+import dev.mirutime.feature.tts.AndroidTtsVoicePreviewer
 import dev.mirutime.feature.tts.PrefsTtsSessionStore
 import dev.mirutime.feature.tts.PrefsTtsSettingsStore
 import dev.mirutime.feature.tts.TtsController
@@ -62,15 +68,31 @@ class ReaderGraph(
     plainEngine: HttpClientEngine,
 ) : ReaderUiGraph {
     private val appContext = context.applicationContext
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    // Data work (parsing, disk, translation) and UI/TTS work have different
+    // thread contracts: keep them in separate scopes.
+    private val dataScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val translationGraph = TranslationGraph(appContext, cfGate, plainEngine)
 
     init {
         // Warm the catalog early; a stale sys: key is rejected once it loads.
-        scope.launch { ReaderFontCatalog.load() }
+        dataScope.launch { ReaderFontCatalog.load() }
     }
 
-    val repository: ReaderRepository = DefaultReaderRepository(bookProvider, libraryRepository)
+    private val translationOnlyDocuments = libraryRepository?.let(::TranslationOnlyDocuments)
+    val repository: ReaderRepository = DefaultReaderRepository(
+        provider = bookProvider,
+        library = libraryRepository,
+        translationOnlyDocument = { bookUrl, chapterIndex ->
+            val mode = activeTranslationMode(bookUrl)?.takeIf { it.hasPair }
+            val fallback = translationOnlyDocuments
+            if (mode != null && fallback != null) {
+                fallback.load(bookUrl, chapterIndex, mode.source, mode.target, mode.provider)
+            } else {
+                null
+            }
+        },
+    )
     override val positions: ReadingPositionRepository = libraryRepository?.let(::RoomReadingPositionRepository)
         ?: PrefsReadingPositionRepository(context.applicationContext)
     val configStore = PrefsReaderConfigStore(context.applicationContext)
@@ -91,16 +113,25 @@ class ReaderGraph(
 
     val translationEngine: TranslationEngine = ManagerTranslationEngine { translationGraph.manager }
     private val translationCache = libraryRepository?.let(::RoomTranslationCache)
-    val translations = TranslationController(translationEngine, scope, translationCache)
+    val translations = TranslationController(translationEngine, dataScope, translationCache)
     val metadataTranslations = MetadataTranslationController(
         engine = translationEngine,
-        scope = scope,
+        scope = dataScope,
         store = libraryRepository?.let(::RoomMetadataTranslationStore),
     )
     override val translation: ReaderTranslationPort = AppReaderTranslationPort(
         controller = translations,
         metadataController = metadataTranslations,
-        scope = scope,
+        retranslator = ChapterRetranslator(
+            currentDocument = { _, index -> session.state.value.documents[index] },
+            config = { bookUrl ->
+                activeTranslationMode(bookUrl)?.let { mode ->
+                    ChapterTranslationPlanner.config(bookUrl, mode)
+                }
+            },
+            submit = { request -> translations.submitForced(request) },
+        ),
+        scope = dataScope,
         context = appContext,
     )
     val sessionTracker = newSessionTracker(ReadingSessionTracker.KIND_READING)
@@ -110,7 +141,7 @@ class ReaderGraph(
         positions = positions,
         config = config,
         readTracker = ReadTracker(repository),
-        scope = scope,
+        scope = dataScope,
         sessionTracker = sessionTracker,
         preloadActiveChapter = { _, document ->
             translation.preloadChapter(document.bookUrl, document)
@@ -121,12 +152,19 @@ class ReaderGraph(
     override val assets: ReaderAssetPort = AppReaderAssetPort(appContext)
     override val ttsSessions: TtsSessionStore = PrefsTtsSessionStore(appContext)
     private val ttsSettings = PrefsTtsSettingsStore(appContext)
-    override val tts = TtsController(AndroidTtsEngine(appContext), scope, ttsSessions, ttsSettings)
+    override val tts = TtsController(
+        engine = AndroidTtsEngine(appContext),
+        scope = mainScope,
+        sessions = ttsSessions,
+        settingsStore = ttsSettings,
+        voicePreviewer = AndroidTtsVoicePreviewer(appContext),
+    )
     override val ttsCoordinator = TtsChapterCoordinator(
         tts = tts,
         session = session,
         translation = translation,
-        scope = scope,
+        settings = settings,
+        scope = mainScope,
         startPlayback = { bookTitle, chapterTitle, coverUrl, chapterIndex, chapterCount ->
             startTtsPlayback(
                 bookTitle = bookTitle,
@@ -165,6 +203,14 @@ class ReaderGraph(
                 }.getOrNull()
             }
         },
+        // Local pages are files in the app's own storage: the importers write
+        // them under local_books / downloads/manga, the direct SAF reader
+        // under cacheDir/local_saf. They are served from disk, not copied.
+        localRoots = listOf(
+            java.io.File(appContext.filesDir, LocalBooksDir),
+            java.io.File(appContext.filesDir, DownloadMangaDir),
+            java.io.File(appContext.cacheDir, SafCacheDir),
+        ),
     )
 
     override suspend fun mangaPageFile(url: String): java.io.File? = mangaPageFiles.file(url)
@@ -196,8 +242,15 @@ class ReaderGraph(
     }
 
     override fun stopTtsSession() {
-        scope.launch { ttsSessionTracker?.stop() }
+        mainScope.launch { ttsSessionTracker?.stop() }
     }
 }
 
 private const val MaxLocalPageBytes = 64L * 1024 * 1024
+
+// Roots of the app's own page storage: LocalBookImporter writes local_books,
+// LocalDownloadFileStore writes downloads/manga, LocalSafCache writes
+// cacheDir/local_saf.
+private const val LocalBooksDir = "local_books"
+private const val DownloadMangaDir = "downloads/manga"
+private const val SafCacheDir = "local_saf"

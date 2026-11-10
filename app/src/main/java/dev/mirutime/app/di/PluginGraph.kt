@@ -168,7 +168,7 @@ class PluginGraph(
     private val systemInfo = AndroidSystemInfo
     private val appContext = context.applicationContext
     private val cookieStore = AppCookieStore.get()
-    private val keyValueStore = PrefsKeyValueStore(context)
+    val keyValueStore = PrefsKeyValueStore(context)
     private val fileSystem = AndroidFileSystem(File(context.filesDir, ROOT_DIR))
     private val repoStore = RepoCatalogStore(fileSystem)
     private val engine = createEngine(MiruCoreLogger)
@@ -924,11 +924,21 @@ class PluginGraph(
         handlesMutex.withLock { handles.remove(id)?.dispose() }
     }
 
+    /** Cheap KV refresh for a restore that could not safely rescan plugins yet. */
+    fun refreshRepoUrl() {
+        _repoUrl.value = keyValueStore.get(REPO_NS, REPO_KEY)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_REPO_URL
+    }
+
     /**
      * Drops every loaded handle and rescans disk. Used after a restore writes
      * plugin files so the UI and the runtime see them immediately.
      */
     suspend fun reload() {
+        // A live restore may have replaced mirutime_kv; pick up the new repo URL.
+        refreshRepoUrl()
         handlesMutex.withLock {
             handles.values.forEach { it.dispose() }
             handles.clear()

@@ -44,7 +44,8 @@ class CoverReactivityContractTest {
         assertTrue(catalog.contains("provider.refreshCatalogCover(sourceId, book.bookUrl)"))
         assertTrue(catalog.contains("reloadKey = reloadTick"))
         assertTrue(catalog.contains("val coverDone = remember(sourceId, filters, reloadTick)"))
-        assertTrue(catalog.contains("snapshotFlow { books }"))
+        assertTrue(catalog.contains("snapshotFlow {"))
+        assertTrue(catalog.contains("pageState.books to (pageState.active && !pageState.loading)"))
         assertTrue(catalog.contains("coverDone.add(url)"))
     }
 

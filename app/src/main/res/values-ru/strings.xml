@@ -142,6 +142,13 @@
     <string name="tool_epub_failed_fmt">Не удалось сохранить EPUB: %1$s</string>
     <string name="tool_epub_no_chapters">Нет глав для экспорта</string>
     <string name="tool_epub_unavailable">Экспорт EPUB здесь недоступен</string>
+    <string name="tool_cbz">Экспорт в CBZ</string>
+    <string name="tool_cbz_desc">Скачанные главы, одна архив на главу</string>
+    <string name="tool_cbz_no_chapters">Нет скачанных глав</string>
+    <string name="tool_cbz_started">Экспорт в CBZ…</string>
+    <string name="tool_cbz_success_fmt">Экспортировано глав: %1$d</string>
+    <string name="tool_cbz_failed_fmt">Не удалось экспортировать CBZ: %1$s</string>
+    <string name="tool_cbz_unavailable">Экспорт CBZ здесь недоступен</string>
     <string name="book_review_translate_stub">Перевод выполняется переводчиком (заглушка)</string>
     <string name="book_plugin">плагин</string>
     <string name="book_by_author_fmt">автор: %1$s</string>
@@ -175,6 +182,12 @@
     <string name="book_dl_add_first">Сначала добавьте книгу в библиотеку</string>
     <string name="book_dl_engine_unavailable">Движок загрузок недоступен</string>
     <string name="book_dl_nothing_new">Новых глав для скачивания нет</string>
+    <string name="book_dl_adopted_fmt">Уже скачано: %1$d</string>
+    <string name="book_dl_cached_fmt">Уже в кэше этой книги: %1$d</string>
+    <string name="book_dl_book_unavailable">Не удалось открыть книгу — повторите</string>
+    <string name="book_dl_video_source_needed">Выберите рабочий источник видео</string>
+    <string name="book_tool_video_source">Источник видео</string>
+    <string name="book_tool_video_source_desc">Проверить и выбрать рабочий поток перед скачиванием</string>
     <string name="book_dl_and_translate">Скачать и перевести</string>
     <string name="book_dl_and_translate_desc">Главы переводятся после скачивания текста</string>
     <string name="book_dl_queued_translate_fmt">В очереди глав: %1$d · переводов: %2$d</string>
@@ -753,6 +766,7 @@
     <string name="finder_local_catalog_empty">Нет локальных файлов</string>
     <string name="finder_local_catalog_empty_desc">Добавьте папку с файлами EPUB, FB2 или CBZ или проверьте доступ к папкам.</string>
     <string name="finder_local_folders_sheet_desc">Папки читаются на месте. Удаление папки не удаляет файлы.</string>
+    <string name="finder_local_manga_hint">Добавляйте папку, внутри которой лежат произведения. Каждая папка первого уровня — книга, всё внутри — её главы.</string>
     <string name="finder_local_folder_empty_fmt">Нет поддерживаемых файлов · %1$s</string>
     <string name="finder_local_folder_meta_books_fmt">Файлов: %1$d · Книги · EPUB, FB2</string>
     <string name="finder_local_folder_meta_manga_fmt">Файлов: %1$d · Манга · CBZ</string>
@@ -1034,13 +1048,13 @@
     <string name="st_tr_yandex_cloud_keys_tip">Один ключ на строку. Создайте ключ в консоли Yandex Cloud.</string>
     <string name="st_tr_yandex_cloud_folder">Folder ID</string>
     <string name="st_tr_yandex_cloud_folder_tip">Идентификатор каталога, которому принадлежит ресурс перевода.</string>
-    <string name="st_tr_prompts">Промпт для LLM</string>
+    <string name="st_tr_prompts">Промпт перевода</string>
     <string name="st_tr_prompts_desc">Инструкции для ИИ-сервисов перевода</string>
     <string name="st_tr_system_prompt">Системный промпт</string>
     <string name="st_tr_prompt_default">По умолчанию</string>
     <string name="st_tr_prompt_custom">Свой</string>
     <string name="st_tr_prompt_sheet_desc">Инструкция, отправляемая с каждым пакетом абзацев.</string>
-    <string name="st_tr_prompt_label">Инструкция для модели</string>
+    <string name="st_tr_prompt_label">Промпт перевода</string>
     <string name="st_tr_prompt_placeholder">Пусто = встроенный промпт</string>
     <string name="st_tr_prompt_placeholders">Доступные плейсхолдеры: {source_language}, {target_language}</string>
     <string name="st_tr_presets">Сохранённые пресеты</string>
@@ -1276,8 +1290,8 @@
     <string name="st_interval_minutes_fmt">%1$d мин</string>
     <string name="st_backup_max">Максимум файлов</string>
     <string name="st_backup_max_fmt">Файлов: %1$d</string>
-    <string name="st_backup_images">Включая изображения</string>
-    <string name="st_backup_images_desc">Включать кэш обложек и изображений. Локальные файлы книг и страницы манги сохраняются всегда.</string>
+    <string name="st_backup_images">Включая обложки</string>
+    <string name="st_backup_images_desc">Сохранять скачанные обложки, чтобы библиотека не загружала их заново. Включено по умолчанию. Страницы манги и видеофайлы не входят в бэкап.</string>
     <string name="st_backup_settings">Включая настройки</string>
     <string name="st_backup_settings_desc">Включать API-ключи и настройки</string>
     <string name="st_backup_plugins">Включая плагины</string>
@@ -1651,6 +1665,7 @@
     <string name="video_section_screen">Экран</string>
     <string name="video_variant">Вариант</string>
     <string name="video_variant_title">Выбор варианта</string>
+    <string name="video_variant_recheck">Проверить снова</string>
     <string name="video_variant_fallback">Вариант %1$d</string>
     <string name="video_subtitle_track">Дорожка субтитров</string>
     <string name="video_episodes">Эпизоды</string>

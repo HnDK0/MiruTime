@@ -248,7 +248,11 @@ fun deleteBackgroundFile(context: Context, source: String) {
     if (isLocalBg(source) && file.parentFile == bgDir(context)) file.delete()
 }
 
-private val bgCache = mutableMapOf<String, ImageBitmap>()
+private val bgCache: MutableMap<String, ImageBitmap> =
+    object : LinkedHashMap<String, ImageBitmap>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap>?): Boolean =
+            size > 8
+    }
 
 private fun decodeBg(resolver: ContentResolver, source: String): ImageBitmap? {
     return try {

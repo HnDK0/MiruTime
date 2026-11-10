@@ -166,6 +166,12 @@
     <string name="book_dl_add_first">Add the book to the library first</string>
     <string name="book_dl_engine_unavailable">Download engine is unavailable</string>
     <string name="book_dl_nothing_new">Nothing new to download</string>
+    <string name="book_dl_adopted_fmt">Already downloaded: %1$d</string>
+    <string name="book_dl_cached_fmt">Cached in this book: %1$d</string>
+    <string name="book_dl_book_unavailable">Couldn\'t open this book — try again</string>
+    <string name="book_dl_video_source_needed">Choose a working video source</string>
+    <string name="book_tool_video_source">Video source</string>
+    <string name="book_tool_video_source_desc">Check and choose a working stream before downloading</string>
     <string name="book_dl_and_translate">Download + translate</string>
     <string name="book_dl_and_translate_desc">Chapters translate after their text is downloaded</string>
     <string name="book_dl_queued_translate_fmt">Queued chapters: %1$d · translations: %2$d</string>
@@ -223,6 +229,13 @@
     <string name="tool_epub_failed_fmt">EPUB export failed: %1$s</string>
     <string name="tool_epub_no_chapters">No chapters to export</string>
     <string name="tool_epub_unavailable">EPUB export is unavailable here</string>
+    <string name="tool_cbz">Export to CBZ</string>
+    <string name="tool_cbz_desc">Downloaded chapters, one archive per chapter</string>
+    <string name="tool_cbz_no_chapters">No downloaded chapters</string>
+    <string name="tool_cbz_started">Exporting to CBZ…</string>
+    <string name="tool_cbz_success_fmt">Exported %1$d chapters</string>
+    <string name="tool_cbz_failed_fmt">CBZ export failed: %1$s</string>
+    <string name="tool_cbz_unavailable">CBZ export is unavailable here</string>
     <string name="tool_regex">Regex cleanup rules</string>
     <string name="tool_regex_desc">Scrub junk lines before they reach the reader</string>
     <string name="book_order_newest">Newest</string>
@@ -740,6 +753,7 @@
     <string name="finder_local_catalog_empty">No local files</string>
     <string name="finder_local_catalog_empty_desc">Add a folder with EPUB, FB2 or CBZ files, or check that your folders still have access.</string>
     <string name="finder_local_folders_sheet_desc">Folders are scanned in place. Removing one never deletes its files.</string>
+    <string name="finder_local_manga_hint">Add the folder that contains the works. Every first-level folder is a book; everything inside it is that book\'s chapters.</string>
     <string name="finder_local_folder_empty_fmt">No supported files · %1$s</string>
     <string name="finder_local_folder_meta_books_fmt">%1$d files · Books · EPUB, FB2</string>
     <string name="finder_local_folder_meta_manga_fmt">%1$d files · Manga · CBZ</string>
@@ -1021,13 +1035,13 @@
     <string name="st_tr_yandex_cloud_keys_tip">One key per line. Create a key in the Yandex Cloud console.</string>
     <string name="st_tr_yandex_cloud_folder">Folder ID</string>
     <string name="st_tr_yandex_cloud_folder_tip">Catalog ID that owns the translation resource.</string>
-    <string name="st_tr_prompts">LLM prompt</string>
+    <string name="st_tr_prompts">Translation prompt</string>
     <string name="st_tr_prompts_desc">Instructions for AI translation providers</string>
     <string name="st_tr_system_prompt">System prompt</string>
     <string name="st_tr_prompt_default">Default</string>
     <string name="st_tr_prompt_custom">Custom</string>
     <string name="st_tr_prompt_sheet_desc">The instruction sent with every batch of paragraphs.</string>
-    <string name="st_tr_prompt_label">System prompt</string>
+    <string name="st_tr_prompt_label">Translation prompt</string>
     <string name="st_tr_prompt_placeholder">Empty = the built-in prompt</string>
     <string name="st_tr_prompt_placeholders">Available placeholders: {source_language}, {target_language}</string>
     <string name="st_tr_presets">Saved presets</string>
@@ -1263,8 +1277,8 @@
     <string name="st_interval_minutes_fmt">%1$d min</string>
     <string name="st_backup_max">Max backup files</string>
     <string name="st_backup_max_fmt">%1$d files</string>
-    <string name="st_backup_images">Include images</string>
-    <string name="st_backup_images_desc">Include cache covers and remote cached images. Local book files and manga pages are always kept.</string>
+    <string name="st_backup_images">Include covers</string>
+    <string name="st_backup_images_desc">Save downloaded covers so the library does not fetch them again. On by default. Manga pages and video files are never included.</string>
     <string name="st_backup_settings">Include settings</string>
     <string name="st_backup_settings_desc">Include API keys and preferences</string>
     <string name="st_backup_plugins">Include plugins</string>
@@ -1630,6 +1644,7 @@
     <string name="video_section_screen">Screen</string>
     <string name="video_variant">Variant</string>
     <string name="video_variant_title">Select variant</string>
+    <string name="video_variant_recheck">Check again</string>
     <string name="video_variant_fallback">Variant %1$d</string>
     <string name="video_subtitle_track">Subtitle track</string>
     <string name="video_episodes">Episodes</string>

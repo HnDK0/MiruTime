@@ -2,6 +2,8 @@ package dev.mirutime.app.features.settings.data
 
 import android.content.Context
 import dev.mirutime.core.log.MiruLog
+import dev.mirutime.data.library.LibraryDao
+import dev.mirutime.data.library.restoreBookIdMap as computeRestoreBookIdMap
 import dev.mirutime.data.library.LibraryDatabase
 import dev.mirutime.data.library.LibraryImportReport
 import dev.mirutime.data.library.LibrarySchemaVersion
@@ -43,18 +45,73 @@ import kotlinx.coroutines.withContext
  * only finishes applying settings when it did. No manual restart is required in
  * the normal path.
  */
+// Manga pages, bodies and local copies are never packed. After restore, drop
+// only the rows whose files are absent, so an existing same-device download
+// survives.
+internal suspend fun LibraryDao.pruneMissingRestoredContent(
+    exists: (String) -> Boolean,
+) {
+    restorePageRows().forEach { row ->
+        val paths = pagePaths(row.pagePathsJson)
+        if (paths.isEmpty() || paths.any { !exists(it) }) {
+            deleteChapterPages(listOf(row.chapterId))
+        }
+    }
+    localMangaBodyRows().forEach { row ->
+        if (!exists(row.path)) deleteChapterBody(row.chapterId)
+    }
+    localMangaFileRows().forEach { row ->
+        if (row.copyPath.isBlank() || !exists(row.copyPath)) {
+            deleteLocalBookFile(row.bookId)
+        }
+    }
+    // A backup may legitimately contain only the DB (files=0). The restored
+    // book_covers rows still point at paths that do not exist on this device;
+    // clear them so the library uses remoteUrl and the cover backfill can
+    // download the files again.
+    var clearedCovers = 0
+    bookCovers().forEach { row ->
+        val path = row.localPath
+        if (!path.isNullOrBlank() && !exists(path)) {
+            upsertBookCover(
+                row.copy(
+                    localPath = null,
+                    sha256 = null,
+                    bytes = 0,
+                    fetchedAt = null,
+                    checkedAt = null,
+                    etag = null,
+                    lastModified = null,
+                    lastError = null,
+                    retryAt = null,
+                ),
+            )
+            clearedCovers++
+        }
+    }
+    if (clearedCovers > 0) {
+        MiruLog.event("backup", "covers-cleared", "count" to clearedCovers)
+    }
+    // Deleting the pages/bodies above may leave a chapter that still claims to
+    // be offline. The denormalized flag is only valid while a body/page row
+    // exists, so drop the ones this restore just orphaned.
+    resetOrphanedDownloadedFlags()
+}
+
 class BackupRestoreService(
     private val filesDir: File,
     private val databasePath: File,
     private val settingsStore: SettingsStore,
     private val readerStore: ReaderBackupStore = NoopReaderBackupStore,
+    private val pluginKvStore: PluginKvBackupStore,
+    private val localSourcesStore: LocalSourcesBackupStore,
     private val appDataDir: File = filesDir.parentFile ?: filesDir,
     private val verifyDatabase: (File) -> Unit = { verifyDatabaseSnapshot(it.absolutePath) },
     private val inspectDatabase: (File) -> Int = { inspectBackupDatabase(it.absolutePath) },
     private val migrateDatabase: (File, Int) -> Unit = { file, fromVersion ->
         migrateBackupDatabase(file.absolutePath, fromVersion, LibrarySchemaVersion)
     },
-    private val importDatabase: ImportDatabase = { _, _, _, _ ->
+    private val importDatabase: ImportDatabase = { _, _, _, _, _ ->
         error("Live database import is not configured")
     },
     private val journalExists: suspend (Long) -> Boolean = { false },
@@ -68,9 +125,14 @@ class BackupRestoreService(
     },
     private val deletePath: (File) -> Boolean = { it.delete() },
     private val movePath: ((File, File) -> Unit)? = null,
+    private val writeAtomicFile: (File, String) -> Unit = ::writeTextAtomic,
+    // Old->new book ids recovered by identity; only the journalless recovery
+    // needs it, but the app passes the real one so covers can be placed.
+    private val restoreBookIdMap: (staged: File, live: File) -> Map<Long, Long> = { _, _ -> emptyMap() },
     private val maxEntryBytes: Long = MAX_RESTORE_ENTRY_BYTES,
     private val maxTotalBytes: Long = MAX_RESTORE_TOTAL_BYTES,
     private val maxEntries: Int = MAX_RESTORE_ENTRIES,
+    private val pruneMissingRestoredContent: suspend () -> Unit = {},
 ) {
     constructor(
         context: Context,
@@ -80,6 +142,8 @@ class BackupRestoreService(
         reloadPlugins: suspend () -> Unit = {},
         clearImageCaches: () -> Unit = {},
         readerStore: ReaderBackupStore = NoopReaderBackupStore,
+        pluginKvStore: PluginKvBackupStore,
+        localSourcesStore: LocalSourcesBackupStore,
         repair: suspend () -> Unit = {},
         onBookKeyRewritten: suspend (oldUrl: String, newUrl: String) -> Unit = { _, _ -> },
     ) : this(
@@ -87,9 +151,11 @@ class BackupRestoreService(
         databasePath = databasePath,
         settingsStore = settingsStore,
         readerStore = readerStore,
+        pluginKvStore = pluginKvStore,
+        localSourcesStore = localSourcesStore,
         appDataDir = context.applicationContext.filesDir.parentFile
             ?: context.applicationContext.filesDir,
-        importDatabase = { sourceFile, coverPathFor, journalId, journalNow ->
+        importDatabase = { sourceFile, coverPathFor, journalId, journalNow, onCommitted ->
             val source = libraryDatabaseAt(context, sourceFile)
             try {
                 database.importLibraryBackup(
@@ -99,11 +165,13 @@ class BackupRestoreService(
                     journalNow = journalNow,
                     onBookKeyRewritten = onBookKeyRewritten,
                     repair = repair,
+                    onCommitted = onCommitted,
                 )
             } finally {
                 source.close()
             }
         },
+        restoreBookIdMap = { staged, live -> computeRestoreBookIdMap(staged.absolutePath, live.absolutePath) },
         journalExists = { id ->
             database.libraryDao().restoreJournalCount(
                 id = id,
@@ -119,6 +187,17 @@ class BackupRestoreService(
         },
         reloadPlugins = reloadPlugins,
         clearImageCaches = clearImageCaches,
+        pruneMissingRestoredContent = {
+            val root = context.applicationContext.filesDir.normalize()
+            database.libraryDao().pruneMissingRestoredContent { path ->
+                if (path.isBlank()) {
+                    false
+                } else {
+                    val file = (if (File(path).isAbsolute) File(path) else File(root, path)).normalize()
+                    file.startsWith(root) && file.exists()
+                }
+            }
+        },
     )
 
     private val stagingRoot = File(filesDir, STAGING_DIR)
@@ -199,10 +278,31 @@ class BackupRestoreService(
         onStage: ((RestoreProgress) -> Unit)?,
     ): RestoreStageResult = withContext(Dispatchers.IO) {
         if (stagingRoot.exists()) {
-            return@withContext RestoreStageResult(
-                success = false,
-                error = "Another restore is already in progress.",
-            )
+            // A staging directory on disk is not an active operation: the
+            // process-wide gate already serializes backups/restores. Finish an
+            // interrupted restore if possible, otherwise drop the unusable
+            // leftover; otherwise it would block every later restore.
+            try {
+                recoverInterruptedRestore()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                MiruLog.event(
+                    "backup",
+                    "stale-stage-recovery-failed",
+                    "error" to e::class.simpleName,
+                )
+            }
+            if (stagingRoot.exists()) {
+                stagingRoot.deleteRecursively()
+                MiruLog.event("backup", "stale-stage-cleared")
+            }
+            if (stagingRoot.exists()) {
+                return@withContext RestoreStageResult(
+                    success = false,
+                    error = "Cannot clear a stale restore directory.",
+                )
+            }
         }
         val temp = File(filesDir, "$STAGING_DIR.tmp-${newId()}")
         try {
@@ -260,38 +360,116 @@ class BackupRestoreService(
                 (marker.operationId?.let { journalExists(it) } ?: false)
             val result = if (dbCommitted) {
                 if (!needsFileResume && stagingRoot.isDirectory) {
-                    // DB committed but no file mapping exists (crash between
-                    // commit and journal write). Never delete the only staged
-                    // files; a later build can recover from them.
-                    return RestoreApplyResult(applied = true)
+                    // DB committed but no file mapping was ever journaled (crash
+                    // or a full disk between the commit and the journal write).
+                    val staged = try {
+                        readStagedManifest()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // A finished restore whose staging survived: nothing to
+                        // materialize, and the plugin reload stays skipped.
+                        val replay = replayRestoredSnapshots(reload = false)
+                        if (replay.ok && marker.phase == PHASE_DB_COMMITTED) {
+                            stagingRoot.deleteRecursively()
+                            rollbackRoot.deleteRecursively()
+                        }
+                        return RestoreApplyResult(
+                            applied = true,
+                            settings = replay.settings,
+                            error = replay.error,
+                        )
+                    }
+                    // The file mapping was never journaled, but books can be
+                    // matched to the live rows by identity, so covers land on
+                    // their new ids too. Without this the library would list
+                    // books whose files never left the staging tree.
+                    val materializeError = try {
+                        val ids = runCatching {
+                            restoreBookIdMap(
+                                resolveInside(stagingRoot, staged.database.name),
+                                databasePath,
+                            )
+                        }.getOrDefault(emptyMap())
+                        copyStagedFiles(
+                            manifest = staged.copy(
+                                // A cover already on disk is a live user
+                                // override or a finished copy: never overwrite it.
+                                files = staged.files.filter { entry ->
+                                    if (entry.kind != KIND_COVER) return@filter true
+                                    val newId = ids[entry.bookId] ?: return@filter false
+                                    !File(
+                                        File(filesDir, "covers/$newId"),
+                                        entry.path.substringAfterLast('/'),
+                                    ).exists()
+                                },
+                            ),
+                            bookIds = ids,
+                            preservedCovers = emptySet(),
+                            rollbacks = mutableListOf(),
+                            created = mutableListOf(),
+                            onStage = null,
+                            resume = true,
+                        )
+                        pruneMissingRestoredContent()
+                        writeMarker(PHASE_DB_COMMITTED, marker.operationId ?: 0L)
+                        marker.operationId?.let { deleteJournal(it) }
+                        null
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        MiruLog.event(
+                            "backup",
+                            "journalless-file-recovery-failed",
+                            "error" to e::class.simpleName,
+                        )
+                        e.message ?: "Restored files could not be copied"
+                    }
+                    val replay = replayRestoredSnapshots(reload = true)
+                    if (materializeError == null && replay.ok) {
+                        stagingRoot.deleteRecursively()
+                        rollbackRoot.deleteRecursively()
+                    }
+                    return RestoreApplyResult(
+                        applied = true,
+                        settings = replay.settings,
+                        error = replay.error ?: materializeError,
+                    )
                 }
                 if (needsFileResume) {
                     val resumed = runCatching { resumeFilePhase() }.getOrDefault(false)
+                    if (resumed) runCatching { pruneMissingRestoredContent() }
                     if (!resumed) {
                         // DB is committed; keep staging + mapping for another
                         // attempt instead of dropping the only local files.
-                        return RestoreApplyResult(applied = true)
+                        val replay = replayRestoredSnapshots(reload = false)
+                        return RestoreApplyResult(
+                            applied = true,
+                            settings = replay.settings,
+                            error = replay.error,
+                        )
                     }
                     writeMarker(PHASE_DB_COMMITTED, marker.operationId ?: 0L)
                     File(rollbackRoot, FILE_JOURNAL).delete()
                 }
-                val restored = File(rollbackRoot, RESTORED_SETTINGS_ENTRY)
-                val settings = if (restored.isFile) parseSettings(restored) else null
-                val restoredReader = File(rollbackRoot, RESTORED_READER_ENTRY)
-                val reader = if (restoredReader.isFile) parseReaderPrefs(restoredReader) else null
-                val settingsOk = runCatching {
-                    settings?.let { settingsStore.save(it) }
-                    reader?.let { readerStore.restore(it) }
-                }.isSuccess
+                val replay = replayRestoredSnapshots(reload = true)
                 val journalOk = runCatching {
                     marker.operationId?.let { deleteJournal(it) }
                 }.isSuccess
-                if (!settingsOk || !journalOk) {
+                if (!replay.ok || !journalOk) {
                     // The DB is committed; keep the marker/rollback for retry
                     // but never report a rollback.
-                    return RestoreApplyResult(applied = true, settings = settings)
+                    return RestoreApplyResult(
+                        applied = true,
+                        settings = replay.settings,
+                        error = replay.error ?: if (!journalOk) {
+                            "Restore journal could not be cleared"
+                        } else {
+                            null
+                        },
+                    )
                 }
-                RestoreApplyResult(applied = true, settings = settings)
+                RestoreApplyResult(applied = true, settings = replay.settings)
             } else {
                 val filesRestored = rollbackStagedFiles()
                 val previous = File(rollbackRoot, PREVIOUS_SETTINGS_ENTRY)
@@ -299,7 +477,9 @@ class BackupRestoreService(
                 val previousReader = File(rollbackRoot, PREVIOUS_READER_ENTRY)
                 val reader = if (previousReader.isFile) parseReaderPrefs(previousReader) else null
                 val settingsRestored = runCatching {
-                    settings?.let { settingsStore.save(it) }
+                    settings?.let {
+                        if (!settingsStore.save(it)) error("settings were not persisted")
+                    }
                     reader?.let { readerStore.restore(it) }
                 }.isSuccess
                 if (!filesRestored || !settingsRestored) {
@@ -314,13 +494,87 @@ class BackupRestoreService(
             stagingRoot.deleteRecursively()
             rollbackRoot.deleteRecursively()
             result
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             RestoreApplyResult(applied = false)
         }
     }
 
+    private data class ReplayResult(
+        val settings: PersistedSettings?,
+        val ok: Boolean,
+        val error: String?,
+    )
+
+    /**
+     * Applies every durable RESTORED_* snapshot. Idempotent: KV/local sources
+     * merge, settings/reader overwrite. One failed step does not skip the rest.
+     */
+    private suspend fun replayRestoredSnapshots(
+        reload: Boolean,
+    ): ReplayResult {
+        val settingsFile = File(rollbackRoot, RESTORED_SETTINGS_ENTRY)
+        val readerFile = File(rollbackRoot, RESTORED_READER_ENTRY)
+        val pluginKvFile = File(rollbackRoot, RESTORED_PLUGIN_KV_ENTRY)
+        val localSourcesFile = File(rollbackRoot, RESTORED_LOCAL_SOURCES_ENTRY)
+        var ok = true
+        var firstError: String? = null
+
+        fun rememberFailure(label: String, e: Throwable) {
+            ok = false
+            if (firstError == null) firstError = "$label: ${e.message ?: "failed"}"
+        }
+
+        val settings = runCatching {
+            if (settingsFile.isFile) parseSettings(settingsFile) else null
+        }.getOrElse {
+            rememberFailure("settings", it)
+            null
+        }
+        val reader = runCatching {
+            if (readerFile.isFile) parseReaderPrefs(readerFile) else null
+        }.getOrElse {
+            rememberFailure("reader", it)
+            null
+        }
+        val pluginKv = runCatching {
+            if (pluginKvFile.isFile) parsePluginKv(pluginKvFile) else null
+        }.getOrElse {
+            rememberFailure("plugin-kv", it)
+            null
+        }
+        val localSources = runCatching {
+            if (localSourcesFile.isFile) parseLocalSources(localSourcesFile) else null
+        }.getOrElse {
+            rememberFailure("local-sources", it)
+            null
+        }
+
+        suspend fun runStep(label: String, block: suspend () -> Unit) {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                rememberFailure(label, e)
+            }
+        }
+
+        runStep("settings") {
+            settings?.let { if (!settingsStore.save(it)) error("settings were not persisted") }
+        }
+        runStep("reader") { reader?.let { readerStore.restore(it) } }
+        runStep("plugin-kv") { pluginKv?.let { pluginKvStore.restore(it) } }
+        runStep("local-sources") { localSources?.let { localSourcesStore.restore(it) } }
+        if (reload && (pluginKv != null || localSources != null)) {
+            runStep("plugins") { reloadPlugins() }
+        }
+        return ReplayResult(settings, ok, firstError)
+    }
+
     private fun writeMarker(phase: String, operationId: Long) {
-        File(rollbackRoot, PROGRESS_MARKER).writeText("$phase\n$operationId")
+        writeAtomicFile(File(rollbackRoot, PROGRESS_MARKER), "$phase\n$operationId")
     }
 
     private fun writeFileJournal(bookIds: Map<Long, Long>, preservedCovers: Set<Long>) {
@@ -328,7 +582,7 @@ class BackupRestoreService(
         lines += FILE_JOURNAL_VERSION
         bookIds.forEach { (oldId, newId) -> lines += "b $oldId $newId" }
         preservedCovers.forEach { lines += "p $it" }
-        File(rollbackRoot, FILE_JOURNAL).writeText(lines.joinToString("\n"))
+        writeAtomicFile(File(rollbackRoot, FILE_JOURNAL), lines.joinToString("\n"))
     }
 
     private fun readFileJournal(): Pair<Map<Long, Long>, Set<Long>>? {
@@ -396,6 +650,7 @@ class BackupRestoreService(
             return RestoreApplyResult(applied = false, error = "No staged restore to apply")
         }
         var phase = PHASE_FILES_COPIED
+        var journalWarning: String? = null
         var previousSettings: PersistedSettings? = null
         var previousReader: ReaderBackupPrefs? = null
         val operationId = newOperationId()
@@ -415,7 +670,7 @@ class BackupRestoreService(
             }
             verifyDatabase(stagedDb)
 
-            val settings = manifest.settings?.let { entry ->
+            val archivedSettings = manifest.settings?.let { entry ->
                 val stagedSettingsFile = resolveInside(stagingRoot, entry.name)
                 requireEntryFile(stagedSettingsFile, entry, "settings")
                 if (sha256File(stagedSettingsFile) != entry.sha256) {
@@ -431,10 +686,36 @@ class BackupRestoreService(
                 }
                 parseReaderPrefs(stagedReaderFile)
             }
+            val pluginKv = manifest.pluginKv?.let { entry ->
+                val stagedKvFile = resolveInside(stagingRoot, entry.name)
+                requireEntryFile(stagedKvFile, entry, "plugin settings")
+                if (sha256File(stagedKvFile) != entry.sha256) {
+                    error("Plugin settings checksum does not match the manifest")
+                }
+                parsePluginKv(stagedKvFile)
+            }
+            val localSources = manifest.localSources?.let { entry ->
+                val stagedSourcesFile = resolveInside(stagingRoot, entry.name)
+                requireEntryFile(stagedSourcesFile, entry, "local sources")
+                if (sha256File(stagedSourcesFile) != entry.sha256) {
+                    error("Local sources checksum does not match the manifest")
+                }
+                parseLocalSources(stagedSourcesFile)
+            }
 
             previousSettings = runCatching { settingsStore.load() }.getOrNull()
             previousReader = runCatching { readerStore.snapshot() }.getOrNull()
-            prepareRollback(previousSettings, settings, previousReader, reader, operationId)
+            // SAF folder picks belong to this device, not to the archive.
+            val settings = archivedSettings?.withDeviceLocalPathsFrom(previousSettings)
+            prepareRollback(
+                previousSettings,
+                settings,
+                previousReader,
+                reader,
+                pluginKv,
+                localSources,
+                operationId,
+            )
             onProgress(STAGING_PROGRESS * 0.99f)
 
             onStage?.invoke(RestoreProgress(RestoreStage.DATABASE, 0, 1))
@@ -447,7 +728,25 @@ class BackupRestoreService(
                 },
                 operationId,
                 System.currentTimeMillis(),
-            )
+            ) { committed ->
+                // The DB transaction is durable: journal the file mapping and
+                // mark the phase before repair/FTS can be cancelled. A journal
+                // failure must not turn a committed restore into a failure.
+                phase = PHASE_DB_FILES
+                try {
+                    writeFileJournal(committed.bookIdMap, committed.preservedCoverBookIds)
+                    writeMarker(PHASE_DB_FILES, operationId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    journalWarning = e.message ?: "Restore journal could not be written"
+                    MiruLog.event(
+                        "backup",
+                        "journal-write-failed",
+                        "error" to e::class.simpleName,
+                    )
+                }
+            }
             onStage?.invoke(RestoreProgress(RestoreStage.DATABASE, 1, 1))
             phase = PHASE_DB_FILES
             // From here the DB is durable. Cancellation must never roll it
@@ -455,9 +754,23 @@ class BackupRestoreService(
             return withContext(NonCancellable) {
                 try {
                     // Journal first: a kill before the marker must still be
-                    // recoverable via the journal row + files.journal.
-                    writeFileJournal(report.bookIdMap, report.preservedCoverBookIds)
-                    writeMarker(PHASE_DB_FILES, operationId)
+                    // recoverable via the journal row + files.journal. A full
+                    // disk here must not skip the file copy itself: the copy
+                    // works from the in-memory mapping.
+                    try {
+                        writeFileJournal(report.bookIdMap, report.preservedCoverBookIds)
+                        writeMarker(PHASE_DB_FILES, operationId)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        journalWarning = journalWarning
+                            ?: (e.message ?: "Restore journal could not be written")
+                        MiruLog.event(
+                            "backup",
+                            "journal-write-failed",
+                            "error" to e::class.simpleName,
+                        )
+                    }
                     copyStagedFiles(
                         manifest = manifest,
                         bookIds = report.bookIdMap,
@@ -466,6 +779,7 @@ class BackupRestoreService(
                         created = mutableListOf(),
                         onStage = onStage,
                     )
+                    pruneMissingRestoredContent()
                     phase = PHASE_DB_COMMITTED
                     writeMarker(PHASE_DB_COMMITTED, operationId)
                     File(rollbackRoot, FILE_JOURNAL).delete()
@@ -473,13 +787,17 @@ class BackupRestoreService(
 
                     if (settings != null) {
                         onStage?.invoke(RestoreProgress(RestoreStage.SETTINGS, 0, 1))
-                        settingsStore.save(settings)
+                        if (!settingsStore.save(settings)) {
+                            error("Restored settings could not be saved")
+                        }
                         AppSettings.applyPersisted(settings)
                         onStage?.invoke(RestoreProgress(RestoreStage.SETTINGS, 1, 1))
                     }
                     if (reader != null) {
                         readerStore.restore(reader)
                     }
+                    pluginKv?.let { pluginKvStore.restore(it) }
+                    localSources?.let { localSourcesStore.restore(it) }
 
                     // Derived caches/plugins are rebuilt only after the import commits.
                     onStage?.invoke(RestoreProgress(RestoreStage.CACHE, 0, 1))
@@ -496,15 +814,18 @@ class BackupRestoreService(
                         applied = true,
                         settings = settings,
                         pluginsRestored = manifest.plugins.size,
+                        error = journalWarning,
                     )
                 } catch (e: Exception) {
-                    // DB is committed; keep db-files marker + staging + mapping
-                    // for the next-start retry. Never call the rollback path.
+                    // DB and files are committed; settings may be partial.
+                    // Staging is no longer needed and must not block a later
+                    // restore; keep only the rollback snapshots for recovery.
+                    if (phase == PHASE_DB_COMMITTED) stagingRoot.deleteRecursively()
                     RestoreApplyResult(
                         applied = true,
                         settings = settings,
                         pluginsRestored = manifest.plugins.size,
-                        error = e.message,
+                        error = e.message ?: journalWarning,
                     )
                 }
             }
@@ -548,19 +869,11 @@ class BackupRestoreService(
             return
         }
         if (phase == PHASE_DB_COMMITTED) {
-            // The database transaction is already durable; only settings may
-            // still need to land. Leave the marker for next-start recovery if
-            // this save fails.
-            runCatching {
-                val restored = File(rollbackRoot, RESTORED_SETTINGS_ENTRY)
-                if (restored.isFile) {
-                    val settings = parseSettings(restored)
-                    settingsStore.save(settings)
-                    AppSettings.applyPersisted(settings)
-                }
-                val restoredReader = File(rollbackRoot, RESTORED_READER_ENTRY)
-                if (restoredReader.isFile) readerStore.restore(parseReaderPrefs(restoredReader))
-                deleteJournal(operationId)
+            // The database transaction is already durable; replay the durable
+            // RESTORED_* snapshots. Keep the marker when anything fails.
+            val replay = replayRestoredSnapshots(reload = true)
+            replay.settings?.let { AppSettings.applyPersisted(it) }
+            if (replay.ok && runCatching { deleteJournal(operationId) }.isSuccess) {
                 rollbackRoot.deleteRecursively()
             }
             stagingRoot.deleteRecursively()
@@ -568,7 +881,7 @@ class BackupRestoreService(
             val filesRolledBack = rollbackFiles(rollbacks, created)
             val settingsRolledBack = previousSettings?.let {
                 runCatching {
-                    settingsStore.save(it)
+                    if (!settingsStore.save(it)) error("settings were not persisted")
                     AppSettings.applyPersisted(it)
                 }.isSuccess
             } ?: true
@@ -589,6 +902,8 @@ class BackupRestoreService(
         restored: PersistedSettings?,
         previousReader: ReaderBackupPrefs?,
         restoredReader: ReaderBackupPrefs?,
+        restoredPluginKv: PluginKvBackup?,
+        restoredLocalSources: LocalSourcesBackup?,
         operationId: Long,
     ) {
         rollbackRoot.deleteRecursively()
@@ -611,6 +926,16 @@ class BackupRestoreService(
         restoredReader?.let {
             File(rollbackRoot, RESTORED_READER_ENTRY).writeText(
                 BackupJson.encodeToString(ReaderBackupPrefs.serializer(), it),
+            )
+        }
+        restoredPluginKv?.let {
+            File(rollbackRoot, RESTORED_PLUGIN_KV_ENTRY).writeText(
+                BackupJson.encodeToString(PluginKvBackup.serializer(), it),
+            )
+        }
+        restoredLocalSources?.let {
+            File(rollbackRoot, RESTORED_LOCAL_SOURCES_ENTRY).writeText(
+                BackupJson.encodeToString(LocalSourcesBackup.serializer(), it),
             )
         }
         File(rollbackRoot, PROGRESS_MARKER).writeText("$PHASE_FILES_COPIED\n$operationId")
@@ -849,6 +1174,20 @@ class BackupRestoreService(
             }
             parseReaderPrefs(readerFile)
         }
+        manifest.pluginKv?.let { entry ->
+            val pluginKvFile = resolveInside(temp, entry.name)
+            if (pluginKvFile.length() > MAX_RESTORE_PLUGIN_KV_BYTES) {
+                error("plugin-kv.json is too large")
+            }
+            parsePluginKv(pluginKvFile)
+        }
+        manifest.localSources?.let { entry ->
+            val localSourcesFile = resolveInside(temp, entry.name)
+            if (localSourcesFile.length() > MAX_RESTORE_LOCAL_SOURCES_BYTES) {
+                error("local-sources.json is too large")
+            }
+            parseLocalSources(localSourcesFile)
+        }
 
         val stagedDb = resolveInside(temp, DATABASE_ENTRY)
         try {
@@ -904,6 +1243,8 @@ class BackupRestoreService(
             maxEntryBytes = maxEntryBytes,
             maxSettingsBytes = MAX_RESTORE_SETTINGS_BYTES,
             maxReaderBytes = MAX_RESTORE_READER_BYTES,
+            maxPluginKvBytes = MAX_RESTORE_PLUGIN_KV_BYTES,
+            maxLocalSourcesBytes = MAX_RESTORE_LOCAL_SOURCES_BYTES,
         ).forEach { entry ->
             expected[entry.path] = ExpectedEntry(
                 size = entry.size,
@@ -955,6 +1296,38 @@ class BackupRestoreService(
             error("Unsupported reader preferences version ${prefs.version}")
         }
         return prefs
+    }
+
+    private fun parsePluginKv(file: File): PluginKvBackup {
+        if (file.length() > MAX_RESTORE_PLUGIN_KV_BYTES) {
+            error("plugin-kv.json is too large")
+        }
+        val text = try {
+            file.readText()
+        } catch (_: Exception) {
+            error("plugin-kv.json could not be read")
+        }
+        return try {
+            BackupJson.decodeFromString(PluginKvBackup.serializer(), text)
+        } catch (_: Exception) {
+            error("plugin-kv.json is not a valid plugin settings snapshot")
+        }
+    }
+
+    private fun parseLocalSources(file: File): LocalSourcesBackup {
+        if (file.length() > MAX_RESTORE_LOCAL_SOURCES_BYTES) {
+            error("local-sources.json is too large")
+        }
+        val text = try {
+            file.readText()
+        } catch (_: Exception) {
+            error("local-sources.json could not be read")
+        }
+        return try {
+            BackupJson.decodeFromString(LocalSourcesBackup.serializer(), text)
+        } catch (_: Exception) {
+            error("local-sources.json is not a valid local sources snapshot")
+        }
     }
 
     private fun readStagedManifest(): BackupManifest {
@@ -1028,11 +1401,41 @@ class BackupRestoreService(
                 error("Backup reader preferences have an invalid checksum")
             }
         }
+        manifest.pluginKv?.let { kv ->
+            if (kv.name != PLUGIN_KV_ENTRY) {
+                error("Backup plugin settings path is not supported")
+            }
+            if (kv.size < 0 || kv.size > MAX_RESTORE_PLUGIN_KV_BYTES) {
+                error("Backup plugin settings are too large")
+            }
+            if (!SHA256_HEX.matches(kv.sha256)) {
+                error("Backup plugin settings have an invalid checksum")
+            }
+            if (!manifest.settingsIncluded && !manifest.pluginsIncluded) {
+                error("Backup plugin settings flag does not match its payload")
+            }
+        }
+        manifest.localSources?.let { sources ->
+            if (sources.name != LOCAL_SOURCES_ENTRY) {
+                error("Backup local sources path is not supported")
+            }
+            if (sources.size < 0 || sources.size > MAX_RESTORE_LOCAL_SOURCES_BYTES) {
+                error("Backup local sources are too large")
+            }
+            if (!SHA256_HEX.matches(sources.sha256)) {
+                error("Backup local sources have an invalid checksum")
+            }
+            if (!manifest.settingsIncluded) {
+                error("Backup local sources flag does not match its payload")
+            }
+        }
         validateEntry(manifest.database, "database")
 
         val seen = hashSetOf(MANIFEST_ENTRY, DATABASE_ENTRY)
         manifest.settings?.let { seen += it.name }
         manifest.reader?.let { seen += it.name }
+        manifest.pluginKv?.let { seen += it.name }
+        manifest.localSources?.let { seen += it.name }
         manifest.files.forEach { entry ->
             val path = validateRelative(entry.path)
             if (!path.startsWith("$FILES_DIR/") || path.length <= FILES_DIR.length + 1) {
@@ -1206,6 +1609,8 @@ class BackupRestoreService(
         private const val RESTORED_SETTINGS_ENTRY = "settings.restore.json"
         private const val PREVIOUS_READER_ENTRY = "reader.previous.json"
         private const val RESTORED_READER_ENTRY = "reader.restore.json"
+        private const val RESTORED_PLUGIN_KV_ENTRY = "plugin-kv.restore.json"
+        private const val RESTORED_LOCAL_SOURCES_ENTRY = "local-sources.restore.json"
         private const val PROGRESS_MARKER = "progress"
         private const val PHASE_FILES_COPIED = "files"
         private const val PHASE_DB_FILES = "db-files"
@@ -1213,9 +1618,11 @@ class BackupRestoreService(
         private const val FILE_JOURNAL = "files.journal"
         private const val FILE_JOURNAL_VERSION = "v1"
         private const val RESTORE_CHUNK_BYTES = 64 * 1024
-        private const val MAX_RESTORE_MANIFEST_BYTES = 1024L * 1024
+        private const val MAX_RESTORE_MANIFEST_BYTES = 16L * 1024 * 1024
         private const val MAX_RESTORE_SETTINGS_BYTES = 16L * 1024 * 1024
         private const val MAX_RESTORE_READER_BYTES = 4L * 1024 * 1024
+        private const val MAX_RESTORE_PLUGIN_KV_BYTES = 4L * 1024 * 1024
+        private const val MAX_RESTORE_LOCAL_SOURCES_BYTES = 8L * 1024 * 1024
         private const val MAX_RESTORE_PATH_LENGTH = 1024
         private const val MAX_RESTORE_ENTRY_BYTES = 2L * 1024 * 1024 * 1024
         private const val MAX_RESTORE_TOTAL_BYTES = 8L * 1024 * 1024 * 1024
@@ -1266,7 +1673,19 @@ internal typealias ImportDatabase = suspend (
     coverPathFor: (oldBookId: Long, newBookId: Long, oldPath: String?) -> String?,
     journalId: Long,
     journalNow: Long,
+    onCommitted: suspend (LibraryImportReport) -> Unit,
 ) -> LibraryImportReport
+
+// Temp-file + rename so a crash never leaves a half-written marker/journal.
+internal fun writeTextAtomic(file: File, text: String) {
+    file.parentFile?.mkdirs()
+    val temp = File(file.parentFile, "${file.name}.tmp")
+    temp.writeText(text)
+    if (!temp.renameTo(file)) {
+        file.delete()
+        check(temp.renameTo(file)) { "Cannot write ${file.name}" }
+    }
+}
 
 data class RestoreStageResult(
     val success: Boolean,

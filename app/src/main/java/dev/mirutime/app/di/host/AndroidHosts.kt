@@ -5,6 +5,9 @@ import android.os.Build
 import dev.mirutime.core.log.MiruLog
 import dev.mirutime.core.host.CookieStore
 import dev.mirutime.core.host.FileSystem
+import dev.mirutime.app.features.settings.data.PluginKvBackup
+import dev.mirutime.app.features.settings.data.PluginKvBackupStore
+import dev.mirutime.app.features.settings.data.mergePluginKv
 import dev.mirutime.core.host.KeyValueStore
 import dev.mirutime.core.host.Logger
 import dev.mirutime.core.host.SystemInfo
@@ -67,7 +70,9 @@ class AndroidFileSystem(private val rootDir: File) : FileSystem {
                 target.writeBytes(data)
                 tmp.delete()
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // No path/host in the log: it can name a plugin or user source.
+            MiruLog.w("fs", "event=fs-write-failed error=${e::class.simpleName}")
             runCatching { tmp.delete() }
         }
     }
@@ -80,24 +85,58 @@ class AndroidFileSystem(private val rootDir: File) : FileSystem {
     }
 
     override fun rename(from: String, to: String) {
-        runCatching {
+        val renamed = runCatching {
             val target = resolve(to)
             target.parentFile?.mkdirs()
             resolve(from).renameTo(target)
-        }
+        }.getOrDefault(false)
+        if (!renamed) MiruLog.w("fs", "event=fs-rename-failed")
     }
 
     override fun list(dir: String): List<String> =
         runCatching { resolve(dir).list()?.sorted()?.map { "$dir/$it" } }.getOrNull().orEmpty()
 
     private fun resolve(path: String): File {
-        val file = File(path)
-        return if (file.isAbsolute) file else File(rootDir, path)
+        // Preserve access to absolute paths that already lie inside rootDir
+        // (compatibility with older callers), while blocking everything else.
+        val absolute = File(path)
+        if (absolute.isAbsolute) {
+            val canonical = runCatching { absolute.canonicalFile }.getOrNull()
+            val rootCanonical = rootDir.canonicalFile
+            if (canonical != null &&
+                (canonical == rootCanonical ||
+                    canonical.path.startsWith(rootCanonical.path + File.separator))
+            ) {
+                return absolute
+            }
+        }
+        // Normalize traversal so "../" cannot escape rootDir, while keeping the
+        // ordinary relative semantics (a/../b -> b). Invalid/empty results land
+        // on a sentinel that never exists, so mutations are no-ops.
+        val segments = mutableListOf<String>()
+        for (part in path.replace('\\', '/').split('/')) {
+            when {
+                part.isEmpty() || part == "." -> Unit
+                part == ".." -> if (segments.isNotEmpty()) segments.removeAt(segments.lastIndex)
+                else -> segments += part
+            }
+        }
+        if (segments.isEmpty()) return File(rootDir, ".invalid")
+        val candidate = segments.fold(rootDir) { acc, segment -> File(acc, segment) }
+        val rootCanonical = rootDir.canonicalFile
+        val candidateCanonical = runCatching { candidate.canonicalFile }.getOrNull() ?: candidate
+        return if (candidateCanonical == rootCanonical ||
+            candidateCanonical.path.startsWith(rootCanonical.path + File.separator)
+        ) {
+            candidate
+        } else {
+            File(rootDir, ".invalid")
+        }
     }
 }
 
 // One SharedPreferences file; keys namespaced as "<namespace>:<key>".
-class PrefsKeyValueStore(context: Context) : KeyValueStore {
+class PrefsKeyValueStore(context: Context) : KeyValueStore, PluginKvBackupStore {
     private val prefs = context.applicationContext
         .getSharedPreferences("mirutime_kv", Context.MODE_PRIVATE)
 
@@ -110,5 +149,20 @@ class PrefsKeyValueStore(context: Context) : KeyValueStore {
 
     override fun remove(namespace: String, key: String) {
         prefs.edit().remove("$namespace:$key").apply()
+    }
+
+    override fun snapshot(): PluginKvBackup = PluginKvBackup(
+        entries = prefs.all.mapNotNull { (key, value) ->
+            (value as? String)?.let { key to it }
+        }.toMap(),
+    )
+
+    override fun restore(backup: PluginKvBackup) {
+        // Keys are stored verbatim ("namespace:key"); never route them through set().
+        val editor = prefs.edit()
+        mergePluginKv(snapshot().entries, backup.entries).forEach { (key, value) ->
+            editor.putString(key, value)
+        }
+        check(editor.commit()) { "Could not restore plugin settings" }
     }
 }

@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.navigation.compose.rememberNavController
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,6 +69,7 @@ class MainActivity : ComponentActivity() {
     private val pendingOpenTitle = mutableStateOf("")
     // Library-update notification: route to the Updates screen once per intent.
     private val pendingOpenUpdates = mutableStateOf(false)
+    private var navController: androidx.navigation.NavHostController? = null
 
     // The app language is applied before the activity's resources are built,
     // so the first frame already uses the saved locale (no AppCompat).
@@ -79,6 +81,13 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         openFromIntent(intent)
+    }
+
+    override fun onSaveInstanceState(outState: android.os.Bundle) {
+        super.onSaveInstanceState(outState)
+        navController?.currentBackStackEntry?.destination?.route?.let { route ->
+            outState.putString("saved_route", route)
+        }
     }
 
     private fun openFromIntent(intent: android.content.Intent?) {
@@ -101,9 +110,16 @@ class MainActivity : ComponentActivity() {
         }
         super.onCreate(savedInstanceState)
         openFromIntent(intent)
+        val initialRoute = savedInstanceState?.getString("saved_route")
         val (savedMode, savedBg) = loadThemePrefs(applicationContext)
         val savedLibrary = loadBgLibrary(applicationContext, savedBg)
         setContent {
+            // Hoisted so the NavController is created before the DB gate and
+            // survives process death / restore (otherwise the back stack resets
+            // to the start destination on restore).
+            val navController = rememberNavController()
+            this.navController = navController
+            // Route persistence handled by onSaveInstanceState + initialRoute.
             // Release builds no longer have a destructive DB fallback. Probe on
             // IO so an incompatible file shows a blocking message instead of
             // crashing in composition (and without blocking onCreate).
@@ -198,6 +214,8 @@ class MainActivity : ComponentActivity() {
                     LocalWebUserAgent provides userAgentFor,
                 ) {
                     MiruShell(
+                        navController = navController,
+                        initialRoute = initialRoute,
                         themeMode = themeMode,
                         onThemeMode = {
                             themeMode = it
