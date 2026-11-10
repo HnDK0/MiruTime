@@ -29,8 +29,11 @@ interface ReaderContentSource {
      * Parses a chapter without touching reading history. Used when cleanup rules
      * change and the open chapter has to be re-read.
      */
-    suspend fun documentForRulesReload(bookUrl: String, chapterIndex: Int): ReaderDocument? =
-        document(bookUrl, chapterIndex)
+    suspend fun documentForRulesReload(
+        bookUrl: String,
+        chapterIndex: Int,
+        allowTranslationOnly: Boolean = false,
+    ): ReaderDocument? = document(bookUrl, chapterIndex)
 
     suspend fun markRead(bookUrl: String, chapterIndex: Int, read: Boolean)
 }
@@ -116,6 +119,25 @@ interface ReaderTranslationPort {
      */
     suspend fun preloadChapter(bookUrl: String, document: ReaderDocument) {}
     fun forget(chapterUrls: Collection<String>)
+
+    /**
+     * Forces a fresh translation of one chapter: cached rows and the in-memory
+     * entry are dropped, the chapter is re-read from the source and submitted
+     * again. Used by the reader header when a provider skipped part of the text.
+     */
+    suspend fun retranslateChapter(bookUrl: String, chapterIndex: Int): Boolean = false
+
+    /**
+     * Cache identity of the translation for [document], so the reader can hide
+     * an entry produced for an older parse of the same chapter URL.
+     */
+    fun chapterConfigKey(bookUrl: String, document: ReaderDocument): String? = null
+
+    /**
+     * Effective prompt identity for [bookUrl]; the reader keys its cached
+     * config map by it so a prompt change is not hidden behind a mode memo.
+     */
+    fun promptKey(bookUrl: String): String = ""
 
     /** Active FULL-mode metadata config token, or null when metadata is off. */
     fun metadataConfigKey(bookUrl: String): String?

@@ -1,6 +1,5 @@
 package dev.mirutime.feature.reader.ui
 
-import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -41,7 +40,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -49,14 +50,11 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.mirutime.feature.reader.R
@@ -67,10 +65,7 @@ import dev.mirutime.app.features.reader.document.BlockKind
 import coil3.compose.AsyncImage
 import dev.mirutime.app.features.reader.document.ReaderBlock
 import dev.mirutime.app.features.reader.document.ReaderDocument
-import dev.mirutime.app.features.reader.document.ReaderSplit
 import dev.mirutime.app.features.reader.document.ReadingAnchor
-import dev.mirutime.app.features.reader.document.SentenceSpan
-import dev.mirutime.app.features.reader.document.SentenceSplitter
 import dev.mirutime.feature.reader.ChapterLoadStatus
 import dev.mirutime.feature.reader.ReaderStyle
 import dev.mirutime.feature.reader.paged.PageAlt
@@ -79,7 +74,6 @@ import dev.mirutime.feature.reader.paged.PageLine
 import dev.mirutime.feature.reader.paged.PagedVisualLine
 import dev.mirutime.feature.reader.paged.ReaderPage
 import dev.mirutime.feature.reader.paged.pairedRows
-import dev.mirutime.feature.reader.paged.parallelPairs
 import dev.mirutime.feature.reader.ui.ChapterHeaderMetrics
 import dev.mirutime.feature.reader.ui.chapterTitleStyle
 import dev.mirutime.feature.reader.ui.ReaderChapterHeader
@@ -88,13 +82,11 @@ import dev.mirutime.feature.reader.ui.paragraphText
 import dev.mirutime.feature.reader.ui.selectionSearchMenu
 import dev.mirutime.feature.reader.ui.toTextStyle
 import dev.mirutime.feature.tts.api.TtsHighlight
-import kotlin.math.min
-import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 /** Gap between the two copies of a parallel pair; included in the page height. */
-private val PagedAltGap = 6.dp
+internal val PagedAltGap = 6.dp
 private const val PAGED_ALT_SCALE = 0.85f
 private const val PAGED_ALT_ALPHA = 0.72f
 
@@ -221,6 +213,7 @@ internal fun ReaderPaged(
                             translationLabel = translationLabel,
                             translations = translations,
                             parallel = parallel,
+                            translationFirst = translationFirst,
                         )
                     } catch (throwable: Throwable) {
                         MiruLog.e("reader", "pagination failed", throwable)
@@ -369,22 +362,18 @@ private fun ReaderPagedPager(
             canNextChapter,
             doubleTapMenu,
         ) {
-            // Pending center tap in two-tap mode. It belongs to this gesture
-            // loop, so changing the setting or the pages drops it.
-            var lastCenterTapAt = 0L
             var lastHandledTap: ReaderTap? = null
             awaitEachGesture {
                 // SelectionContainer sits inside the pager, so taps are read
                 // at the Initial pass: handled short taps consume their up
                 // before selection sees them, while long presses and swipes
                 // pass through untouched.
-                val tap = awaitReaderTap(lastHandledTap) { x ->
+                val tap = awaitReaderTap(lastHandledTap) { x, isDouble ->
                     val width = size.width.toFloat()
                     when {
                         x < width * 0.25f -> {
                             // Edge taps turn pages immediately, even in
-                            // two-tap mode, and cancel a pending center tap.
-                            lastCenterTapAt = 0L
+                            // two-tap mode.
                             if (pagerState.currentPage > 0) {
                                 scope.launch {
                                     pagerState.animateScrollToPage(pagerState.currentPage - 1)
@@ -394,7 +383,6 @@ private fun ReaderPagedPager(
                             }
                         }
                         x > width * 0.75f -> {
-                            lastCenterTapAt = 0L
                             if (pagerState.currentPage < pages.lastIndex) {
                                 scope.launch {
                                     pagerState.animateScrollToPage(pagerState.currentPage + 1)
@@ -404,27 +392,14 @@ private fun ReaderPagedPager(
                             }
                         }
                         else -> {
-                            if (!doubleTapMenu) {
+                            if (menuTapToggles(isDouble = isDouble, doubleTapMenu = doubleTapMenu)) {
                                 onToggleChrome()
-                            } else {
-                                val now = SystemClock.uptimeMillis()
-                                val isDouble = isMenuDoubleTap(
-                                    now = now,
-                                    lastTapAt = lastCenterTapAt,
-                                    timeout = viewConfiguration.doubleTapTimeoutMillis,
-                                )
-                                if (isDouble) {
-                                    lastCenterTapAt = 0L
-                                    onToggleChrome()
-                                } else {
-                                    lastCenterTapAt = now
-                                }
                             }
                         }
                     }
                 }
-                lastHandledTap = tap
-                if (tap == null) lastCenterTapAt = 0L
+                // A recognized pair is closed: the next tap starts a new one.
+                lastHandledTap = if (tap?.isDouble == true) null else tap
             }
         },
     ) {
@@ -626,22 +601,29 @@ private fun PairedText(
     val hasPrimary = alt.end > alt.start
     val hasBoth = hasPrimary && alt.heightPx > 0f
     val hasAlt = !hasPrimary || alt.heightPx > 0f
-    val primaryHeightPx = when {
+    val largeHeightPx = when {
         hasBoth -> (line.heightPx - gapPx - alt.heightPx).coerceAtLeast(0f)
+        hasPrimary || hasAlt -> line.heightPx
+        else -> 0f
+    }
+    val translatedHeightPx = when {
+        hasBoth -> if (translationFirst) largeHeightPx else alt.heightPx
         hasPrimary -> line.heightPx
         else -> 0f
     }
     val originalHeightPx = when {
-        hasBoth -> alt.heightPx
+        hasBoth -> if (translationFirst) alt.heightPx else largeHeightPx
         hasAlt -> line.heightPx
         else -> 0f
     }
-    val translatedBase = if (line.kind == BlockKind.Heading) {
+    val primaryBase = if (line.kind == BlockKind.Heading) {
         style.headingTextStyle()
     } else {
         style.toTextStyle()
     }
-    val originalBase = style.pagedSecondaryTextStyle(line.kind)
+    val secondaryBase = style.pagedSecondaryTextStyle(line.kind)
+    val translatedBase = if (translationFirst) primaryBase else secondaryBase
+    val originalBase = if (translationFirst) secondaryBase else primaryBase
     val translatedStyle = translatedBase.copy(
         textIndent = if (line.isSegmentStart) translatedBase.textIndent else null,
     )
@@ -655,7 +637,7 @@ private fun PairedText(
             overflow = TextOverflow.Clip,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(with(density) { primaryHeightPx.toDp() }),
+                .height(with(density) { translatedHeightPx.toDp() }),
         )
     }
     val originalText: @Composable () -> Unit = {
@@ -692,7 +674,7 @@ internal fun ReaderStyle.pagedSecondaryTextStyle(kind: BlockKind): TextStyle {
     )
 }
 
-private fun slice(source: String, start: Int, end: Int): String {
+internal fun slice(source: String, start: Int, end: Int): String {
     if (source.isEmpty()) return ""
     val from = start.coerceIn(0, source.length)
     val to = end.coerceIn(from, source.length)
@@ -700,7 +682,7 @@ private fun slice(source: String, start: Int, end: Int): String {
 }
 
 /** Visual lines of a measured run, offsets relative to that run. */
-private fun TextLayoutResult.visualLines(): List<PagedVisualLine> =
+internal fun TextLayoutResult.visualLines(): List<PagedVisualLine> =
     List(lineCount) { index ->
         val start = getLineStart(index)
         val end = getLineEnd(lineIndex = index, visibleEnd = true).coerceAtLeast(start)
@@ -785,8 +767,8 @@ private fun pagedLineHighlightModifier(
         if (!containsCursor(start, end, highlight.start)) return Modifier
     }
     return Modifier.background(
-        Color(highlight.colorArgb).copy(alpha = 0.10f),
-        RoundedCornerShape(MiruRadius.Badge),
+        Color(highlight.colorArgb).copy(alpha = SentenceTintAlpha),
+        RoundedCornerShape(SentenceTintCorner),
     )
 }
 
@@ -804,238 +786,11 @@ private fun lineText(block: ReaderBlock?, line: PageLine, translated: String?): 
     return source.substring(start, end)
 }
 
-private fun measurePages(
-    document: ReaderDocument,
-    style: ReaderStyle,
-    textMeasurer: TextMeasurer,
-    widthPx: Float,
-    pageHeightPx: Float,
-    density: Density,
-    layoutDirection: LayoutDirection,
-    chapterTitle: String,
-    translationLabel: String?,
-    translations: Map<BlockId, String>,
-    parallel: Boolean = false,
-): List<ReaderPage> {
-    val width = widthPx.roundToInt().coerceAtLeast(1)
-    val paragraphSpacing = with(density) { style.paragraphSpacingDp.dp.toPx() }
-    val paragraphStyle = style.toTextStyle()
-    val headingStyle = style.headingTextStyle()
-    val measured = mutableListOf<PageLine>()
-
-    // The chapter header is a line of its own. It is measured with the same
-    // measurer, the same styles and the same width the composable paints it
-    // with, so the reserved height is exactly the painted height.
-    val titleBlock = document.titleBlock()
-    val bodyBlocks = document.bodyBlocks()
-    measured += PageLine(
-        blockId = titleBlock?.id
-            ?: bodyBlocks.firstOrNull()?.id
-            ?: BlockId(document.chapterUrl, 0),
-        kind = BlockKind.Heading,
-        start = 0,
-        end = titleBlock?.original?.length ?: 0,
-        heightPx = measureChapterHeaderHeight(
-            title = chapterTitle,
-            translationLabel = translationLabel,
-            style = style,
-            textMeasurer = textMeasurer,
-            width = width,
-            density = density,
-            layoutDirection = layoutDirection,
-        ),
-        spacingBeforePx = 0f,
-        isChapterHeader = true,
-    )
-
-    bodyBlocks.forEach { block ->
-        val blockSpacing = paragraphSpacing
-        when (block.kind) {
-            BlockKind.Image -> {
-                val imageHeight = min(widthPx * 0.66f, pageHeightPx * 0.55f)
-                    .coerceAtLeast(0f)
-                measured += PageLine(
-                    blockId = block.id,
-                    kind = block.kind,
-                    start = 0,
-                    end = block.original.length,
-                    heightPx = imageHeight,
-                    spacingBeforePx = blockSpacing,
-                )
-            }
-            BlockKind.Divider -> {
-                val text = "· · ·"
-                val result = textMeasurer.measure(
-                    text = AnnotatedString(text),
-                    style = paragraphStyle,
-                    layoutDirection = layoutDirection,
-                    density = density,
-                    constraints = Constraints(maxWidth = width),
-                )
-                val height = if (result.lineCount == 0) {
-                    0f
-                } else {
-                    result.getLineBottom(0) - result.getLineTop(0)
-                }
-                measured += PageLine(
-                    blockId = block.id,
-                    kind = block.kind,
-                    start = 0,
-                    end = block.original.length,
-                    heightPx = height,
-                    spacingBeforePx = blockSpacing,
-                )
-            }
-            BlockKind.Heading, BlockKind.Paragraph -> {
-                val translated = translations[block.id]?.takeIf { it.isNotBlank() }
-                // Parallel: every visual line of the translation is paired with
-                // the original line at the same index. Pair offsets stay
-                // original-based, so anchors restore the same page in both modes.
-                if (parallel && translated != null) {
-                    val pairs = parallelPairs(block, translated, style.splitSentences)
-                    val secondaryStyle = style.pagedSecondaryTextStyle(block.kind)
-                    val gapPx = with(density) { PagedAltGap.toPx() }
-                    val primaryStyle = if (block.kind == BlockKind.Heading) {
-                        headingStyle
-                    } else {
-                        paragraphStyle
-                    }
-                    pairs.forEach { pair ->
-                        val primary = slice(translated, pair.translated.start, pair.translated.end)
-                        val secondary = slice(
-                            block.original,
-                            pair.original.start,
-                            pair.original.end,
-                        )
-                        if (primary.isBlank() && secondary.isBlank()) return@forEach
-                        val primaryLines = textMeasurer.measure(
-                            text = AnnotatedString(primary),
-                            style = primaryStyle,
-                            layoutDirection = layoutDirection,
-                            density = density,
-                            constraints = Constraints(maxWidth = width),
-                        ).visualLines()
-                        val altLines = textMeasurer.measure(
-                            text = AnnotatedString(secondary),
-                            style = secondaryStyle,
-                            layoutDirection = layoutDirection,
-                            density = density,
-                            constraints = Constraints(maxWidth = width),
-                        ).visualLines()
-                        measured += pairedRows(
-                            blockId = block.id,
-                            kind = block.kind,
-                            pair = pair,
-                            primaryLines = primaryLines,
-                            altLines = altLines,
-                            gapPx = gapPx,
-                            spacingBeforePx = blockSpacing,
-                        )
-                    }
-                    return@forEach
-                }
-                val source = translated ?: block.original
-                if (source.isBlank()) return@forEach
-                val split = ReaderSplit.shouldSplit(block, style.splitSentences)
-                val segments = if (split) {
-                    if (translated != null) {
-                        SentenceSplitter.spans(source)
-                    } else {
-                        ReaderSplit.originalSpans(block)
-                    }
-                } else {
-                    listOf(SentenceSpan(0, source.length))
-                }
-                val baseStyle = if (block.kind == BlockKind.Heading) headingStyle else paragraphStyle
-                segments.forEach { segment ->
-                    if (segment.end <= segment.start) return@forEach
-                    val raw = source.substring(segment.start, segment.end)
-                    val text = if (
-                        translated == null &&
-                        block.kind == BlockKind.Paragraph &&
-                        !split
-                    ) {
-                        style.paragraphText(raw)
-                    } else {
-                        AnnotatedString(raw)
-                    }
-                    val result = textMeasurer.measure(
-                        text = text,
-                        style = baseStyle,
-                        layoutDirection = layoutDirection,
-                        density = density,
-                        constraints = Constraints(maxWidth = width),
-                    )
-                    for (lineIndex in 0 until result.lineCount) {
-                        val lineStart = result.getLineStart(lineIndex)
-                        val start = segment.start + lineStart
-                        val end = segment.start + result.getLineEnd(
-                            lineIndex = lineIndex,
-                            visibleEnd = true,
-                        ).coerceAtLeast(lineStart)
-                        val top = result.getLineTop(lineIndex)
-                        val bottom = result.getLineBottom(lineIndex)
-                        measured += PageLine(
-                            blockId = block.id,
-                            kind = block.kind,
-                            start = start,
-                            end = end,
-                            heightPx = (bottom - top).coerceAtLeast(0f),
-                            // Full paragraph spacing between split sentences, none
-                            // between the wrapped lines of one sentence.
-                            spacingBeforePx = if (lineIndex == 0) blockSpacing else 0f,
-                            isSegmentStart = split && lineIndex == 0,
-                        )
-                    }
-                }
-            }
-        }
-    }
-    return PageBreaker.breakPages(measured, pageHeightPx)
-}
-
 /**
- * Height of the shared chapter header: top padding, the ornament row and the
- * bottom padding - the same parts [ReaderChapterHeader] paints. The row is as
- * tall as the taller of the ornament and the title column, and the column
- * holds the title plus, when translation is on, the badge.
- */
-private fun measureChapterHeaderHeight(
-    title: String,
-    translationLabel: String?,
-    style: ReaderStyle,
-    textMeasurer: TextMeasurer,
-    width: Int,
-    density: Density,
-    layoutDirection: LayoutDirection,
-): Float {
-    // The title column is narrower than the page by the ornament and its gap.
-    val ornamentPx = with(density) { ChapterHeaderMetrics.ornamentSize.roundToPx() }
-    val ornamentGapPx = with(density) { ChapterHeaderMetrics.ornamentGap.roundToPx() }
-    val contentWidth = (width - ornamentPx - ornamentGapPx).coerceAtLeast(1)
-    val heading = textMeasurer.measure(
-        text = AnnotatedString(title),
-        style = style.chapterTitleStyle(),
-        layoutDirection = layoutDirection,
-        density = density,
-        constraints = Constraints(maxWidth = contentWidth),
-    )
-    return with(density) {
-        val badge = if (translationLabel != null) {
-            ChapterHeaderMetrics.badgeGap.toPx() + ChapterHeaderMetrics.badgeHeight.toPx()
-        } else {
-            0f
-        }
-        val column = heading.size.height + badge
-        ChapterHeaderMetrics.topPadding.toPx() +
-            maxOf(ChapterHeaderMetrics.ornamentSize.toPx(), column) +
-            ChapterHeaderMetrics.bottomPadding.toPx()
-    }
-}
-
-/**
- * True when a center tap lands within [timeout] of the previous one. Nothing
- * pending is 0, so the first tap never counts as a double tap.
+ * True when a tap lands within [timeout] of the previous one. Nothing
+ * pending is 0, so the first tap never counts as a double tap. Both times
+ * come from pointer events: the release of the previous tap and the press of
+ * the current one, so the hold of the finger is not counted.
  */
 internal fun isMenuDoubleTap(now: Long, lastTapAt: Long, timeout: Long): Boolean =
     lastTapAt != 0L && now - lastTapAt <= timeout
@@ -1044,22 +799,50 @@ internal fun isMenuDoubleTap(now: Long, lastTapAt: Long, timeout: Long): Boolean
  * One short tap handled by the reader, kept so the next gesture can recognize
  * a double tap before SelectionContainer sees its down.
  */
-internal data class ReaderTap(val at: Long, val position: Offset)
+internal data class ReaderTap(
+    val at: Long,
+    val position: Offset,
+    val isDouble: Boolean = false,
+)
+
+/**
+ * True when the tap must toggle the reader menu. In two-tap mode only the
+ * second tap of the pair toggles it, in one-tap mode only the first one, so a
+ * double tap never toggles the menu twice.
+ */
+internal fun menuTapToggles(isDouble: Boolean, doubleTapMenu: Boolean): Boolean =
+    if (doubleTapMenu) isDouble else !isDouble
+
+/**
+ * Awaits the up of a gesture whose down this handler already consumed.
+ * [waitForUpOrCancellation] bails out as soon as any change is consumed, which
+ * is exactly what a child does in reaction to our consumed down.
+ */
+private suspend fun AwaitPointerEventScope.awaitUpOfOwnedGesture(): PointerInputChange? {
+    while (true) {
+        val event = awaitPointerEvent(PointerEventPass.Main)
+        val change = event.changes.firstOrNull() ?: return null
+        if (change.changedToUpIgnoreConsumed()) return change
+        if (!change.pressed) return null
+    }
+}
 
 /**
  * Waits for one reader tap and returns it when handled.
  *
- * The down and up are read at the Initial pass, before SelectionContainer.
- * A short tap consumes its up so selection never sees it. A tap that follows
- * another handled tap within the double-tap timeout and near the same spot
- * also consumes its down: SelectionContainer triggers word selection on the
- * second down, so consuming only the up still left double-click selection
- * active. A long press elsewhere consumes nothing, so text selection and
- * pager swipes keep working.
+ * The down is read at the Initial pass so a double tap is recognized before
+ * SelectionContainer sees it: a tap that follows another handled tap within the
+ * double-tap timeout and near the same spot consumes its down, because
+ * SelectionContainer triggers word selection on the second down.
+ *
+ * The up is read at the Main pass, which runs bottom-up: every child — a button
+ * or SelectionContainer — handles it before this ancestor. A consumed up means
+ * a child took the gesture, so the reader returns null instead of toggling the
+ * menu on top of that action.
  */
 internal suspend fun AwaitPointerEventScope.awaitReaderTap(
     previousTap: ReaderTap?,
-    onTap: (x: Float) -> Unit,
+    onTap: (x: Float, isDouble: Boolean) -> Unit,
 ): ReaderTap? {
     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
     val secondTap = previousTap != null &&
@@ -1070,11 +853,23 @@ internal suspend fun AwaitPointerEventScope.awaitReaderTap(
         ) &&
         (down.position - previousTap.position).getDistance() <= viewConfiguration.touchSlop * 4f
     if (secondTap) down.consume()
-    val up = waitForUpOrCancellation(pass = PointerEventPass.Initial) ?: return null
+    // Main runs bottom-up: every child (a button, SelectionContainer) handles
+    // the up before this ancestor does, so a consumed up means the tap belongs
+    // to that child and the reader must not toggle the menu on top of it.
+    // The second down of a recognized pair was consumed above, so a child that
+    // also consumes this gesture's up (text selection) must not cancel the
+    // pair: the consumed down already told it the reader owns the gesture.
+    val up = if (secondTap) {
+        awaitUpOfOwnedGesture() ?: return null
+    } else {
+        waitForUpOrCancellation(pass = PointerEventPass.Main) ?: return null
+    }
+    if (up.isConsumed && !secondTap) return null
     val moved = (up.position - down.position).getDistance()
     if (moved > viewConfiguration.touchSlop) return null
+    // A long press belongs to text selection: it is never a menu tap, and the
+    // pointer is left alone so SelectionContainer keeps the gesture.
     if (up.uptimeMillis - down.uptimeMillis >= viewConfiguration.longPressTimeoutMillis) return null
-    up.consume()
-    onTap(up.position.x)
-    return ReaderTap(up.uptimeMillis, up.position)
+    onTap(up.position.x, secondTap)
+    return ReaderTap(up.uptimeMillis, up.position, secondTap)
 }

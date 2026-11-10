@@ -11,6 +11,7 @@ import dev.mirutime.app.features.translation.data.TranslationController
 import dev.mirutime.app.features.translation.data.activeTranslationMode
 import dev.mirutime.app.features.translation.data.cacheKey
 import dev.mirutime.app.features.translation.data.metadataConfigFor
+import dev.mirutime.app.features.translation.data.translationConfigKey
 import dev.mirutime.core.text.RegexRule
 import dev.mirutime.core.text.RegexRuleTarget
 import dev.mirutime.core.text.applyRulesFor
@@ -65,14 +66,18 @@ class AppReaderAssetPort(context: Context) : ReaderAssetPort {
     override fun deleteFont(path: String?) = store.deleteFont(path)
 }
 
+/** A synthetic document already carries translated text; never translate it again. */
+internal fun isTranslatable(document: ReaderDocument): Boolean = !document.translationOnly
+
 /**
  * Bridges the app translation controllers into the reader port. Config
  * resolution stays in app: the reader only asks for an active mode or ensures
  * a chapter, and never sees AppSettings or TranslationRequest.
  */
-class AppReaderTranslationPort(
+internal class AppReaderTranslationPort(
     private val controller: TranslationController,
     private val metadataController: MetadataTranslationController,
+    private val retranslator: ChapterRetranslator,
     private val scope: CoroutineScope,
     private val context: Context,
 ) : ReaderTranslationPort {
@@ -133,12 +138,31 @@ class AppReaderTranslationPort(
         chapterIndex: Int,
         document: ReaderDocument,
     ) {
+        if (!isTranslatable(document)) return
         val mode = activeTranslationMode(bookUrl) ?: return
         val config = ChapterTranslationPlanner.config(bookUrl, mode) ?: return
         ChapterTranslationPlanner.request(document, config)?.let(controller::submit)
     }
 
+    override suspend fun retranslateChapter(bookUrl: String, chapterIndex: Int): Boolean =
+        retranslator.retranslate(bookUrl, chapterIndex)
+
+    override fun chapterConfigKey(bookUrl: String, document: ReaderDocument): String? {
+        if (!isTranslatable(document)) return null
+        val mode = activeTranslationMode(bookUrl) ?: return null
+        val config = ChapterTranslationPlanner.config(bookUrl, mode) ?: return null
+        val request = ChapterTranslationPlanner.request(document, config) ?: return null
+        return translationConfigKey(request)
+    }
+
+    override fun promptKey(bookUrl: String): String {
+        val mode = activeTranslationMode(bookUrl) ?: return ""
+        val config = ChapterTranslationPlanner.config(bookUrl, mode) ?: return ""
+        return ChapterTranslationPlanner.promptHash(config.prompt)
+    }
+
     override suspend fun preloadChapter(bookUrl: String, document: ReaderDocument) {
+        if (!isTranslatable(document)) return
         val mode = activeTranslationMode(bookUrl) ?: return
         val config = ChapterTranslationPlanner.config(bookUrl, mode) ?: return
         ChapterTranslationPlanner.request(document, config)?.let { controller.preload(it) }

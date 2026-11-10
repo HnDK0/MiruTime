@@ -15,6 +15,8 @@ class ReaderLoadFailure(
     val title: String,
     override val message: String,
     val authUrl: String? = null,
+    /** A transient transport/parser failure is worth retrying on its own. */
+    val retryable: Boolean = true,
 ) : Exception(message)
 
 sealed interface ChapterLoadStatus {
@@ -90,7 +92,14 @@ object FeedPlanner {
         val entries = mutableListOf<FeedEntry>()
         val ranges = mutableMapOf<Int, IntRange>()
 
-        chapters.firstOrNull { it.index == first - 1 }?.let { previous ->
+        // Chapters are addressed by list position, not by idx arithmetic: a
+        // removed chapter leaves a hole and `first - 1` / `last + 1` would look
+        // for a chapter that is not in the list at all.
+        val firstPosition = chapters.indexOfFirst { it.index == first }
+        val lastPosition = chapters.indexOfFirst { it.index == last }
+        if (firstPosition < 0 || lastPosition < firstPosition) return FeedPlan.Empty
+
+        chapters.getOrNull(firstPosition - 1)?.let { previous ->
             entries += FeedEntry.Gap(
                 id = "gap:top:${previous.index}",
                 chapterIndex = previous.index,
@@ -100,7 +109,7 @@ object FeedPlanner {
             )
         }
 
-        for (chapter in chapters.filter { it.index in first..last }) {
+        for (chapter in chapters.subList(firstPosition, lastPosition + 1)) {
             val document = documents[chapter.index]
             if (document == null) {
                 entries += FeedEntry.Gap(
@@ -128,7 +137,7 @@ object FeedPlanner {
             ranges[chapter.index] = start..entries.lastIndex
         }
 
-        chapters.firstOrNull { it.index == last + 1 }?.let { next ->
+        chapters.getOrNull(lastPosition + 1)?.let { next ->
             entries += FeedEntry.Gap(
                 id = "gap:${next.index}",
                 chapterIndex = next.index,
@@ -187,8 +196,13 @@ object MangaFeedPlanner {
     ): List<MangaFeedPage> {
         if (chapters.isEmpty()) return emptyList()
         val titles = chapters.associate { it.index to it.title }
-        return documents.keys
-            .filter { it in (activeIndex - window)..(activeIndex + window) }
+        // Neighbours are list positions, not index arithmetic: a hole in idx
+        // would otherwise drop the next chapter out of the stitched strip.
+        val activePosition = chapters.indexOfFirst { it.index == activeIndex }
+        if (activePosition < 0) return emptyList()
+        return (activePosition - window..activePosition + window)
+            .mapNotNull { position -> chapters.getOrNull(position)?.index }
+            .filter { it in documents }
             .sorted()
             .flatMap { index -> pagesOf(documents.getValue(index), titles[index]) }
     }

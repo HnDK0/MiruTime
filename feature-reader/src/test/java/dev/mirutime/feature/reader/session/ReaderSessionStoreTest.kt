@@ -56,6 +56,8 @@ class ReaderSessionStoreTest {
         private val gate: Pair<Int, CompletableDeferred<Unit>>? = null,
         /** Throws for this chapter to simulate a real content-source error. */
         private val failOn: Pair<Int, Throwable>? = null,
+        /** Per-chapter gates, so two loads can finish out of order. */
+        private val gates: Map<Int, CompletableDeferred<Unit>> = emptyMap(),
     ) : ReaderContentSource {
         val marked = mutableListOf<Int>()
         // The active chapter uses the history-touching path; prefetch and the
@@ -64,6 +66,7 @@ class ReaderSessionStoreTest {
         val documentCalls = mutableListOf<Int>()
         val prefetchCalls = mutableListOf<Int>()
         val reloadCalls = mutableListOf<Int>()
+        val reloadAllow = mutableListOf<Boolean>()
 
         fun calls(index: Int): Int =
             documentCalls.count { it == index } + prefetchCalls.count { it == index }
@@ -87,20 +90,55 @@ class ReaderSessionStoreTest {
         override suspend fun documentForRulesReload(
             bookUrl: String,
             chapterIndex: Int,
+            allowTranslationOnly: Boolean,
         ): ReaderDocument? {
             reloadCalls += chapterIndex
+            reloadAllow += allowTranslationOnly
             return load(chapterIndex)
         }
 
         private suspend fun load(chapterIndex: Int): ReaderDocument? {
             if (failOn?.first == chapterIndex) throw failOn.second
             if (gate?.first == chapterIndex) gate.second.await()
+            gates[chapterIndex]?.await()
             return docs[chapterIndex]
         }
 
         override suspend fun markRead(bookUrl: String, chapterIndex: Int, read: Boolean) {
             marked += chapterIndex
         }
+    }
+
+    /** Fails the first request for one chapter, then behaves like the normal source. */
+    private class FailingOnceRepository(
+        private val chapters: List<ReaderChapter>,
+        private val docs: Map<Int, ReaderDocument>,
+        private val chapterIndex: Int,
+        private val error: Throwable,
+    ) : ReaderContentSource {
+        private val callsByChapter = mutableMapOf<Int, Int>()
+
+        fun calls(index: Int): Int = callsByChapter[index] ?: 0
+
+        override suspend fun book(bookUrl: String): ReaderBook =
+            ReaderBook(bookUrl, "Book", chapters)
+
+        override suspend fun document(bookUrl: String, chapterIndex: Int): ReaderDocument? =
+            load(chapterIndex)
+
+        override suspend fun documentForPrefetch(
+            bookUrl: String,
+            chapterIndex: Int,
+        ): ReaderDocument? = load(chapterIndex)
+
+        private fun load(index: Int): ReaderDocument? {
+            val seen = (callsByChapter[index] ?: 0) + 1
+            callsByChapter[index] = seen
+            if (index == chapterIndex && seen == 1) throw error
+            return docs[index]
+        }
+
+        override suspend fun markRead(bookUrl: String, chapterIndex: Int, read: Boolean) = Unit
     }
 
     @Test
@@ -129,12 +167,30 @@ class ReaderSessionStoreTest {
     }
 
     @Test
+    fun `reload can keep a cached-only document`() = runTest {
+        val repository = TestRepository(chapters, docs)
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+        )
+        store.open("book", 2, restoreSaved = false)
+        advanceUntilIdle()
+
+        assertTrue(store.reloadActiveChapter(allowTranslationOnly = true))
+        assertEquals(listOf(true), repository.reloadAllow)
+    }
+
+    @Test
     fun `reload keeps the old document when the content source fails`() = runTest {
         val delegate = TestRepository(chapters, docs)
         val repository = object : ReaderContentSource by delegate {
             override suspend fun documentForRulesReload(
                 bookUrl: String,
                 chapterIndex: Int,
+                allowTranslationOnly: Boolean,
             ): ReaderDocument? = throw IllegalStateException("boom")
         }
         val store = ReaderSessionStore(
@@ -163,9 +219,10 @@ class ReaderSessionStoreTest {
             override suspend fun documentForRulesReload(
                 bookUrl: String,
                 chapterIndex: Int,
+                allowTranslationOnly: Boolean,
             ): ReaderDocument? {
                 gate.await()
-                return delegate.documentForRulesReload(bookUrl, chapterIndex)
+                return delegate.documentForRulesReload(bookUrl, chapterIndex, allowTranslationOnly)
             }
         }
         val store = ReaderSessionStore(
@@ -500,6 +557,194 @@ class ReaderSessionStoreTest {
     }
 
     @Test
+    fun `goToChapter keeps the page read phase instead of blanking it`() = runTest {
+        val store = ReaderSessionStore(
+            content = TestRepository(chapters, docs),
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(TestRepository(chapters, docs)),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+        val scrollToken = store.state.value.scrollToken
+
+        store.goToChapter(2)
+        advanceUntilIdle()
+
+        assertEquals(2, store.state.value.activeChapterIndex)
+        // No intermediate Restoring phase and exactly one token bump.
+        assertEquals(RestorePhase.Ready, store.state.value.restorePhase)
+        assertEquals(scrollToken + 1, store.state.value.scrollToken)
+        assertEquals(null, store.state.value.navigatingTo)
+    }
+
+    @Test
+    fun `goToChapter reports the target while it loads`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = TestRepository(chapters, docs, gate = 2 to gate)
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+
+        val navigation = launch { store.goToChapter(2) }
+        runCurrent()
+
+        assertEquals(2, store.state.value.navigatingTo)
+        assertEquals(RestorePhase.Ready, store.state.value.restorePhase)
+
+        gate.complete(Unit)
+        navigation.join()
+
+        assertEquals(null, store.state.value.navigatingTo)
+        assertEquals(2, store.state.value.activeChapterIndex)
+    }
+
+    @Test
+    fun `a repeated tap on the same chapter does not load it twice`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = TestRepository(chapters, docs, gate = 2 to gate)
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+        // open() already prefetches chapter 2 once; only the repeated tap for
+        // the chapter currently being loaded must add nothing.
+        val callsBefore = repository.calls(2)
+
+        val first = launch { store.goToChapter(2) }
+        runCurrent()
+        val callsWhileLoading = repository.calls(2)
+        store.goToChapter(2)
+        runCurrent()
+
+        assertEquals(callsWhileLoading, repository.calls(2))
+        assertTrue(callsWhileLoading >= callsBefore)
+
+        gate.complete(Unit)
+        first.join()
+    }
+
+    @Test
+    fun `stale anchors of the old chapter do not move the reader back while navigating`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = TestRepository(chapters, docs, gate = 2 to gate)
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+
+        val navigation = launch { store.goToChapter(2) }
+        runCurrent()
+
+        store.onAnchorChanged(
+            ReadingAnchor("book#chapter=1", BlockId("book#chapter=1", 0), charOffset = 0),
+            offsetPx = 0,
+        )
+
+        assertEquals(1, store.state.value.activeChapterIndex)
+
+        gate.complete(Unit)
+        navigation.join()
+        assertEquals(2, store.state.value.activeChapterIndex)
+    }
+
+    @Test
+    fun `ensureNext loads the following chapter once and never moves the reader`() = runTest {
+        val repository = TestRepository(chapters, docs)
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+
+        store.ensureNext(2)
+        store.ensureNext(2)
+
+        assertEquals(1, repository.prefetchCalls.count { it == 2 })
+        assertEquals(1, store.state.value.activeChapterIndex)
+        assertNotNull(store.state.value.documents[2])
+    }
+
+    @Test
+    fun `a transient failure retries itself before it publishes Failed`() = runTest {
+        val repository = FailingOnceRepository(
+            chapters,
+            docs,
+            chapterIndex = 2,
+            error = dev.mirutime.feature.reader.ReaderLoadFailure(
+                title = "Timeout",
+                message = "Timeout",
+                retryable = true,
+            ),
+        )
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+
+        store.ensureNext(2)
+        advanceUntilIdle()
+
+        assertEquals(ChapterLoadStatus.Ready, store.state.value.statuses[2])
+        assertEquals(2, repository.calls(2))
+    }
+
+    @Test
+    fun `a non retryable failure publishes Failed immediately`() = runTest {
+        val repository = TestRepository(
+            chapters,
+            docs,
+            failOn = 2 to dev.mirutime.feature.reader.ReaderLoadFailure(
+                title = "Login required",
+                message = "Session expired",
+                authUrl = "https://site.example/login",
+                retryable = false,
+            ),
+        )
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+
+        store.ensureNext(2)
+        advanceUntilIdle()
+
+        assertTrue(store.state.value.statuses[2] is ChapterLoadStatus.Failed)
+        assertEquals(1, repository.calls(2))
+    }
+
+    @Test
     fun `goToChapterForTts keeps the scroll token and ready phase`() = runTest {
         val store = ReaderSessionStore(
             content = TestRepository(chapters, docs),
@@ -770,6 +1015,134 @@ class ReaderSessionStoreTest {
 
         assertEquals(3, store.state.value.activeChapterIndex)
         assertEquals(anchor, store.state.value.anchor)
+    }
+
+    @Test
+    fun `a slower load does not publish over the newer navigated chapter`() = runTest {
+        val slow = CompletableDeferred<Unit>()
+        val repository = TestRepository(chapters, docs, gates = mapOf(3 to slow))
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+
+        val first = launch { store.goToChapter(3) }
+        runCurrent()
+        val second = launch { store.goToChapter(4) }
+        runCurrent()
+        assertEquals(4, store.state.value.activeChapterIndex)
+
+        // The stale load finishes last; neither its chapter nor its outcome may
+        // reach the state the reader already shows.
+        slow.complete(Unit)
+        first.join()
+        second.join()
+
+        assertEquals(4, store.state.value.activeChapterIndex)
+        assertEquals("book#chapter=4", store.state.value.anchor?.chapterUrl)
+        assertTrue(3 !in store.state.value.documents)
+        assertEquals(ChapterLoadStatus.NotLoaded, store.state.value.statuses[3])
+    }
+
+    @Test
+    fun `a stale load of the same chapter keeps the newer load spinning`() = runTest {
+        val stale = CompletableDeferred<Unit>()
+        val fresh = CompletableDeferred<Unit>()
+        val delegate = TestRepository(chapters, docs)
+        var calls = 0
+        val repository = object : ReaderContentSource by delegate {
+            override suspend fun document(bookUrl: String, chapterIndex: Int): ReaderDocument? {
+                if (chapterIndex == 3) {
+                    calls++
+                    if (calls == 1) stale.await() else fresh.await()
+                }
+                return delegate.document(bookUrl, chapterIndex)
+            }
+        }
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(delegate),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+
+        // 3 -> 4 -> 3: two loads of chapter 3 run, the older one finishes last.
+        val first = launch { store.goToChapter(3) }
+        runCurrent()
+        val second = launch { store.goToChapter(4) }
+        runCurrent()
+        val third = launch { store.goToChapter(3) }
+        runCurrent()
+
+        stale.complete(Unit)
+        first.join()
+        runCurrent()
+
+        assertEquals(ChapterLoadStatus.Loading, store.state.value.statuses[3])
+
+        fresh.complete(Unit)
+        second.join()
+        third.join()
+
+        assertEquals(ChapterLoadStatus.Ready, store.state.value.statuses[3])
+        assertEquals(3, store.state.value.activeChapterIndex)
+    }
+
+    @Test
+    fun `a load from before open never publishes`() = runTest {
+        val slow = CompletableDeferred<Unit>()
+        val repository = TestRepository(chapters, docs, gates = mapOf(3 to slow))
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+
+        val pending = launch { store.goToChapter(3) }
+        runCurrent()
+        // Re-opening the reader starts a fresh navigation: the old load is stale
+        // even though the same book is opened again.
+        store.open("book", 1, restoreSaved = false)
+        runCurrent()
+
+        slow.complete(Unit)
+        pending.join()
+
+        assertEquals(1, store.state.value.activeChapterIndex)
+        assertTrue(3 !in store.state.value.documents)
+    }
+
+    @Test
+    fun `a chapter change prunes loaded chapters and statuses to the active window`() = runTest {
+        val repository = TestRepository(chapters, docs)
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+        assertTrue(1 in store.state.value.documents)
+
+        store.goToChapter(4)
+        advanceUntilIdle()
+
+        assertEquals(setOf(2, 4), store.state.value.documents.keys)
+        assertEquals(setOf(2, 4), store.state.value.statuses.keys)
     }
 
     @Test

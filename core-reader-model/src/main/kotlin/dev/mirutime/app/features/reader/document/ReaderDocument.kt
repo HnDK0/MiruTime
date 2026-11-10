@@ -24,6 +24,9 @@ data class ReaderDocument(
     val title: String,
     val blocks: List<ReaderBlock>,
     val revision: Long = 0,
+    // Built from cached translation blocks because the original source is
+    // unavailable. It must never be submitted to the translator again.
+    val translationOnly: Boolean = false,
 ) {
     fun blockAt(blockId: BlockId): ReaderBlock? = blocks.firstOrNull { it.id == blockId }
 

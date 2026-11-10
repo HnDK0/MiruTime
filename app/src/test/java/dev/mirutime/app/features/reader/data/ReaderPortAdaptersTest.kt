@@ -1,9 +1,12 @@
 package dev.mirutime.app.features.reader.data
 
+import dev.mirutime.app.features.reader.document.ReaderDocument
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.core.text.RegexRule
 import dev.mirutime.core.text.RegexRuleScope
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReaderPortAdaptersTest {
@@ -76,6 +79,22 @@ class ReaderPortAdaptersTest {
         val cleaned = cleanTranslatedBlocks("", mapOf(0 to "AD text"))
 
         assertEquals(" text", cleaned[0])
+    }
+
+    @Test
+    fun `translation-only documents are never translated`() {
+        val synthetic = ReaderDocument(
+            bookUrl = "book",
+            chapterUrl = "book#chapter=1",
+            chapterIndex = 1,
+            title = "One",
+            blocks = emptyList(),
+            translationOnly = true,
+        )
+        val original = synthetic.copy(translationOnly = false)
+
+        assertFalse(isTranslatable(synthetic))
+        assertTrue(isTranslatable(original))
     }
 
     @Test

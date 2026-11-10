@@ -321,6 +321,51 @@ class ReaderPageBreakerTest {
     }
 
     @Test
+    fun `original primary keeps original offsets and translation alt`() {
+        val pair = SentencePair(
+            original = SentenceSpan(start = 100, end = 140),
+            translated = SentenceSpan(start = 0, end = 20),
+        )
+        val rows = pairedRows(
+            blockId = BlockId("c", 0),
+            kind = BlockKind.Paragraph,
+            pair = pair,
+            primaryLines = listOf(PagedVisualLine(start = 0, end = 40, heightPx = 40f)),
+            altLines = listOf(PagedVisualLine(start = 0, end = 20, heightPx = 20f)),
+            gapPx = 6f,
+            spacingBeforePx = 16f,
+            originalPrimary = true,
+        )
+
+        assertEquals(1, rows.size)
+        assertEquals(66f, rows[0].heightPx, 0.01f)
+        assertEquals(100, rows[0].start)
+        assertEquals(140, rows[0].end)
+        assertEquals(PageAlt(start = 0, end = 20, heightPx = 20f), rows[0].alt)
+    }
+
+    @Test
+    fun `pair inside a display group has no paragraph spacing`() {
+        val pair = SentencePair(
+            original = SentenceSpan(start = 100, end = 140),
+            translated = SentenceSpan(start = 0, end = 20),
+        )
+        val rows = pairedRows(
+            blockId = BlockId("c", 0),
+            kind = BlockKind.Paragraph,
+            pair = pair,
+            primaryLines = listOf(PagedVisualLine(start = 0, end = 10, heightPx = 40f)),
+            altLines = listOf(PagedVisualLine(start = 5, end = 20, heightPx = 20f)),
+            gapPx = 6f,
+            spacingBeforePx = 16f,
+            startsGroup = false,
+        )
+
+        assertEquals(0f, rows[0].spacingBeforePx, 0.01f)
+        assertTrue(!rows[0].isSegmentStart)
+    }
+
+    @Test
     fun `long pair splits into visual rows instead of one clipped line`() {
         val pair = SentencePair(
             original = SentenceSpan(0, 60),

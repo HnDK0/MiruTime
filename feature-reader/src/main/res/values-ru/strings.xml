@@ -120,6 +120,7 @@
     <string name="rd_paragraph_spacing">Отступ между абзацами</string>
     <string name="rd_percent_fmt">%1$d%%</string>
     <string name="rd_prev_chapter">Предыдущая глава</string>
+    <string name="rd_chapter_loading">Загрузка главы</string>
     <string name="rd_reading">Чтение</string>
     <string name="rd_regex">Регулярные выражения</string>
     <string name="rd_regex_desc">Очистка текста главы правилами</string>
@@ -140,8 +141,12 @@
     <string name="rd_text_color">Цвет текста</string>
     <string name="rd_tools">Инструменты</string>
     <string name="rd_translation">Перевод</string>
+    <string name="rd_retranslate">Перевести главу заново</string>
+    <string name="rd_retranslate_failed">Не удалось перевести главу заново</string>
+    <string name="rd_original_reload_failed">Не удалось загрузить оригинал главы</string>
     <string name="rd_translation_cleartext">HTTP только для локальных адресов</string>
     <string name="rd_translation_failed">Ошибка перевода</string>
+    <string name="rd_original_unavailable">оригинал недоступен</string>
     <string name="rd_translation_local_network">Нужно разрешение на локальную сеть</string>
     <string name="rd_translation_loading">Перевод…</string>
     <!-- Elapsed time next to the translating label: keeps the wait visible. -->

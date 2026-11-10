@@ -65,7 +65,9 @@ import dev.mirutime.feature.reader.R
 import dev.mirutime.app.features.reader.document.BlockId
 import dev.mirutime.app.features.reader.document.BlockKind
 import dev.mirutime.app.features.reader.document.ReaderBlock
+import dev.mirutime.app.features.reader.document.ReaderDisplay
 import dev.mirutime.app.features.reader.document.ReaderSplit
+import dev.mirutime.app.features.reader.document.SentenceSpan
 import dev.mirutime.app.features.reader.document.SentenceSplitter
 import dev.mirutime.feature.reader.ReaderStyle
 import dev.mirutime.feature.reader.paged.parallelPairs
@@ -113,15 +115,10 @@ fun ReaderBlockView(
                 .fillMaxWidth()
                 .then(
                     if (blockTint) {
-                        Modifier.drawBehind {
-                            val bleedPx = bleed.toPx()
-                            drawRoundRect(
-                                color = Color(ttsHighlight.colorArgb).copy(alpha = 0.10f),
-                                topLeft = Offset(-bleedPx, 0f),
-                                size = Size(size.width + bleedPx * 2f, size.height),
-                                cornerRadius = CornerRadius(6.dp.toPx()),
-                            )
-                        }
+                        Modifier.fullWidthTint(
+                            Color(ttsHighlight.colorArgb).copy(alpha = SentenceTintAlpha),
+                            bleed,
+                        )
                     } else {
                         Modifier
                     },
@@ -200,35 +197,55 @@ private fun OriginalText(
         BlockKind.Paragraph -> {
             val spans = remember(block.sentences, block.original) { ReaderSplit.originalSpans(block) }
             if (ReaderSplit.shouldSplit(block, style.splitSentences) && spans.isNotEmpty()) {
-                // Keep one Text per sentence even while TTS highlights a range.
-                // Collapsing to a single paragraph Text on highlight start made
-                // the whole block re-layout and blink at every chunk boundary.
+                // Spans stay sentence-level; display groups keep quoted
+                // paragraphs and punctuation-only fragments together. A one-span
+                // group keeps the old per-sentence Text, so narration is unchanged.
+                val groups = remember(block.sentences, block.original, style.splitSentences) {
+                    ReaderDisplay.groupsForBlock(block, splitEnabled = true)
+                }
                 Column(verticalArrangement = Arrangement.spacedBy(style.paragraphSpacingDp.dp)) {
-                    spans.forEach { span ->
-                        val rawStart = span.start.coerceIn(0, block.original.length)
-                        val rawEnd = span.end.coerceIn(rawStart, block.original.length)
-                        val sentence = block.original.substring(rawStart, rawEnd)
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .then(
-                                    sentenceHighlightModifier(
-                                        blockId = block.id,
-                                        start = rawStart,
-                                        end = rawEnd,
-                                        isTranslated = false,
-                                        highlight = highlight,
-                                        bleed = bleed,
+                    groups.forEach { group ->
+                        if (group.spans.size <= 1) {
+                            val span = group.spans.firstOrNull() ?: SentenceSpan(group.start, group.end)
+                            val rawStart = span.start.coerceIn(0, block.original.length)
+                            val rawEnd = span.end.coerceIn(rawStart, block.original.length)
+                            val sentence = block.original.substring(rawStart, rawEnd)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(
+                                        sentenceHighlightModifier(
+                                            blockId = block.id,
+                                            start = rawStart,
+                                            end = rawEnd,
+                                            isTranslated = false,
+                                            highlight = highlight,
+                                            bleed = bleed,
+                                        ),
                                     ),
-                                ),
-                        ) {
-                            TtsHighlightedText(
-                                raw = sentence,
+                            ) {
+                                TtsHighlightedText(
+                                    raw = sentence,
+                                    block = block,
+                                    style = style,
+                                    highlight = highlight,
+                                    applyFirstLetterBold = false,
+                                    baseOffset = rawStart,
+                                    textStyle = style.toTextStyle(),
+                                )
+                            }
+                        } else {
+                            val rawStart = group.start.coerceIn(0, block.original.length)
+                            val rawEnd = group.end.coerceIn(rawStart, block.original.length)
+                            GroupTtsText(
+                                raw = block.original.substring(rawStart, rawEnd),
+                                groupStart = rawStart,
+                                groupSpans = group.spans,
                                 block = block,
                                 style = style,
                                 highlight = highlight,
-                                applyFirstLetterBold = false,
-                                baseOffset = rawStart,
+                                isTranslated = false,
+                                bleed = bleed,
                                 textStyle = style.toTextStyle(),
                             )
                         }
@@ -266,31 +283,49 @@ private fun TranslatedText(
     // whole-block tint from the caller.
     if (block != null && ReaderSplit.shouldSplit(block, style.splitSentences)) {
         val spans = remember(text) { SentenceSplitter.spans(text) }
+        val groups = remember(text, style.splitSentences) {
+            ReaderDisplay.groupsForText(text, spans, splitEnabled = true)
+        }
         Column(verticalArrangement = Arrangement.spacedBy(style.paragraphSpacingDp.dp)) {
-            spans.forEach { span ->
-                val sentence = text.substring(span.start, span.end)
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(
-                            sentenceHighlightModifier(
-                                blockId = block.id,
-                                start = span.start,
-                                end = span.end,
-                                isTranslated = true,
-                                highlight = highlight,
-                                bleed = bleed,
+            groups.forEach { group ->
+                if (group.spans.size <= 1) {
+                    val span = group.spans.firstOrNull() ?: SentenceSpan(group.start, group.end)
+                    val sentence = text.substring(span.start, span.end)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                sentenceHighlightModifier(
+                                    blockId = block.id,
+                                    start = span.start,
+                                    end = span.end,
+                                    isTranslated = true,
+                                    highlight = highlight,
+                                    bleed = bleed,
+                                ),
                             ),
-                        ),
-                ) {
-                    TtsHighlightedText(
-                        raw = sentence,
+                    ) {
+                        TtsHighlightedText(
+                            raw = sentence,
+                            block = block,
+                            style = style,
+                            highlight = highlight,
+                            applyFirstLetterBold = false,
+                            isTranslated = true,
+                            baseOffset = span.start,
+                            textStyle = textStyle,
+                        )
+                    }
+                } else {
+                    GroupTtsText(
+                        raw = text.substring(group.start, group.end),
+                        groupStart = group.start,
+                        groupSpans = group.spans,
                         block = block,
                         style = style,
                         highlight = highlight,
-                        applyFirstLetterBold = false,
                         isTranslated = true,
-                        baseOffset = span.start,
+                        bleed = bleed,
                         textStyle = textStyle,
                     )
                 }
@@ -333,7 +368,8 @@ internal fun feedPairPlan(
     translated: String,
     splitSentences: Boolean,
 ): List<FeedPairCopy> =
-    parallelPairs(block, translated, splitSentences).mapNotNull { pair ->
+    ReaderDisplay.mergePunctuationPairs(block.original, parallelPairs(block, translated, splitSentences))
+        .mapNotNull { pair ->
         val primary = translated.sliceSpan(pair.translated.start, pair.translated.end)
         val secondary = block.original.sliceSpan(pair.original.start, pair.original.end)
         if (primary.isBlank() && secondary.isBlank()) {
@@ -350,10 +386,10 @@ private fun String.sliceSpan(start: Int, end: Int): String {
 }
 
 /**
- * Translation and original stacked vertically, translated first or second.
- * The original is secondary: smaller and dimmed. Split paragraphs pair each
- * translated sentence with its original sentence (paged pairing); every other
- * block keeps the whole-block stack.
+ * Translation and original stacked vertically. The first language is the
+ * primary/large copy; the other is small/dimmed. Split paragraphs pair each
+ * translated sentence with its original sentence; every other block keeps the
+ * whole-block stack.
  */
 @Composable
 private fun ParallelTranslation(
@@ -364,24 +400,35 @@ private fun ParallelTranslation(
     highlight: TtsHighlight? = null,
     bleed: Dp = 0.dp,
 ) {
-    val translatedStyle = if (block.kind == BlockKind.Heading) {
+    val primaryStyle = if (block.kind == BlockKind.Heading) {
         style.headingTextStyle()
     } else {
         style.toTextStyle()
     }
-    val originalStyle = style.pagedSecondaryTextStyle(block.kind)
+    val secondaryStyle = style.pagedSecondaryTextStyle(block.kind)
+    val translatedStyle = if (translationFirst) primaryStyle else secondaryStyle
+    val originalStyle = if (translationFirst) secondaryStyle else primaryStyle
     // shortcut: mirrors paged PagedAltGap; share a token if it ever changes.
     val copyGap = 6.dp
     val pairMode = ReaderSplit.shouldSplit(block, style.splitSentences)
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(style.paragraphSpacingDp.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         if (pairMode) {
             val pairPlan = remember(block.sentences, translated, style.splitSentences) {
                 feedPairPlan(block, translated, style.splitSentences)
             }
-            pairPlan.forEach { copy ->
+            // Pairs inside one display group flow together; only a group start
+            // gets the paragraph gap. Pair identity/highlight is unchanged.
+            val groupStarts = remember(block.sentences, block.original, style.splitSentences) {
+                ReaderDisplay.groupStarts(ReaderDisplay.groupsForBlock(block, splitEnabled = true))
+            }
+            pairPlan.forEachIndexed { index, copy ->
+                val startsGroup = index == 0 || copy.originalStart in groupStarts
+                if (index > 0 && startsGroup) {
+                    Spacer(Modifier.height(style.paragraphSpacingDp.dp))
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -396,6 +443,7 @@ private fun ParallelTranslation(
                             originalStyle = originalStyle,
                             translationFirst = translationFirst,
                             highlight = highlight,
+                            startsGroup = startsGroup,
                         )
                     }
                 }
@@ -443,7 +491,13 @@ private fun ParallelPairCopy(
     originalStyle: TextStyle,
     translationFirst: Boolean,
     highlight: TtsHighlight?,
+    startsGroup: Boolean = true,
 ) {
+    // A pair inside a merged group flows on from the previous one: only the
+    // group start gets the first-line indent, so a quoted paragraph does not
+    // look like several paragraphs again.
+    val translatedTextStyle = if (startsGroup) translatedStyle else translatedStyle.copy(textIndent = null)
+    val originalTextStyle = if (startsGroup) originalStyle else originalStyle.copy(textIndent = null)
     val translatedCopy: @Composable () -> Unit = {
         if (copy.translated.isNotBlank()) {
             TtsHighlightedText(
@@ -454,7 +508,7 @@ private fun ParallelPairCopy(
                 applyFirstLetterBold = false,
                 isTranslated = true,
                 baseOffset = copy.translatedStart,
-                textStyle = translatedStyle,
+                textStyle = translatedTextStyle,
             )
         }
     }
@@ -468,7 +522,7 @@ private fun ParallelPairCopy(
                 applyFirstLetterBold = false,
                 isTranslated = false,
                 baseOffset = copy.originalStart,
-                textStyle = originalStyle,
+                textStyle = originalTextStyle,
             )
         }
     }
@@ -725,6 +779,21 @@ internal fun ttsHighlightRange(
 }
 
 /**
+ * Absolute range of the sentence span that contains the spoken cursor inside a
+ * display group, or null when the highlight is not for this copy/block.
+ */
+internal fun activeSentenceRange(
+    spans: List<SentenceSpan>,
+    blockId: BlockId,
+    highlight: TtsHighlight?,
+    isTranslated: Boolean,
+): IntRange? {
+    if (highlight == null || highlight.blockId != blockId || highlight.translated != isTranslated) return null
+    val span = spans.firstOrNull { containsCursor(it.start, it.end, highlight.start) } ?: return null
+    return span.start until span.end
+}
+
+/**
  * Renders one text slice and draws the spoken range as rounded per-line pills.
  * A wrapped sentence gets one pill per visual line instead of one hard
  * rectangle around the whole block.
@@ -743,7 +812,7 @@ private fun TtsHighlightedText(
 ) {
     val text = style.paragraphText(raw, applyFirstLetterBold)
     val range = ttsHighlightRange(raw.length, block.id, highlight, isTranslated, baseOffset)
-    val color = highlight?.let { Color(it.colorArgb).copy(alpha = 0.30f) }
+    val color = highlight?.let { Color(it.colorArgb).copy(alpha = WordTintAlpha) }
     var layout by remember(text, range) { mutableStateOf<TextLayoutResult?>(null) }
     val highlightModifier = if (range != null && color != null) {
         Modifier.drawBehind {
@@ -761,7 +830,7 @@ private fun TtsHighlightedText(
     )
 }
 
-private fun DrawScope.drawRoundedRangeHighlight(
+internal fun DrawScope.drawRoundedRangeHighlight(
     layout: TextLayoutResult,
     range: IntRange,
     color: Color,
@@ -833,15 +902,25 @@ private fun sentenceHighlightModifier(
         return Modifier
     }
     if (!containsCursor(start, end, highlight.start)) return Modifier
-    return Modifier.drawBehind {
-        val bleedPx = bleed.toPx()
-        drawRoundRect(
-            color = Color(highlight.colorArgb).copy(alpha = 0.10f),
-            topLeft = Offset(-bleedPx, 0f),
-            size = Size(size.width + bleedPx * 2f, size.height),
-            cornerRadius = CornerRadius(6.dp.toPx()),
-        )
-    }
+    return Modifier.fullWidthTint(
+        Color(highlight.colorArgb).copy(alpha = SentenceTintAlpha),
+        bleed,
+    )
+}
+
+/**
+ * The sentence/paragraph tint of the reader. It bleeds into the paragraph
+ * padding so the highlight reaches the same edges in the feed, a split
+ * paragraph and a parallel pair. A clipping ancestor would hide the bleed.
+ */
+private fun Modifier.fullWidthTint(color: Color, bleed: Dp): Modifier = drawBehind {
+    val bleedPx = bleed.toPx()
+    drawRoundRect(
+        color = color,
+        topLeft = Offset(-bleedPx, 0f),
+        size = Size(size.width + bleedPx * 2f, size.height),
+        cornerRadius = CornerRadius(SentenceTintCorner.toPx()),
+    )
 }
 
 /** Tints one parallel pair when the cursor is inside either of its copies. */
@@ -851,21 +930,38 @@ private fun parallelPairHighlightModifier(
     highlight: TtsHighlight?,
     bleed: Dp,
 ): Modifier {
-    if (highlight == null || highlight.blockId != blockId) return Modifier
-    val active = if (highlight.translated) {
+    if (highlight == null || !pairHighlightActive(blockId, copy, highlight)) return Modifier
+    return Modifier.fullWidthTint(
+        Color(highlight.colorArgb).copy(alpha = SentenceTintAlpha),
+        bleed,
+    )
+}
+
+/**
+ * True when the spoken cursor falls inside the copy of the pair that is being
+ * spoken. Each side is compared in its own string space, exactly like the
+ * single-copy sentence tint.
+ */
+internal fun pairHighlightActive(
+    blockId: BlockId,
+    copy: FeedPairCopy,
+    highlight: TtsHighlight?,
+): Boolean {
+    if (highlight == null || highlight.blockId != blockId) return false
+    return if (highlight.translated) {
         copy.translated.isNotBlank() &&
-            containsCursor(copy.translatedStart, copy.translatedStart + copy.translated.length, highlight.start)
+            containsCursor(
+                copy.translatedStart,
+                copy.translatedStart + copy.translated.length,
+                highlight.start,
+            )
     } else {
         copy.original.isNotBlank() &&
-            containsCursor(copy.originalStart, copy.originalStart + copy.original.length, highlight.start)
-    }
-    return if (active) {
-        Modifier.background(
-            Color(highlight.colorArgb).copy(alpha = 0.10f),
-            RoundedCornerShape(MiruRadius.Badge),
-        )
-    } else {
-        Modifier
+            containsCursor(
+                copy.originalStart,
+                copy.originalStart + copy.original.length,
+                highlight.start,
+            )
     }
 }
 

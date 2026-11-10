@@ -42,7 +42,11 @@ enum class ReaderPanel { Style, More, Translation, Tts }
 fun ReaderPanelHost(
     panel: ReaderPanel?,
     style: ReaderStyle,
+    previewStyle: ReaderStyle = style,
     onStyleChange: (ReaderStyle) -> Unit,
+    onStylePreview: (ReaderStyle) -> Unit = onStyleChange,
+    onStyleCommit: (ReaderStyle) -> Unit = onStyleChange,
+    onStyleCancel: () -> Unit = {},
     onDismiss: () -> Unit,
     bookUrl: String,
     onOpenRegex: (String) -> Unit,
@@ -58,6 +62,8 @@ fun ReaderPanelHost(
     ttsCapabilities: TtsCapabilities = TtsCapabilities(),
     ttsStatus: TtsStatus = TtsStatus.Idle,
     ttsMessage: String? = null,
+    ttsPreviewText: String = "",
+    ttsPreviewTranslatedText: String = "",
     ttsHighlight: Boolean = false,
     highlightColor: Long = ReaderStyle.Default.highlightColor,
     onTtsSettingsChange: (TtsSettings) -> Unit = {},
@@ -68,6 +74,9 @@ fun ReaderPanelHost(
     onTtsHighlightChange: (Boolean) -> Unit = {},
     onHighlightColorChange: (Long) -> Unit = {},
     onTtsDiscoverVoices: () -> Unit = {},
+    onTtsPreviewVoice: (String?, String?, Float, Float, String) -> Unit =
+        { _, _, _, _, _ -> },
+    onTtsPreviewStop: () -> Unit = {},
     sleepTimer: StateFlow<TtsSleepTimerState?>? = null,
     onSleepTimerMinutes: (Int) -> Unit = {},
     onSleepTimerChapters: (Int) -> Unit = {},
@@ -88,8 +97,10 @@ fun ReaderPanelHost(
             )
         } else {
             ReaderStylePanel(
-                style = style,
-                onStyleChange = onStyleChange,
+                style = previewStyle,
+                onStylePreview = onStylePreview,
+                onStyleCommit = onStyleCommit,
+                onStyleCancel = onStyleCancel,
                 onDismiss = onDismiss,
                 assets = assets,
             )
@@ -119,6 +130,8 @@ fun ReaderPanelHost(
                 capabilities = ttsCapabilities,
                 status = ttsStatus,
                 message = ttsMessage,
+                ttsPreviewText = ttsPreviewText,
+                ttsPreviewTranslatedText = ttsPreviewTranslatedText,
                 highlight = ttsHighlight,
                 highlightColor = highlightColor,
                 highlightColors = ReaderPalette.highlightColors,
@@ -131,6 +144,8 @@ fun ReaderPanelHost(
                 onHighlightColorChange = onHighlightColorChange,
                 onDismiss = onDismiss,
                 onDiscoverVoices = onTtsDiscoverVoices,
+                onPreviewVoice = onTtsPreviewVoice,
+                onPreviewStop = onTtsPreviewStop,
                 sleepTimer = sleepTimer,
                 onSleepTimerMinutes = onSleepTimerMinutes,
                 onSleepTimerChapters = onSleepTimerChapters,
@@ -189,20 +204,25 @@ private fun MangaStylePanel(
 @Composable
 private fun ReaderStylePanel(
     style: ReaderStyle,
-    onStyleChange: (ReaderStyle) -> Unit,
+    onStylePreview: (ReaderStyle) -> Unit,
+    onStyleCommit: (ReaderStyle) -> Unit,
+    onStyleCancel: () -> Unit,
     onDismiss: () -> Unit,
     assets: ReaderAssetPort,
 ) {
-    var draft by remember(style) { mutableStateOf(style) }
     var resetConfirm by remember { mutableStateOf(false) }
 
     AppBottomSheet(
         title = stringResource(R.string.rd_style),
         description = stringResource(R.string.rd_style_desc),
-        onClose = onDismiss,
+        onClose = {
+            onStyleCancel()
+            onDismiss()
+        },
         doneLabel = stringResource(R.string.st_save),
+        closeLabel = stringResource(R.string.lib_cancel),
         onDone = {
-            onStyleChange(draft)
+            onStyleCommit(style)
             onDismiss()
         },
         // Reset is the sheet-header action; it still asks before discarding.
@@ -214,11 +234,12 @@ private fun ReaderStylePanel(
         },
     ) {
         ReaderStyleControls(
-            style = draft,
-            onStyleChange = { draft = it },
-            onReset = { draft = ReaderStyle.Default },
+            style = style,
+            onStyleChange = onStylePreview,
+            onReset = { onStylePreview(ReaderStyle.Default) },
             assets = assets,
             hostedInSheet = true,
+            deferAssetDeletion = true,
         )
     }
 
@@ -232,7 +253,7 @@ private fun ReaderStylePanel(
             closeLabel = stringResource(R.string.lib_cancel),
             onDone = {
                 resetConfirm = false
-                draft = ReaderStyle.Default
+                onStylePreview(ReaderStyle.Default)
             },
             content = {},
         )

@@ -157,6 +157,18 @@ object SentenceSplitter {
     }
 
     /**
+     * True when the whole paragraph is one quoted block and nothing but a
+     * closing period/punctuation follows it (for example `«...» .`). Display
+     * grouping keeps such a paragraph whole.
+     */
+    internal fun isQuoteWrappedParagraph(text: String): Boolean {
+        val trimmedStart = text.indexOfFirst { !it.isWhitespace() }
+        if (trimmedStart < 0) return false
+        val closing = quotedBlockEnd(text, trimmedStart) ?: return false
+        return text.substring(closing + 1).none { it.isLetterOrDigit() }
+    }
+
+    /**
      * A paragraph is a log/chat block when its only line starts with a log
      * prefix, or when at least two lines look like chat lines ("[12:34]",
      * "<Alice>", "**Alice**"). "Name: ..." lines are status-block territory.
@@ -188,12 +200,8 @@ object SentenceSplitter {
         // A paragraph that is one quoted block may contain several sentences
         // (long dialogue). An inline quote or a quote followed by an
         // attribution is part of a sentence and stays whole.
-        val trimmedStart = text.indexOfFirst { !it.isWhitespace() }
-        val trimmedEnd = text.indexOfLast { !it.isWhitespace() }
-        val closingOuterQuote = if (trimmedStart >= 0) quotedBlockEnd(text, trimmedStart) else null
         // `».` is a quoted paragraph with the sentence period outside the quote.
-        val quoteWrappedParagraph = closingOuterQuote != null &&
-            text.substring(closingOuterQuote + 1).none { it.isLetterOrDigit() }
+        val quoteWrappedParagraph = isQuoteWrappedParagraph(text)
 
         // Quotes and brackets are tracked separately: a quoted paragraph may
         // contain several sentences, so a quote must not suppress boundaries.

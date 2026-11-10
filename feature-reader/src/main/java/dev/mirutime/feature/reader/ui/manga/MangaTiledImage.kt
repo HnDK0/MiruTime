@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +31,8 @@ import com.davemorrissey.labs.subscaleview.decoder.CompatDecoderFactory
 import com.davemorrissey.labs.subscaleview.decoder.SkiaPooledImageRegionDecoder
 import java.io.File
 import kotlin.math.abs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private const val MaxScale = 4f
 private const val ZoomEpsilon = 0.01f
@@ -75,6 +78,15 @@ internal fun MangaTiledImage(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    // ImageSource.uri() checks the file on disk while building the source, so
+    // it must not run on the main thread.
+    var imageSource by remember(file) { mutableStateOf<ImageSource?>(null) }
+    LaunchedEffect(file) {
+        val current = file ?: return@LaunchedEffect
+        imageSource = withContext(Dispatchers.IO) {
+            ImageSource.uri(Uri.fromFile(current))
+        }
+    }
     Box(modifier.background(Color.Black)) {
         if (file == null) return@Box
         AndroidView(
@@ -124,10 +136,11 @@ internal fun MangaTiledImage(
             },
             update = { view ->
                 val path = file.absolutePath
-                if (view.tag != path) {
+                val source = imageSource
+                if (source != null && view.tag != path) {
                     view.tag = path
                     view.recycle()
-                    view.setImage(ImageSource.uri(Uri.fromFile(file)))
+                    view.setImage(source)
                 }
                 view.contentDescription = contentDescription
                 view.onTapFraction = onTap

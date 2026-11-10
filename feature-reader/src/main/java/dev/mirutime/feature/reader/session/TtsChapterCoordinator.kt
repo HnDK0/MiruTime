@@ -2,11 +2,18 @@ package dev.mirutime.feature.reader.session
 
 import dev.mirutime.app.features.reader.document.ReadingAnchor
 import dev.mirutime.core.log.MiruLog
+import dev.mirutime.app.features.reader.document.ReaderDocument
+import dev.mirutime.feature.reader.api.ReaderSettingsPort
 import dev.mirutime.feature.reader.api.ReaderTranslationPort
 import dev.mirutime.feature.reader.api.translationEnsureTargets
 import dev.mirutime.feature.reader.api.ttsHandoffApplies
+import dev.mirutime.feature.reader.api.ChapterConfigKeyCache
+import dev.mirutime.feature.reader.api.ReaderChapterTranslation
+import dev.mirutime.feature.reader.api.TtsTextSource
+import dev.mirutime.feature.reader.api.ttsTextSource
 import dev.mirutime.feature.tts.TtsChapterDirection
 import dev.mirutime.feature.tts.TtsHandoffSource
+import dev.mirutime.feature.tts.TtsState
 import dev.mirutime.feature.tts.TtsStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -33,6 +40,7 @@ class TtsChapterCoordinator(
     private val tts: TtsHandoffSource,
     private val session: ReaderSessionStore,
     private val translation: ReaderTranslationPort,
+    private val settings: ReaderSettingsPort,
     private val scope: CoroutineScope,
     private val startPlayback: (
         bookTitle: String,
@@ -59,6 +67,9 @@ class TtsChapterCoordinator(
     // A cancelled hand-off still runs its finally block; only the latest
     // generation may clear handoffInProgress or touch the session.
     private var handoffGeneration = 0
+    // The hand-off hashes the chapter text twice otherwise (ensureChapter builds
+    // the same request). Memoize like the screen does.
+    private val configKeys = ChapterConfigKeyCache()
 
     fun start() {
         if (jobs.isNotEmpty()) return
@@ -72,6 +83,7 @@ class TtsChapterCoordinator(
         jobs += scope.launch { observePlayback() }
         jobs += scope.launch { observeTranslations() }
         jobs += scope.launch { observeFinishedChapter() }
+        jobs += scope.launch { observeLanguage() }
     }
 
     /** Stops playback without tearing down the app-scoped collectors. */
@@ -100,6 +112,80 @@ class TtsChapterCoordinator(
         if (status == TtsStatus.Playing || status == TtsStatus.Loading) {
             publishStart(session.state.value)
         }
+    }
+
+    /**
+     * Keeps the spoken language in step with the page while speech runs. The
+     * hand-off only sees the translation state at the moment it starts the next
+     * chapter; a translation that arrives later (the normal case, and the only
+     * case with the screen off) is applied here, from the same rule the hand-off
+     * uses. One owner: the reader screen no longer restarts the session.
+     */
+    private suspend fun observeLanguage() {
+        combine(tts.state, translation.state, session.state) { ttsState, translations, sessionState ->
+            LanguageInput(
+                tts = ttsState,
+                translations = translations,
+                documents = sessionState.documents.values.toList(),
+                bookUrl = sessionState.book?.bookUrl,
+            )
+        }
+            .distinctUntilChanged()
+            .collect { input ->
+                val blockId = input.tts.blockId ?: return@collect
+                if (input.tts.status == TtsStatus.Idle || input.tts.status == TtsStatus.Failed) {
+                    return@collect
+                }
+                if (_handoffInProgress.value) return@collect
+                val document = input.documents.firstOrNull { it.chapterUrl == blockId.chapterUrl }
+                    ?: return@collect
+                val bookUrl = input.bookUrl?.takeIf { it.isNotBlank() } ?: return@collect
+                val current = tts.sessionLanguage ?: return@collect
+                val source = textSource(bookUrl, document, input.translations)
+                if (source.language == current) return@collect
+                MiruLog.event(
+                    "tts",
+                    "language-switch",
+                    "chapter" to document.chapterIndex,
+                    "block" to blockId.index,
+                    "language" to source.language.name.lowercase(),
+                )
+                tts.switchLanguage(
+                    document = document,
+                    translations = source.translations,
+                    blockIndex = blockId.index,
+                    language = source.language,
+                )
+            }
+    }
+
+    private data class LanguageInput(
+        val tts: TtsState,
+        val translations: Map<String, ReaderChapterTranslation>,
+        val documents: List<ReaderDocument>,
+        val bookUrl: String?,
+    )
+
+    /** Text/language for one document, filtered exactly like the page does. */
+    private fun textSource(
+        bookUrl: String,
+        document: ReaderDocument,
+        translations: Map<String, ReaderChapterTranslation>,
+    ): TtsTextSource {
+        val mode = translation.activeMode(bookUrl)
+        val available = if (mode?.hasPair == true) translations else emptyMap()
+        val expectedKey = configKeys.keyFor(
+            document = document,
+            mode = mode,
+            promptKey = translation.promptKey(bookUrl),
+        ) { target -> translation.chapterConfigKey(bookUrl, target) }
+        val entry = available[document.chapterUrl]
+            ?.takeIf { expectedKey == null || it.configKey == expectedKey }
+        return ttsTextSource(
+            parallelEnabled = settings.parallelEnabled,
+            parallelOrder = settings.parallelOrder,
+            translations = entry?.translations,
+        )
     }
 
     private suspend fun handleHandoff(direction: TtsChapterDirection, generation: Int) {
@@ -151,13 +237,11 @@ class TtsChapterCoordinator(
             nextLoadedChapter(target)?.let { (index, next) ->
                 translation.ensureChapter(bookUrl, index, next)
             }
-            val mode = translation.activeMode(bookUrl)
-            val available = if (mode?.hasPair == true) translation.state.value else emptyMap()
             if (generation != handoffGeneration) return
-            val started = tts.playHandoff(
-                document,
-                available[document.chapterUrl]?.translations.orEmpty(),
-            )
+            // Same entry the reader would paint: an entry from another parse or
+            // config must not be spoken with the wrong language.
+            val source = textSource(bookUrl, document, translation.state.value)
+            val started = tts.playHandoff(document, source.translations, source.language)
             if (!started) {
                 // Timer/Stop/Pause dropped the request: return to the chapter
                 // and cursor that were actually spoken, without a hard scroll.

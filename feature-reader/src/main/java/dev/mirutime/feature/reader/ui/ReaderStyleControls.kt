@@ -75,6 +75,8 @@ fun ReaderStyleControls(
     assets: ReaderAssetPort,
     modifier: Modifier = Modifier,
     hostedInSheet: Boolean = false,
+    /** Keep the old asset until Save; Cancel deletes only the new preview asset. */
+    deferAssetDeletion: Boolean = false,
 ) {
     var fontSheet by remember { mutableStateOf(false) }
     var fontOptions by remember { mutableStateOf(ReaderFontCatalog.legacyOptions()) }
@@ -95,7 +97,10 @@ fun ReaderStyleControls(
     ) { uri ->
         if (uri != null) {
             scope.launch {
-                val asset = assets.importBackground(uri, currentStyle.backgroundImagePath)
+                val asset = assets.importBackground(
+                    uri,
+                    previousPath = if (deferAssetDeletion) null else currentStyle.backgroundImagePath,
+                )
                 if (asset != null) {
                     currentUpdate(
                         currentStyle.copy(
@@ -114,7 +119,10 @@ fun ReaderStyleControls(
     ) { uri ->
         if (uri != null) {
             scope.launch {
-                val asset = assets.importFont(uri, currentStyle.customFontPath)
+                val asset = assets.importFont(
+                    uri,
+                    previousPath = if (deferAssetDeletion) null else currentStyle.customFontPath,
+                )
                 if (asset != null) {
                     currentUpdate(
                         currentStyle.copy(
@@ -162,7 +170,9 @@ fun ReaderStyleControls(
                         RemoveAssetButton(
                             contentDescription = stringResource(R.string.rd_custom_font_remove),
                             onClick = {
-                                assets.deleteFont(style.customFontPath)
+                                if (!deferAssetDeletion) {
+                                    assets.deleteFont(style.customFontPath)
+                                }
                                 update(
                                     style.copy(
                                         customFontPath = null,
@@ -369,7 +379,9 @@ fun ReaderStyleControls(
                                 R.string.rd_custom_background_remove,
                             ),
                             onClick = {
-                                assets.deleteBackground(style.backgroundImagePath)
+                                if (!deferAssetDeletion) {
+                                    assets.deleteBackground(style.backgroundImagePath)
+                                }
                                 update(
                                     style.copy(
                                         backgroundImagePath = null,

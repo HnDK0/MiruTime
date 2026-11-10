@@ -91,6 +91,8 @@ fun pairedRows(
     altLines: List<PagedVisualLine>,
     gapPx: Float,
     spacingBeforePx: Float,
+    startsGroup: Boolean = true,
+    originalPrimary: Boolean = false,
 ): List<PageLine> {
     val rowCount = maxOf(primaryLines.size, altLines.size)
     if (rowCount == 0) return emptyList()
@@ -99,52 +101,39 @@ fun pairedRows(
         val primary = primaryLines.getOrNull(index)
         val alt = altLines.getOrNull(index)
         val first = index == 0
-        when {
-            primary != null && alt != null -> rows += PageLine(
-                blockId = blockId,
-                kind = kind,
-                start = pair.original.start + alt.start,
-                end = pair.original.start + alt.end,
-                heightPx = primary.heightPx + gapPx + alt.heightPx,
-                spacingBeforePx = if (first) spacingBeforePx else 0f,
-                isSegmentStart = first,
-                alt = PageAlt(
-                    start = pair.translated.start + primary.start,
-                    end = pair.translated.start + primary.end,
-                    heightPx = alt.heightPx,
-                ),
-            )
-            primary != null -> rows += PageLine(
-                blockId = blockId,
-                kind = kind,
-                // Anchor at the pair start; the translation line has no original
-                // visual line to point at.
-                start = pair.original.start,
-                end = pair.original.end,
-                heightPx = primary.heightPx,
-                spacingBeforePx = if (first) spacingBeforePx else 0f,
-                isSegmentStart = first,
-                alt = PageAlt(
-                    start = pair.translated.start + primary.start,
-                    end = pair.translated.start + primary.end,
-                    heightPx = 0f,
-                ),
-            )
-            alt != null -> rows += PageLine(
-                blockId = blockId,
-                kind = kind,
-                start = pair.original.start + alt.start,
-                end = pair.original.start + alt.end,
-                heightPx = alt.heightPx,
-                spacingBeforePx = if (first) spacingBeforePx else 0f,
-                isSegmentStart = first,
-                alt = PageAlt(
-                    start = pair.translated.start,
-                    end = pair.translated.start,
-                    heightPx = 0f,
-                ),
-            )
+        // originalPrimary=true: primaryLines are the original, altLines the
+        // translation. Otherwise the old layout (translation primary) is used.
+        val original = if (originalPrimary) primary else alt
+        val translated = if (originalPrimary) alt else primary
+        val lineStart = pair.original.start + (original?.start ?: 0)
+        // A translation-only visual row still anchors the whole original pair,
+        // so the page cursor never jumps to offset 0.
+        val lineEnd = original?.let { pair.original.start + it.end } ?: pair.original.end
+        val translatedStart = pair.translated.start + (translated?.start ?: 0)
+        val translatedEnd = translated?.let { pair.translated.start + it.end } ?: pair.translated.start
+        val height = when {
+            primary != null && alt != null -> primary.heightPx + gapPx + alt.heightPx
+            primary != null -> primary.heightPx
+            alt != null -> alt.heightPx
+            else -> 0f
         }
+        rows += PageLine(
+            blockId = blockId,
+            kind = kind,
+            start = lineStart,
+            end = lineEnd,
+            heightPx = height,
+            spacingBeforePx = if (first && startsGroup) spacingBeforePx else 0f,
+            isSegmentStart = first && startsGroup,
+            alt = PageAlt(
+                start = translatedStart,
+                end = translatedEnd,
+                // In the both-sided row the secondary copy has its own height;
+                // in a single-sided row the whole line height belongs to the
+                // visible copy.
+                heightPx = if (primary != null && alt != null) alt!!.heightPx else 0f,
+            ),
+        )
     }
     return rows
 }

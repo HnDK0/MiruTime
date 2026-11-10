@@ -33,6 +33,31 @@ internal object TextStructure {
         """^\s*(?:\[\d{1,2}:\d{2}(?::\d{2})?]|\[[^\]]{1,24}]|<[^<>]{1,32}>|⟨[^⟨⟩]{1,32}⟩|\*\*[^*]{1,32}\*\*)\s*\S"""
     )
 
+    private val PUNCTUATION_TYPES: Set<Int> = setOf(
+        Character.CONNECTOR_PUNCTUATION.toInt(),
+        Character.DASH_PUNCTUATION.toInt(),
+        Character.START_PUNCTUATION.toInt(),
+        Character.END_PUNCTUATION.toInt(),
+        Character.INITIAL_QUOTE_PUNCTUATION.toInt(),
+        Character.FINAL_QUOTE_PUNCTUATION.toInt(),
+        Character.OTHER_PUNCTUATION.toInt(),
+    )
+
+    /**
+     * True when the text has no letters/digits/symbols, only punctuation
+     * (whitespace ignored). Emoji are symbols, not punctuation, so an
+     * emoji-only fragment keeps its own paragraph.
+     */
+    internal fun isPunctuationOnly(text: String): Boolean {
+        var sawPunctuation = false
+        for (ch in text) {
+            if (ch.isWhitespace()) continue
+            if (Character.getType(ch) !in PUNCTUATION_TYPES) return false
+            sawPunctuation = true
+        }
+        return sawPunctuation
+    }
+
     /** Box Drawing + Block Elements: chars that form a frame around a block. */
     val FRAME_RANGES = listOf(
         0x2500..0x257F,

@@ -120,6 +120,7 @@
     <string name="rd_paragraph_spacing">Paragraph spacing</string>
     <string name="rd_percent_fmt">%1$d%%</string>
     <string name="rd_prev_chapter">Previous chapter</string>
+    <string name="rd_chapter_loading">Loading chapter</string>
     <string name="rd_reading">Reading</string>
     <string name="rd_regex">Regex</string>
     <string name="rd_regex_desc">Clean chapter text with rules</string>
@@ -140,8 +141,12 @@
     <string name="rd_text_color">Text color</string>
     <string name="rd_tools">Tools</string>
     <string name="rd_translation">Translation</string>
+    <string name="rd_retranslate">Translate chapter again</string>
+    <string name="rd_retranslate_failed">Could not translate the chapter again</string>
+    <string name="rd_original_reload_failed">Could not load the chapter original</string>
     <string name="rd_translation_cleartext">HTTP is allowed only for local addresses</string>
     <string name="rd_translation_failed">Translation failed</string>
+    <string name="rd_original_unavailable">original unavailable</string>
     <string name="rd_translation_local_network">Local network permission required</string>
     <string name="rd_translation_loading">Translating…</string>
     <!-- Elapsed time next to the translating label: keeps the wait visible. -->

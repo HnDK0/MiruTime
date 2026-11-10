@@ -22,6 +22,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -46,6 +47,7 @@ import dev.mirutime.feature.tts.api.TtsHighlight
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import kotlin.math.abs
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
@@ -106,6 +108,8 @@ internal fun ReaderFeed(
     onAnchor: (ReadingAnchor, Int) -> Unit,
     onRetry: (Int) -> Unit,
     onLoadPrevious: (Int) -> Unit,
+    /** Asks for the chapter after the loaded window; keeps reading continuous. */
+    onLoadNext: (Int) -> Unit = {},
     onOpenAuth: (String) -> Unit = {},
     onChapterFinished: (Int) -> Unit,
     onStartOver: () -> Unit,
@@ -114,6 +118,32 @@ internal fun ReaderFeed(
     val entries = state.feed.entries
     val textColor = Color(style.effectiveTextColor())
     val currentOnUserScrollChange by rememberUpdatedState(onUserScrollChange)
+    val currentState by rememberUpdatedState(state)
+    // Only layout-affecting fields should restore the anchor after a reflow;
+    // TTS-highlight/keep-screen-on changes must not snap-scroll.
+    val layoutStyle = listOf(
+        style.fontFamily,
+        style.customFontPath,
+        style.customFontName,
+        style.fontSizeSp,
+        style.lineHeight,
+        style.paragraphSpacingDp,
+        style.marginStartDp,
+        style.marginEndDp,
+        style.marginTopDp,
+        style.marginBottomDp,
+        style.letterSpacingEm,
+        style.justify,
+        style.hyphenation,
+        style.paragraphIndent,
+        style.firstLetterBold,
+        style.splitSentences,
+        style.bold,
+        style.italic,
+        style.underline,
+        style.shadow,
+    )
+    val initialLayoutStyle = remember { layoutStyle }
 
     val density = LocalDensity.current
     // The floating chrome header covers the top of the list. A negative scroll
@@ -165,19 +195,44 @@ internal fun ReaderFeed(
         listState.animateScrollToItem(index, scrollOffset = -ttsFocusInsetPx)
     }
 
-    LaunchedEffect(feedScrollTrigger(state, contentPadding.calculateTopPadding().value)) {
-        val anchor = state.anchor ?: return@LaunchedEffect
-        val chapterIndex = state.chapters.firstOrNull { it.chapterUrl == anchor.chapterUrl }?.index
-        val blocks = chapterIndex?.let { state.documents[it]?.blocks }
+    suspend fun scrollToAnchor(
+        source: ReaderSessionState,
+        anchor: ReadingAnchor,
+        offsetPx: Int,
+    ) {
+        val chapterIndex = source.chapters.firstOrNull {
+            it.chapterUrl == anchor.chapterUrl
+        }?.index
+        val blocks = chapterIndex?.let { source.documents[it]?.blocks }
         val atChapterStart = blocks?.firstOrNull()?.id == anchor.blockId
+        val currentEntries = source.feed.entries
         val index = if (atChapterStart) {
-            entries.indexOfFirst { it is FeedEntry.Header && it.chapterIndex == chapterIndex }
+            currentEntries.indexOfFirst {
+                it is FeedEntry.Header && it.chapterIndex == chapterIndex
+            }
         } else {
-            entries.indexOfFirst { it is FeedEntry.Block && it.block.id == anchor.blockId }
+            currentEntries.indexOfFirst {
+                it is FeedEntry.Block && it.block.id == anchor.blockId
+            }
         }
         if (index >= 0) {
-            listState.scrollToItem(index, if (atChapterStart) 0 else state.offsetPx)
+            listState.scrollToItem(index, if (atChapterStart) 0 else offsetPx)
         }
+    }
+
+    LaunchedEffect(feedScrollTrigger(state, contentPadding.calculateTopPadding().value)) {
+        val anchor = state.anchor ?: return@LaunchedEffect
+        scrollToAnchor(state, anchor, state.offsetPx)
+    }
+
+    // Style preview reflows the text without changing the logical anchor.
+    // Coalesce slider ticks and restore the pre-preview position.
+    LaunchedEffect(layoutStyle) {
+        if (layoutStyle == initialLayoutStyle) return@LaunchedEffect
+        val anchor = currentState.anchor ?: return@LaunchedEffect
+        val offsetPx = currentState.offsetPx
+        delay(80)
+        scrollToAnchor(currentState, anchor, offsetPx)
     }
 
     LaunchedEffect(listState, entries) {
@@ -208,6 +263,22 @@ internal fun ReaderFeed(
                 val entry = entries.getOrNull(lastVisible) ?: return@collect
                 val range = state.feed.chapterEntryRanges[entry.chapterIndex] ?: return@collect
                 if (lastVisible >= range.last) onChapterFinished(entry.chapterIndex)
+            }
+    }
+
+    // Reading forward never stops at a boundary: approaching the end of the
+    // loaded window asks for the next chapter. The store deduplicates the
+    // request, so repeated emissions cost nothing.
+    val nextChapterIndex = remember(state.chapters, state.feed.lastChapterIndex) {
+        val last = state.feed.lastChapterIndex ?: return@remember null
+        val position = state.chapters.indexOfFirst { it.index == last }
+        if (position < 0) null else state.chapters.getOrNull(position + 1)?.index
+    }
+    LaunchedEffect(listState, entries, nextChapterIndex) {
+        val next = nextChapterIndex ?: return@LaunchedEffect
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .collect { lastVisible ->
+                if (lastVisible >= entries.lastIndex - 1) onLoadNext(next)
             }
     }
 
@@ -257,9 +328,13 @@ internal fun ReaderFeed(
                     showDivider = index > 0 && entries[index - 1] !is FeedEntry.Gap,
                 )
                 is FeedEntry.Block -> {
+                    // A provider may return an empty string for a block; paged
+                    // and TTS already fall back to the original there, and feed
+                    // must not paint a blank paragraph either.
                     val translated = translations[entry.block.id.chapterUrl]
                         ?.translations
                         ?.get(entry.block.id.index)
+                        ?.takeIf { it.isNotBlank() }
                     ReaderBlockView(
                         block = entry.block,
                         style = style,

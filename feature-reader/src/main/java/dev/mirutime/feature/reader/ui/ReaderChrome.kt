@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.FormatSize
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Public
@@ -72,6 +73,9 @@ internal fun ReaderChrome(
     chapterPercent: Int,
     canPrev: Boolean,
     canNext: Boolean,
+    /** A prev/next chapter load is running: the arrows report it instead of a spinner. */
+    busyPrev: Boolean = false,
+    busyNext: Boolean = false,
     canOpenWebView: Boolean,
     ttsStatus: TtsStatus,
     sleepTimer: StateFlow<TtsSleepTimerState?>,
@@ -85,6 +89,11 @@ internal fun ReaderChrome(
     onPrev: () -> Unit,
     onNext: () -> Unit,
     onOpenWebView: () -> Unit,
+    // Force a fresh translation of the active chapter; hidden without a pair.
+    showRetranslate: Boolean = false,
+    retranslateEnabled: Boolean = false,
+    retranslateBusy: Boolean = false,
+    onRetranslate: () -> Unit = {},
     onTts: () -> Unit,
     onTranslation: () -> Unit,
     onStyle: () -> Unit,
@@ -129,6 +138,17 @@ internal fun ReaderChrome(
                 )
             },
             actions = {
+                if (showRetranslate) {
+                    ReaderIconButton(
+                        icon = Icons.Outlined.Autorenew,
+                        contentDescription = stringResource(R.string.rd_retranslate),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        enabled = retranslateEnabled && !retranslateBusy,
+                        busy = retranslateBusy,
+                        busyDescription = stringResource(R.string.rd_translation_loading),
+                        onClick = onRetranslate,
+                    )
+                }
                 ReaderIconButton(
                     icon = Icons.Outlined.Public,
                     contentDescription = stringResource(R.string.rd_open_web),
@@ -194,7 +214,9 @@ internal fun ReaderChrome(
                         icon = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = stringResource(R.string.rd_prev_chapter),
                         tint = MaterialTheme.colorScheme.onSurface,
-                        enabled = canPrev,
+                        enabled = canPrev && !busyPrev,
+                        busy = busyPrev,
+                        busyDescription = stringResource(R.string.rd_chapter_loading),
                         onClick = onPrev,
                     )
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -209,7 +231,9 @@ internal fun ReaderChrome(
                         icon = Icons.AutoMirrored.Filled.ArrowForward,
                         contentDescription = stringResource(R.string.rd_next_chapter),
                         tint = MaterialTheme.colorScheme.onSurface,
-                        enabled = canNext,
+                        enabled = canNext && !busyNext,
+                        busy = busyNext,
+                        busyDescription = stringResource(R.string.rd_chapter_loading),
                         onClick = onNext,
                     )
                 }
@@ -309,6 +333,8 @@ internal fun ReaderIconButton(
     tint: Color,
     onClick: () -> Unit,
     enabled: Boolean = true,
+    busy: Boolean = false,
+    busyDescription: String? = null,
 ) {
     MiruIconButton(
         icon = icon,
@@ -316,6 +342,8 @@ internal fun ReaderIconButton(
         onClick = onClick,
         enabled = enabled,
         tint = tint,
+        busy = busy,
+        busyDescription = busyDescription,
     )
 }
 

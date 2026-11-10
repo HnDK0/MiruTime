@@ -4,6 +4,7 @@ import java.io.File
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -100,6 +101,50 @@ class MangaPageFileCacheTest {
         assertNotNull(newest)
         assertFalse(oldest!!.exists())
         assertTrue(newest!!.exists())
+    }
+
+    @Test
+    fun `a local page is served from disk and never copied into the cache`() = runTest {
+        val directory = tempDir()
+        val root = tempDir()
+        val page = File(root, "local_books/local-manga/x/pages/1/001.png").apply {
+            parentFile?.mkdirs()
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        val cache = MangaPageFileCache(
+            directory = directory,
+            fetchRemote = { _, _ -> null },
+            headersFor = { emptyMap() },
+            localRoots = listOf(File(root, "local_books")),
+        )
+
+        val file = cache.file(page.toURI().toString())
+
+        assertNotNull(file)
+        assertEquals(page.canonicalFile, file!!.canonicalFile)
+        assertEquals(0, directory.listFiles().orEmpty().size)
+        // A re-downloaded chapter must show its new page, not the old copy.
+        page.writeBytes(byteArrayOf(4, 5))
+        assertArrayEquals(byteArrayOf(4, 5), cache.file(page.toURI().toString())!!.readBytes())
+    }
+
+    @Test
+    fun `a local file outside the allowed roots is not served`() = runTest {
+        val directory = tempDir()
+        val root = tempDir()
+        val outside = File(root, "elsewhere/001.png").apply {
+            parentFile?.mkdirs()
+            writeBytes(byteArrayOf(1))
+        }
+        val cache = MangaPageFileCache(
+            directory = directory,
+            fetchRemote = { _, _ -> byteArrayOf(9) },
+            headersFor = { emptyMap() },
+            localRoots = listOf(File(root, "local_books")),
+        )
+
+        assertNull(cache.file(outside.toURI().toString()))
+        assertEquals(0, directory.listFiles().orEmpty().size)
     }
 
     private companion object {

@@ -3,6 +3,7 @@ package dev.mirutime.feature.reader.ui
 import dev.mirutime.app.features.reader.document.BlockId
 import dev.mirutime.app.features.reader.document.BlockKind
 import dev.mirutime.app.features.reader.document.ReaderBlock
+import dev.mirutime.app.features.reader.document.SentenceSpan
 import dev.mirutime.feature.tts.api.TtsHighlight
 import dev.mirutime.feature.tts.ui.highlightedRange
 import org.junit.Assert.assertEquals
@@ -71,6 +72,30 @@ class ReaderTextHighlightTest {
         )
 
         assertNull(range)
+    }
+
+    @Test
+    fun activeSentenceRangePicksSpanContainingCursor() {
+        val spans = listOf(SentenceSpan(0, 5), SentenceSpan(6, 11))
+
+        assertEquals(6 until 11, activeSentenceRange(spans, block.id, highlight(7, 9), isTranslated = false))
+        assertEquals(0 until 5, activeSentenceRange(spans, block.id, highlight(2, 3), isTranslated = false))
+    }
+
+    @Test
+    fun activeSentenceRangeIgnoresOtherCopyBlockOrMissingHighlight() {
+        val spans = listOf(SentenceSpan(0, 5), SentenceSpan(6, 11))
+
+        assertNull(activeSentenceRange(spans, block.id, highlight(7, 9, translated = true), isTranslated = false))
+        assertNull(activeSentenceRange(spans, block.id, highlight(7, 9, blockId = BlockId("another", 0)), isTranslated = false))
+        assertNull(activeSentenceRange(spans, block.id, null, isTranslated = false))
+    }
+
+    @Test
+    fun activeSentenceRangeIgnoresCursorOutsideSpans() {
+        val spans = listOf(SentenceSpan(0, 5), SentenceSpan(6, 11))
+
+        assertNull(activeSentenceRange(spans, block.id, highlight(5, 6), isTranslated = false))
     }
 
     @Test

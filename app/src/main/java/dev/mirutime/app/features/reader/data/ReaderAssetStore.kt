@@ -100,7 +100,6 @@ class ReaderAssetStore(context: Context) {
             "image/bmp" -> "bmp"
             "image/heic" -> "heic"
             "image/heif" -> "heif"
-            "image/avif" -> "avif"
             else -> null
         }
     }
@@ -136,7 +135,7 @@ class ReaderAssetStore(context: Context) {
 
     private companion object {
         val ImageExtensions = setOf(
-            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "avif",
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif",
         )
     }
 }

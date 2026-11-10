@@ -3,7 +3,6 @@ package dev.mirutime.feature.reader.api
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -49,6 +48,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil3.compose.AsyncImage
 import dev.mirutime.app.features.reader.document.BlockId
+import dev.mirutime.app.features.reader.document.BlockKind
+import dev.mirutime.app.features.reader.document.ReaderDocument
 import dev.mirutime.app.features.reader.document.ReadingAnchor
 import dev.mirutime.app.features.reader.document.mangaPages
 import dev.mirutime.feature.reader.ChapterLoadStatus
@@ -69,15 +70,18 @@ import dev.mirutime.feature.reader.ui.ReaderMangaPager
 import dev.mirutime.feature.reader.ui.ReaderPaged
 import dev.mirutime.feature.reader.ui.ReaderPanel
 import dev.mirutime.feature.reader.ui.ReaderPanelHost
+import dev.mirutime.feature.reader.ui.ReaderStylePreviewState
 import dev.mirutime.feature.reader.ui.ReaderTap
 import dev.mirutime.feature.reader.ui.readerBackClosesOverlay
 import dev.mirutime.feature.reader.ui.awaitReaderTap
-import dev.mirutime.feature.reader.ui.isMenuDoubleTap
+import dev.mirutime.feature.reader.ui.menuTapToggles
 import dev.mirutime.feature.reader.ui.openWebSearch
 import dev.mirutime.feature.reader.ui.readerBottomPaddingDp
 import dev.mirutime.feature.reader.ui.readerTopPaddingDp
 import dev.mirutime.feature.reader.ui.restoreReaderBarsNow
 import dev.mirutime.feature.tts.R as TtsR
+import dev.mirutime.feature.tts.TtsLanguage
+import dev.mirutime.feature.tts.TtsPlayerText
 import dev.mirutime.feature.tts.TtsSession
 import dev.mirutime.feature.tts.TtsStatus
 import dev.mirutime.feature.tts.api.TtsHighlight
@@ -86,7 +90,9 @@ import dev.mirutime.feature.tts.ui.TtsFloatingPlayer
 import dev.mirutime.feature.tts.ui.TtsMiniPlayer
 import java.io.File
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -111,6 +117,7 @@ fun ReaderScreen(
     val state by store.state.collectAsState()
     val config by graph.config.config.collectAsState()
     val translations by graph.translation.state.collectAsState()
+    var retranslatingChapters by remember { mutableStateOf(emptySet<Int>()) }
     val metadata by graph.translation.metadata.collectAsState()
     val ttsState by graph.tts.state.collectAsState()
     val ttsSettings by graph.tts.settings.collectAsState()
@@ -124,7 +131,14 @@ fun ReaderScreen(
         else -> stringResource(TtsR.string.rd_tts_failed)
     }
     val currentTtsActive by rememberUpdatedState(ttsActive)
-    val style = config.style.sanitized()
+    val committedStyle = config.style.sanitized()
+    var stylePreview by remember { mutableStateOf(ReaderStylePreviewState(committedStyle)) }
+    LaunchedEffect(committedStyle) {
+        if (stylePreview.preview == null) {
+            stylePreview = ReaderStylePreviewState(committedStyle)
+        }
+    }
+    val style = stylePreview.effective
     val mangaStyle = config.mangaStyle.sanitized()
     // Active paragraph is always marked while TTS has a cursor; the optional
     // word range follows the style switch.
@@ -159,10 +173,26 @@ fun ReaderScreen(
     val context = LocalContext.current
     val listState = rememberLazyListState()
     val lifecycleOwner = LocalLifecycleOwner.current
-    var overlayAvailable by remember {
-        mutableStateOf(android.provider.Settings.canDrawOverlays(context))
-    }
     var panel by remember { mutableStateOf<ReaderPanel?>(null) }
+    val cancelStylePreview: () -> Unit = {
+        val preview = stylePreview.preview
+        if (preview != null) {
+            if (preview.customFontPath != committedStyle.customFontPath) {
+                graph.assets.deleteFont(preview.customFontPath)
+            }
+            if (preview.backgroundImagePath != committedStyle.backgroundImagePath) {
+                graph.assets.deleteBackground(preview.backgroundImagePath)
+            }
+        }
+        stylePreview = stylePreview.cancel()
+    }
+    // Any panel-close path (BackHandler, Focus, dismiss) must drop a pending
+    // style preview; otherwise it would stay applied and suppress anchor saves.
+    LaunchedEffect(panel) {
+        if (panel != ReaderPanel.Style && stylePreview.preview != null) {
+            cancelStylePreview()
+        }
+    }
     val mangaScrubber = remember { MangaScrubberState() }
     // Bumped by the player's Focus action; the feed/pager scrolls to the
     // spoken block even when it did not change since the last follow.
@@ -182,15 +212,19 @@ fun ReaderScreen(
     // must not pull the session (and the guard) back. The TTS effect still
     // adopts its own chapter and within-chapter offsets.
     val onReaderAnchor: (ReadingAnchor, Int) -> Unit = { anchor, offset ->
-        val spokenUrl = graph.tts.state.value.blockId?.chapterUrl
-        if (shouldApplyReaderAnchor(
-                ttsOwnsCursor = ttsSessionActive,
-                handoffInProgress = handoffInProgress,
-                spokenChapterUrl = spokenUrl,
-                anchorChapterUrl = anchor.chapterUrl,
-            )
-        ) {
-            store.onAnchorChanged(anchor, offset)
+        // A style preview reflows the page; persisting the reflowed anchor
+        // would lose the pre-preview reading position.
+        if (stylePreview.preview == null) {
+            val spokenUrl = graph.tts.state.value.blockId?.chapterUrl
+            if (shouldApplyReaderAnchor(
+                    ttsOwnsCursor = ttsSessionActive,
+                    handoffInProgress = handoffInProgress,
+                    spokenChapterUrl = spokenUrl,
+                    anchorChapterUrl = anchor.chapterUrl,
+                )
+            ) {
+                store.onAnchorChanged(anchor, offset)
+            }
         }
     }
     // Captured before store.open() writes a newer reading position, so the
@@ -237,7 +271,24 @@ fun ReaderScreen(
         if (rulesOriginalRevision == seenRulesRevision) return@LaunchedEffect
         seenRulesRevision = rulesOriginalRevision
         if (ttsActive) graph.tts.stop()
-        store.reloadActiveChapter()
+        // The re-parse changes the chapter's config key, so the cached entry no
+        // longer matches and stays hidden; queue the translation here or it is
+        // never requested again for this document.
+        reloadActiveChapterForRules(store, graph.translation, bookUrl)
+    }
+    // Translation-only text is built from translated blocks, so translation
+    // cleanup rules need a rebuild too: the port cannot recompute a document
+    // that no longer has its original blocks.
+    val rulesTranslationRevision by graph.rules.revision.collectAsState()
+    var seenTranslationRulesRevision by remember(bookUrl) {
+        mutableStateOf(rulesTranslationRevision)
+    }
+    LaunchedEffect(rulesTranslationRevision) {
+        if (rulesTranslationRevision == seenTranslationRulesRevision) return@LaunchedEffect
+        seenTranslationRulesRevision = rulesTranslationRevision
+        if (state.documents[state.activeChapterIndex]?.translationOnly == true) {
+            store.reloadActiveChapter(allowTranslationOnly = true)
+        }
     }
 
     LaunchedEffect(
@@ -246,14 +297,17 @@ fun ReaderScreen(
         ttsState.status,
         ttsSessionActive,
         mangaScrubber.dragging,
+        retranslatingChapters,
     ) {
         // A failed speaker keeps its retry affordance visible instead of
         // disappearing with the rest of the auto-hidden chrome. Otherwise the
         // menu always auto-hides, independent of the floating-player option.
         // A scrub in progress holds it open; hiding would dispose the slider
-        // and leave the reader thinking a drag is still active.
+        // and leave the reader thinking a drag is still active. A running
+        // re-translation keeps its busy icon reachable: the request can take
+        // minutes and the page shows no other progress.
         if (chromeVisible && panel == null && ttsState.status != TtsStatus.Failed &&
-            !mangaScrubber.dragging
+            !mangaScrubber.dragging && state.activeChapterIndex !in retranslatingChapters
         ) {
             delay(3500)
             chromeVisible = false
@@ -269,7 +323,6 @@ fun ReaderScreen(
                 }
                 Lifecycle.Event.ON_START -> {
                     readerResumed = true
-                    overlayAvailable = android.provider.Settings.canDrawOverlays(context)
                     if (!currentTtsActive) store.resumeSession()
                 }
                 else -> Unit
@@ -307,6 +360,7 @@ fun ReaderScreen(
     }
 
     val activeDocument = state.documents[state.activeChapterIndex]
+    val activeIsTranslationOnly = activeDocument?.translationOnly == true
     val isManga = state.book?.isManga == true
     val mangaPages = remember(activeDocument, isManga) {
         if (isManga) activeDocument?.mangaPages().orEmpty() else emptyList()
@@ -323,8 +377,12 @@ fun ReaderScreen(
     // Chrome scrubber position and the bridge to whichever manga viewer is
     // active. Reset on chapter change so a stale counter never flashes.
     var mangaPage by remember(state.activeChapterIndex) { mutableIntStateOf(0) }
-    val nextChapterFirstPage = remember(state.activeChapterIndex, state.documents) {
-        state.documents[state.activeChapterIndex + 1]
+    val nextChapterFirstPage = remember(state.activeChapterIndex, state.documents, state.chapters) {
+        // Positional neighbour: a removed chapter leaves a hole in idx, so
+        // activeChapterIndex + 1 is not necessarily the next stored chapter.
+        val position = state.chapters.indexOfFirst { it.index == state.activeChapterIndex }
+        val nextIndex = if (position < 0) null else state.chapters.getOrNull(position + 1)?.index
+        nextIndex?.let { state.documents[it] }
             ?.mangaPages()
             ?.firstOrNull()
             ?.imageRef
@@ -413,9 +471,43 @@ fun ReaderScreen(
         ?: activeDocument?.title
         ?: state.chapters.firstOrNull { it.index == state.activeChapterIndex }?.title.orEmpty()
     val mode = graph.translation.activeMode(bookUrl)
+    val promptKey = graph.translation.promptKey(bookUrl)
+    // Hash keys are O(chapter text); memoize per chapter so a new load re-hashes
+    // only the document that changed, not every loaded chapter.
+    val configKeyCache = remember(bookUrl) { ChapterConfigKeyCache() }
+    // Hide an entry produced for an older parse of the same chapter URL: block
+    // indices may no longer match, which used to look like "partly untranslated".
+    val expectedConfigKeys = remember(state.documents, bookUrl, mode, promptKey) {
+        configKeyCache.retain(state.documents.values.mapTo(HashSet()) { it.chapterUrl })
+        state.documents.values.mapNotNull { document ->
+            val key = configKeyCache.keyFor(document, mode, promptKey) { target ->
+                graph.translation.chapterConfigKey(bookUrl, target)
+            }
+                // A translation-only document already carries its text in the
+                // blocks; a stale controller entry must never paint it twice.
+                ?: if (document.translationOnly) TRANSLATION_ONLY_CONFIG_KEY else null
+            key?.let { document.chapterUrl to it }
+        }.toMap()
+    }
     // A disabled mode must hide whatever is still cached from a previous
     // configuration instead of leaving translated text on screen.
-    val visibleTranslations = visibleTranslations(mode, bookUrl, translations)
+    val visibleTranslations = visibleTranslations(mode, bookUrl, translations, expectedConfigKeys)
+    fun ttsSource(document: ReaderDocument): TtsTextSource =
+        ttsTextSource(
+            parallelEnabled = graph.settings.parallelEnabled,
+            parallelOrder = graph.settings.parallelOrder,
+            translations = visibleTranslations[document.chapterUrl]?.translations,
+        )
+
+    // Enabling translation (or changing the pair) must translate the chapter on
+    // screen now, not on the next navigation. Submits dedupe, so the chapter
+    // load path stays the only request owner on a plain open.
+    LaunchedEffect(mode, activeDocument?.chapterUrl) {
+        val document = activeDocument ?: return@LaunchedEffect
+        if (mode?.hasPair != true) return@LaunchedEffect
+        graph.translation.ensureChapter(bookUrl, document.chapterIndex, document)
+    }
+
     // The player only shows text it can point at; during a chapter hand-off or
     // before restore lands the preview stays null and the sheet says so.
     // Translations live in the chapter cache, not in ReaderBlock.translation.
@@ -427,6 +519,18 @@ fun ReaderScreen(
         null
     }
     val ttsPreviewInfo = ttsSentencePreviewInfo(activeDocument, ttsState, ttsPreviewTranslation)
+    val previewBlock = activeDocument?.blocks?.firstOrNull {
+        it.kind == BlockKind.Paragraph && it.original.isNotBlank()
+    }
+    val ttsPreviewText = previewBlock?.original?.trim()?.take(240)
+        ?.takeIf { it.isNotBlank() }
+        ?: stringResource(TtsR.string.rd_tts_test_text)
+    val ttsPreviewTranslatedText = previewBlock?.let { block ->
+        visibleTranslations[block.id.chapterUrl]?.translations?.get(block.id.index)
+            ?.trim()
+            ?.take(240)
+            ?.takeIf { it.isNotBlank() }
+    } ?: ttsPreviewText
     val ttsPreview = ttsPreviewInfo?.text
     // The floating player can show the whole spoken block plus the other
     // language, matching NoveLA's spoken/both/translation paragraph modes.
@@ -442,6 +546,21 @@ fun ReaderScreen(
     val ttsCounterpart = if (ttsState.translated) ttsBlock?.original else ttsBlockTranslation
     val ttsSentenceNumber = if (ttsState.blockId != null) ttsState.currentChunk + 1 else 0
     val ttsChunkCount = ttsState.chunkCount
+    // The system overlay has no document: publish the rich player's text here so
+    // it can render the same plate the in-app player shows.
+    LaunchedEffect(ttsPreview, ttsParagraph, ttsCounterpart, chapterPercent, style.highlightColor) {
+        graph.tts.updatePlayerText(
+            TtsPlayerText(
+                sentence = ttsPreview,
+                paragraph = ttsParagraph,
+                counterpart = ttsCounterpart,
+                sentenceHighlightStart = ttsPreviewInfo?.start ?: 0,
+                sentenceHighlightEnd = ttsPreviewInfo?.end ?: 0,
+                chapterPercent = chapterPercent,
+                glowColorArgb = style.highlightColor,
+            ),
+        )
+    }
 
     // One-shot: a process-death session only restores after the chapter is
     // ready, and only when it points at the chapter the reader actually opened.
@@ -455,10 +574,12 @@ fun ReaderScreen(
             restoreSession = null
             return@LaunchedEffect
         }
+        val source = ttsSource(document)
         val restored = graph.tts.restore(
             document = document,
-            translations = visibleTranslations[document.chapterUrl]?.translations.orEmpty(),
+            translations = source.translations,
             session = session,
+            language = source.language,
         )
         restoreSession = null
         if (restored) {
@@ -523,13 +644,18 @@ fun ReaderScreen(
     val loadingSuffix = stringResource(R.string.rd_translation_loading)
     // A wait with no numbers reads as a hang: the badge counts the seconds the
     // active chapter has been translating, reset per chapter.
-    val activeChapterUrl = state.documents[state.activeChapterIndex]?.chapterUrl
-    val activeTranslating = activeChapterUrl
-        ?.let { visibleTranslations[it]?.status } == ReaderTranslationStatus.Loading
+    val activeChapterUrl = state.documents[state.activeChapterIndex]?.chapterUrl.orEmpty()
+    val hasPair = mode?.hasPair == true
+    val chapterReady = state.statuses[state.activeChapterIndex] is ChapterLoadStatus.Ready
+    // Raw state, not the painted map: a running request with a config key the
+    // page currently hides still blocks the retry, or the tap would cancel it.
+    val activeTranslating =
+        translations[activeChapterUrl]?.status == ReaderTranslationStatus.Loading
+    val activeRetranslating = state.activeChapterIndex in retranslatingChapters
     var translationElapsedSec by remember(activeChapterUrl) { mutableIntStateOf(0) }
-    LaunchedEffect(activeChapterUrl, activeTranslating) {
+    LaunchedEffect(activeChapterUrl, activeTranslating, activeRetranslating) {
         translationElapsedSec = 0
-        if (!activeTranslating) return@LaunchedEffect
+        if (!activeTranslating && !activeRetranslating) return@LaunchedEffect
         while (true) {
             delay(1_000)
             translationElapsedSec++
@@ -540,23 +666,44 @@ fun ReaderScreen(
     val failedSuffix = stringResource(R.string.rd_translation_failed)
     val localNetworkSuffix = stringResource(R.string.rd_translation_local_network)
     val cleartextSuffix = stringResource(R.string.rd_translation_cleartext)
+    val originalUnavailable = stringResource(R.string.rd_original_unavailable)
     val labelFor: (Int) -> String? = { chapterIndex ->
         translationLabel?.let { base ->
             val translation = state.documents[chapterIndex]?.chapterUrl
                 ?.let { visibleTranslations[it] }
-            when (translation?.status) {
+            val status = when (translation?.status) {
                 ReaderTranslationStatus.Loading -> if (chapterIndex == state.activeChapterIndex && translationElapsedSec > 0) {
-                    "$base · $loadingSuffix $translationElapsedText"
+                    " · $loadingSuffix $translationElapsedText"
                 } else {
-                    "$base · $loadingSuffix"
+                    " · $loadingSuffix"
                 }
-                ReaderTranslationStatus.Failed -> "$base · " + when (translation.failure) {
+                ReaderTranslationStatus.Failed -> " · " + when (translation.failure) {
                     ReaderTranslationFailure.LocalNetworkRequired -> localNetworkSuffix
                     ReaderTranslationFailure.CleartextNotAllowed -> cleartextSuffix
                     null -> failedSuffix
                 }
-                ReaderTranslationStatus.Ready, null -> base
+                ReaderTranslationStatus.Ready, null -> ""
             }
+            // A forced retry keeps the old text visible, so the status stays
+            // Ready; the busy suffix is the only progress cue once the chrome
+            // hides. A Loading status already shows it.
+            val busy = if (chapterIndex in retranslatingChapters &&
+                translation?.status != ReaderTranslationStatus.Loading
+            ) {
+                if (chapterIndex == state.activeChapterIndex && translationElapsedSec > 0) {
+                    " · $loadingSuffix $translationElapsedText"
+                } else {
+                    " · $loadingSuffix"
+                }
+            } else {
+                ""
+            }
+            val notice = if (state.documents[chapterIndex]?.translationOnly == true) {
+                " · $originalUnavailable"
+            } else {
+                ""
+            }
+            base + status + busy + notice
         }
     }
     val pagedTranslations: Map<BlockId, String> = activeDocument?.let { document ->
@@ -594,11 +741,21 @@ fun ReaderScreen(
     fun startTtsAtAnchor() {
         val document = activeDocument ?: return
         val anchor = store.state.value.anchor?.takeIf { it.chapterUrl == document.chapterUrl }
+        val source = ttsSource(document)
+        dev.mirutime.core.log.MiruLog.event(
+            "reader",
+            "tts-start",
+            "parallel" to graph.settings.parallelEnabled,
+            "order" to graph.settings.parallelOrder,
+            "translations" to source.translations.size,
+            "chapter" to document.chapterIndex,
+        )
         graph.tts.playFrom(
             document = document,
-            translations = visibleTranslations[document.chapterUrl]?.translations.orEmpty(),
+            translations = source.translations,
             blockIndex = anchor?.blockId?.index,
             charOffset = anchor?.charOffset ?: 0,
+            language = source.language,
         )
     }
     val toggleTts: () -> Unit = {
@@ -609,10 +766,8 @@ fun ReaderScreen(
             if (status == TtsStatus.Idle || status == TtsStatus.Failed) {
                 startTtsAtAnchor()
             } else {
-                graph.tts.toggle(
-                    document,
-                    visibleTranslations[document.chapterUrl]?.translations.orEmpty(),
-                )
+                val source = ttsSource(document)
+                graph.tts.toggle(document, source.translations, source.language)
             }
         }
     }
@@ -646,12 +801,13 @@ fun ReaderScreen(
             val currentBlock = ttsState.blockId?.index ?: 0
             val target = (currentBlock + delta).coerceIn(0, document.blocks.lastIndex)
             if (target != currentBlock) {
+                val source = ttsSource(document)
                 graph.tts.seekToBlock(
                     document = document,
-                    translations = visibleTranslations[document.chapterUrl]
-                        ?.translations.orEmpty(),
+                    translations = source.translations,
                     blockIndex = target,
                     charOffset = 0,
+                    language = source.language,
                 )
             }
         }
@@ -757,29 +913,15 @@ fun ReaderScreen(
                     // at the Initial pass: handled short taps consume their up
                     // before selection sees them, while long presses and drags
                     // pass through untouched.
-                    var lastTapAt = 0L
                     var lastHandledTap: ReaderTap? = null
                     awaitEachGesture {
-                        val tap = awaitReaderTap(lastHandledTap) {
-                            if (!style.doubleTapMenu) {
+                        val tap = awaitReaderTap(lastHandledTap) { _, isDouble ->
+                            if (menuTapToggles(isDouble = isDouble, doubleTapMenu = style.doubleTapMenu)) {
                                 chromeVisible = !chromeVisible
-                            } else {
-                                val now = SystemClock.uptimeMillis()
-                                val isDouble = isMenuDoubleTap(
-                                    now = now,
-                                    lastTapAt = lastTapAt,
-                                    timeout = viewConfiguration.doubleTapTimeoutMillis,
-                                )
-                                if (isDouble) {
-                                    lastTapAt = 0L
-                                    chromeVisible = !chromeVisible
-                                } else {
-                                    lastTapAt = now
-                                }
                             }
                         }
-                        lastHandledTap = tap
-                        if (tap == null) lastTapAt = 0L
+                        // A recognized pair is closed: the next tap starts a new one.
+                        lastHandledTap = if (tap?.isDouble == true) null else tap
                     }
                 },
         ) {
@@ -824,11 +966,10 @@ fun ReaderScreen(
                     onVisiblePage = { mangaPage = it },
                     nextChapterFirstPage = nextChapterFirstPage,
                     onNearEnd = {
-                        // Do not race an already running prefetch; the open/anchor
-                        // path usually loaded the next chapter long before this.
-                        val next = state.activeChapterIndex + 1
-                        if (state.statuses[next] != ChapterLoadStatus.Loading) {
-                            scope.launch { store.prefetch() }
+                        // continue forward through the same deduplicated path the
+                        // novel feed uses; a Failed chapter is left to its Retry.
+                        state.chapters.getOrNull(chapterPosition + 1)?.let { next ->
+                            scope.launch { store.ensureNext(next.index) }
                         }
                     },
                     pageFile = mangaPageFile,
@@ -899,6 +1040,7 @@ fun ReaderScreen(
                     onAnchor = onReaderAnchor,
                     onRetry = { index -> scope.launch { store.retry(index) } },
                     onLoadPrevious = { index -> scope.launch { store.ensurePrevious(index) } },
+                    onLoadNext = { index -> scope.launch { store.ensureNext(index) } },
                     onOpenAuth = onOpenAuthUrl,
                     onChapterFinished = { index -> scope.launch { store.onChapterFinished(index) } },
                     onStartOver = {
@@ -910,6 +1052,8 @@ fun ReaderScreen(
         }
 
         if (chromeVisible && state.restorePhase == RestorePhase.Ready) {
+            val retranslateFailedMessage = stringResource(R.string.rd_retranslate_failed)
+            val originalReloadFailedMessage = stringResource(R.string.rd_original_reload_failed)
             ReaderChrome(
                 title = chapterTitle,
                 bookTitle = bookTitle,
@@ -918,6 +1062,10 @@ fun ReaderScreen(
                 chapterPercent = chapterPercent,
                 canPrev = chapterPosition > 0,
                 canNext = chapterPosition >= 0 && chapterPosition < chapterCount - 1,
+                busyPrev = state.navigatingTo != null &&
+                    state.navigatingTo == state.chapters.getOrNull(chapterPosition - 1)?.index,
+                busyNext = state.navigatingTo != null &&
+                    state.navigatingTo == state.chapters.getOrNull(chapterPosition + 1)?.index,
                 canOpenWebView = chapterUrl.isNotBlank(),
                 ttsStatus = ttsState.status,
                 sleepTimer = graph.tts.sleepTimer,
@@ -932,7 +1080,10 @@ fun ReaderScreen(
                 onMangaPageChangeFinished = { mangaScrubber.finish() },
                 onBack = exitReader,
                 onPrev = {
-                    if (ttsSessionActive) {
+                    // A live-but-empty TTS session cannot resolve a chapter
+                    // hand-off (requestChapter is a silent no-op without
+                    // chunks), so navigate the reader instead of losing the tap.
+                    if (ttsSessionActive && ttsState.chunkCount > 0) {
                         graph.tts.skipPreviousChapter()
                     } else {
                         state.chapters.getOrNull(chapterPosition - 1)?.let {
@@ -941,7 +1092,7 @@ fun ReaderScreen(
                     }
                 },
                 onNext = {
-                    if (ttsSessionActive) {
+                    if (ttsSessionActive && ttsState.chunkCount > 0) {
                         graph.tts.skipNextChapter()
                     } else {
                         state.chapters.getOrNull(chapterPosition + 1)?.let {
@@ -951,6 +1102,65 @@ fun ReaderScreen(
                 },
                 onOpenWebView = {
                     if (chapterUrl.isNotBlank()) onOpenWebView(chapterUrl, chapterTitle)
+                },
+                showRetranslate = !isManga && hasPair && chapterReady,
+                retranslateEnabled = retranslateAvailability(
+                    hasPair = hasPair,
+                    chapterReady = chapterReady,
+                    translationLoading = activeTranslating,
+                ) && state.activeChapterIndex !in retranslatingChapters,
+                retranslateBusy = state.activeChapterIndex in retranslatingChapters,
+                onRetranslate = {
+                    val index = state.activeChapterIndex
+                    // Set synchronously so a second tap in the same frame sees
+                    // the button disabled, before any coroutine runs.
+                    if (index !in retranslatingChapters) {
+                        retranslatingChapters = retranslatingChapters + index
+                        dev.mirutime.core.log.MiruLog.event(
+                            "reader",
+                            "retranslate-start",
+                            "chapter" to index,
+                        )
+                        val job = scope.launch {
+                            val failure = try {
+                                // Cached-only chapter: the original has to be
+                                // recovered first, and that failure is not a
+                                // translation failure.
+                                val originalReady = !activeIsTranslationOnly ||
+                                    store.reloadActiveChapter(allowTranslationOnly = false)
+                                if (!originalReady) {
+                                    originalReloadFailedMessage
+                                } else if (!graph.translation.retranslateChapter(bookUrl, index)) {
+                                    retranslateFailedMessage
+                                } else {
+                                    null
+                                }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                dev.mirutime.core.log.MiruLog.w(
+                                    "reader",
+                                    "retranslate failed chapter=$index " +
+                                        "error=${error::class.simpleName}",
+                                )
+                                retranslateFailedMessage
+                            }
+                            dev.mirutime.core.log.MiruLog.event(
+                                "reader",
+                                "retranslate-done",
+                                "chapter" to index,
+                                "ok" to (failure == null),
+                            )
+                            failure?.let {
+                                Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        // Covers normal completion and cancellation before the
+                        // body is first dispatched; the old code could stick.
+                        job.invokeOnCompletion {
+                            retranslatingChapters = retranslatingChapters - index
+                        }
+                    }
                 },
                 onTts = {
                     chromeVisible = true
@@ -973,14 +1183,13 @@ fun ReaderScreen(
             )
         }
 
-        // Optional floating player: in-app only, no system overlay. Hidden
-        // while the chrome or a sheet is open so it never duplicates the
-        // bottom-menu player or sits under a modal scrim. With the overlay
-        // permission the player lives in the service window; the state is
-        // refreshed on every ON_START after the user returns from Settings.
+        // Optional floating player: the rich in-app surface while the reader is
+        // on screen. The system overlay takes over only once the whole app goes
+        // to the background, so the two never show the same session at once.
+        // Hidden while the chrome or a sheet is open so it never duplicates the
+        // bottom-menu player or sits under a modal scrim.
         if (ttsSessionActive &&
             ttsSettings.floatingPlayer &&
-            !overlayAvailable &&
             panel == null &&
             !chromeVisible
         ) {
@@ -1019,8 +1228,26 @@ fun ReaderScreen(
 
     ReaderPanelHost(
         panel = panel,
-        style = style,
+        style = committedStyle,
+        previewStyle = style,
         onStyleChange = graph.config::setStyle,
+        onStylePreview = {
+            // An asset import can finish after the sheet closed; never revive
+            // a preview outside the Style panel.
+            if (panel == ReaderPanel.Style) stylePreview = stylePreview.preview(it)
+        },
+        onStyleCommit = { previewed ->
+            val previous = committedStyle
+            graph.config.setStyle(previewed)
+            if (previewed.customFontPath != previous.customFontPath) {
+                graph.assets.deleteFont(previous.customFontPath)
+            }
+            if (previewed.backgroundImagePath != previous.backgroundImagePath) {
+                graph.assets.deleteBackground(previous.backgroundImagePath)
+            }
+            stylePreview = stylePreview.commit()
+        },
+        onStyleCancel = cancelStylePreview,
         onDismiss = { panel = null },
         bookUrl = bookUrl,
         onOpenRegex = onOpenRegex,
@@ -1036,12 +1263,24 @@ fun ReaderScreen(
         ttsCapabilities = ttsCapabilities,
         ttsStatus = ttsState.status,
         ttsMessage = ttsErrorMessage,
+        ttsPreviewText = ttsPreviewText,
+        ttsPreviewTranslatedText = ttsPreviewTranslatedText,
         ttsHighlight = style.ttsHighlight,
         highlightColor = style.highlightColor,
         onTtsSettingsChange = graph.tts::updateSettings,
         onTtsTest = graph.tts::testUtterance,
         onTtsReset = graph.tts::resetSettings,
         onTtsDiscoverVoices = graph.tts::refreshEngines,
+        onTtsPreviewVoice = { voiceId, engineId, speed, pitch, text ->
+            graph.tts.previewVoice(voiceId, engineId, speed, pitch, text) {
+                Toast.makeText(
+                    context,
+                    TtsR.string.rd_tts_voice_preview_failed,
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        },
+        onTtsPreviewStop = graph.tts::stopVoicePreview,
         sleepTimer = graph.tts.sleepTimer,
         onSleepTimerMinutes = graph.tts::setSleepTimer,
         onSleepTimerChapters = graph.tts::setSleepTimerChapters,
@@ -1049,10 +1288,10 @@ fun ReaderScreen(
         onTtsRetry = graph.tts::retry,
         onTtsToggle = toggleTts,
         onTtsHighlightChange = { enabled ->
-            graph.config.setStyle(style.copy(ttsHighlight = enabled).sanitized())
+            graph.config.setStyle(committedStyle.copy(ttsHighlight = enabled).sanitized())
         },
         onHighlightColorChange = { color ->
-            graph.config.setStyle(style.copy(highlightColor = color).sanitized())
+            graph.config.setStyle(committedStyle.copy(highlightColor = color).sanitized())
         },
         autoScrollEnabled = autoScrollEnabled,
         autoScrollSupported = autoScrollSupported,
@@ -1075,26 +1314,117 @@ fun ReaderScreen(
 internal fun translationEnsureTargets(
     activeChapterIndex: Int,
     loadedChapterIndices: Collection<Int>,
+    nextChapterIndex: Int? = activeChapterIndex + 1,
 ): List<Int> = buildList {
     add(activeChapterIndex)
-    add(activeChapterIndex + 1)
+    nextChapterIndex?.let(::add)
     addAll(loadedChapterIndices.filter { it < activeChapterIndex }.sortedDescending())
 }.distinct()
+
+/** A key no real translation can carry: hides cached entries for synthetic documents. */
+private const val TRANSLATION_ONLY_CONFIG_KEY = "\u0000translation-only"
+
+/**
+ * Re-parses the active chapter after original-rule edits and re-requests its
+ * translation: the new parse changes the config key, so the cached entry is
+ * hidden and nothing else queues the new request.
+ */
+internal suspend fun reloadActiveChapterForRules(
+    store: ReaderSessionStore,
+    translation: ReaderTranslationPort,
+    bookUrl: String,
+): Boolean {
+    if (!store.reloadActiveChapter()) return false
+    val state = store.state.value
+    val document = state.documents[state.activeChapterIndex] ?: return true
+    translation.ensureChapter(bookUrl, state.activeChapterIndex, document)
+    return true
+}
+
+/**
+ * Memoizes [ReaderTranslationPort.chapterConfigKey] per chapter URL. The key
+ * hashes the whole block text, so recomputing every loaded chapter whenever
+ * the document map changed was O(everything read so far). A different document
+ * instance, mode or prompt invalidates the entry.
+ */
+internal class ChapterConfigKeyCache {
+    private data class Entry(
+        val document: ReaderDocument,
+        val mode: ReaderTranslationMode?,
+        val promptKey: String,
+        val key: String?,
+    )
+
+    private val entries = HashMap<String, Entry>()
+
+    fun keyFor(
+        document: ReaderDocument,
+        mode: ReaderTranslationMode?,
+        promptKey: String,
+        compute: (ReaderDocument) -> String?,
+    ): String? {
+        val cached = entries[document.chapterUrl]
+        if (cached != null && cached.document === document &&
+            cached.mode == mode && cached.promptKey == promptKey
+        ) {
+            return cached.key
+        }
+        val key = compute(document)
+        entries[document.chapterUrl] = Entry(document, mode, promptKey, key)
+        return key
+    }
+
+    /** Drops chapters that are no longer loaded. */
+    fun retain(chapterUrls: Set<String>) {
+        entries.keys.retainAll(chapterUrls)
+    }
+}
 
 /**
  * Translations stay hidden unless the active mode has a complete pair.
  * Disabling translation leaves the controller cache intact, so the reader must
  * filter it out instead of showing translated text after the switch is off.
  */
+/**
+ * Text the TTS should speak for a parallel layout. ORIGINAL_FIRST reads the
+ * original, so translations must be withheld; TRANSLATION_FIRST reads the
+ * translation when the chapter has one and falls back to the original (text and
+ * voice) when it does not. Without the parallel layout the language follows the
+ * translation map. Either way the voice follows the text that is spoken.
+ */
+internal data class TtsTextSource(val translations: Map<Int, String>, val language: TtsLanguage)
+
+internal fun ttsTextSource(
+    parallelEnabled: Boolean,
+    parallelOrder: String,
+    translations: Map<Int, String>?,
+): TtsTextSource {
+    val map = translations.orEmpty()
+    // The voice follows the text that is actually spoken: a language with no
+    // translated text (translation off, no pair, this chapter not translated)
+    // is spoken as the original, whatever the parallel layout asks for.
+    val language = when {
+        parallelEnabled && parallelOrder == "ORIGINAL_FIRST" -> TtsLanguage.Original
+        parallelEnabled && map.isEmpty() -> TtsLanguage.Original
+        parallelEnabled -> TtsLanguage.Translation
+        else -> TtsLanguage.from(map)
+    }
+    return TtsTextSource(if (language == TtsLanguage.Original) emptyMap() else map, language)
+}
+
 fun visibleTranslations(
     mode: ReaderTranslationMode?,
     bookUrl: String,
     translations: Map<String, ReaderChapterTranslation>,
+    expectedConfigKeys: Map<String, String> = emptyMap(),
 ): Map<String, ReaderChapterTranslation> {
     if (mode?.hasPair != true) return emptyMap()
     // Entries carry their owning book now; an entry from another book (or a
     // stale one with no owner) is never painted.
-    return translations.filterValues { it.bookUrl == bookUrl }
+    return translations.filter { (chapterUrl, value) ->
+        value.bookUrl == bookUrl &&
+            (expectedConfigKeys[chapterUrl]?.let { it == value.configKey } ?: true)
+    }
 }
 
 /**
@@ -1126,3 +1456,14 @@ internal fun shouldApplyReaderAnchor(
     anchorChapterUrl: String,
 ): Boolean = !handoffInProgress &&
     (!ttsOwnsCursor || spokenChapterUrl == null || anchorChapterUrl == spokenChapterUrl)
+
+/**
+ * The button is available with an active language pair on a loaded chapter,
+ * and stays disabled while that chapter's translation is already running, so
+ * a second tap can never queue a duplicate request.
+ */
+internal fun retranslateAvailability(
+    hasPair: Boolean,
+    chapterReady: Boolean,
+    translationLoading: Boolean,
+): Boolean = hasPair && chapterReady && !translationLoading

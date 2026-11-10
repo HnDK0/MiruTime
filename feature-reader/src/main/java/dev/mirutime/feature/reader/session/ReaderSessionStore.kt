@@ -45,6 +45,11 @@ data class ReaderSessionState(
     val activeChapterIndex: Int = 0,
     val endOfBook: Boolean = false,
     val scrollToken: Int = 0,
+    /**
+     * Chapter a prev/next action is loading right now. The page stays visible
+     * while it is set; only the arrows report the work. Null means idle.
+     */
+    val navigatingTo: Int? = null,
     val error: String? = null,
 )
 
@@ -70,10 +75,20 @@ class ReaderSessionStore(
     private var saveJob: Job? = null
     private var prefetchJob: Job? = null
     private var seq: Long = 0
+    // Monotonic navigation counter: a slower load that finished after a newer
+    // tap must not publish its state or bump the scroll token again.
+    private var navSeq: Int = 0
+    // Monotonic per-load id: a stale load may only clear the Loading state it
+    // set itself, never the newer load of the same chapter.
+    private var loadSeq: Int = 0
+    private val loadOwner = mutableMapOf<Int, Int>()
     // Value is a per-call token so a late cleanup from a cancelled load cannot
     // drop the marker of a newer load for the same chapter.
     private val inFlight = mutableMapOf<Int, Any>()
     private val inFlightMutex = Mutex()
+    // A transient failure retries itself before the gap offers a manual Retry,
+    // so reaching the end of a chapter never needs the user's involvement.
+    private val autoRetries = mutableMapOf<Int, Int>()
 
     suspend fun open(
         bookUrl: String,
@@ -82,9 +97,13 @@ class ReaderSessionStore(
         reopened: Boolean = false,
     ) {
         sessionTracker?.stop()
+        // A load left over from the previous book is stale from here on.
+        ++navSeq
         // The store is app-scoped: markers left by a cancelled load of the
         // previous book must not block the new session's chapters.
         inFlightMutex.withLock { inFlight.clear() }
+        loadOwner.clear()
+        autoRetries.clear()
         this.bookUrl = bookUrl
         _state.value = ReaderSessionState(
             mode = config.config.value.mode,
@@ -148,15 +167,34 @@ class ReaderSessionStore(
         anchor: ReadingAnchor? = null,
     ) {
         if (_state.value.chapters.none { it.index == index }) return
+        // A second tap on the same target must not start a parallel load; a tap
+        // on another target wins over the one still running.
+        if (_state.value.navigatingTo == index) return
+        val myNav = ++navSeq
         sessionTracker?.stop()
-        _state.update { it.copy(restorePhase = RestorePhase.Restoring, endOfBook = false) }
+        // The old page stays on screen: a full-screen spinner on every chapter
+        // change read as a freeze. Only the arrows report the navigation.
+        _state.update { it.copy(navigatingTo = index, endOfBook = false) }
         val saved = anchor?.let {
             SavedReading(it, offsetPx = 0, seq = seq, updatedAt = System.currentTimeMillis())
         }
-        loadChapter(index, saved, restoreAnchor = saved != null, makeActive = true, atEnd = atEnd)
-        _state.update {
-            it.copy(restorePhase = RestorePhase.Ready, scrollToken = it.scrollToken + 1)
+        try {
+            loadChapter(
+                index,
+                saved,
+                restoreAnchor = saved != null,
+                makeActive = true,
+                atEnd = atEnd,
+                nav = myNav,
+            )
+        } finally {
+            // A cancelled or failed load must not leave the arrows busy forever.
+            if (myNav == navSeq) {
+                _state.update { it.copy(navigatingTo = null) }
+            }
         }
+        if (myNav != navSeq) return
+        _state.update { it.copy(scrollToken = it.scrollToken + 1) }
         sessionTracker?.start(bookUrl, index)
         launchPrefetch()
     }
@@ -212,12 +250,33 @@ class ReaderSessionStore(
     }
 
     suspend fun prefetch() {
-        val active = _state.value.activeChapterIndex
-        val next = _state.value.chapters.firstOrNull { it.index == active + 1 } ?: return
-        val status = _state.value.statuses[next.index]
-        if (status == ChapterLoadStatus.Ready || status is ChapterLoadStatus.Failed) return
-        if (loadChapter(next.index, null, false, false) != null) {
-            MiruLog.event("reader", "prefetch", "chapter" to next.index)
+        val next = nextChapterIndex() ?: return
+        if (_state.value.documents[next] != null) return
+        val status = _state.value.statuses[next]
+        if (status == ChapterLoadStatus.Ready || status == ChapterLoadStatus.Loading) return
+        if (loadChapter(next, null, false, false) != null) {
+            MiruLog.event("reader", "prefetch", "chapter" to next)
+        }
+    }
+
+    /**
+     * Loads the chapter after the visible one without moving the reader. The
+     * feed calls this when the reader reaches the end of the loaded window, so
+     * reading forward never stops at a gap or needs a tap.
+     */
+    suspend fun ensureNext(index: Int) {
+        if (_state.value.chapters.none { it.index == index }) return
+        if (_state.value.documents[index] != null) return
+        val status = _state.value.statuses[index] ?: ChapterLoadStatus.NotLoaded
+        // Failed means the automatic attempts are exhausted: only the visible
+        // Retry action may request it again, so scrolling cannot stampede.
+        if (status is ChapterLoadStatus.Failed) return
+        if (status == ChapterLoadStatus.Loading || status == ChapterLoadStatus.Ready) return
+        val token = beginLoad(index) ?: return
+        try {
+            loadChapter(index, null, restoreAnchor = false, makeActive = false)
+        } finally {
+            endLoad(index, token)
         }
     }
 
@@ -266,11 +325,15 @@ class ReaderSessionStore(
     }
 
     /**
-     * Re-parses the active chapter after the original-applicable cleanup rules
-     * changed. Keeps the reading anchor, never touches reading history, and
-     * leaves the old document in place when the reload fails.
+     * Re-parses the active chapter after cleanup rules changed. Keeps the
+     * reading anchor, never touches reading history, and leaves the old
+     * document in place when the reload fails.
+     *
+     * [allowTranslationOnly] is true for a translation-rule change on a cached-
+     * only chapter: the source may still be unreachable, but its translated
+     * blocks must be cleaned under the new rules. Retry-original passes false.
      */
-    suspend fun reloadActiveChapter(): Boolean {
+    suspend fun reloadActiveChapter(allowTranslationOnly: Boolean = false): Boolean {
         val before = _state.value
         val index = before.activeChapterIndex
         if (before.documents[index] == null) {
@@ -279,8 +342,8 @@ class ReaderSessionStore(
         }
         val currentBook = bookUrl
         val document = try {
-            // touchHistory = false: editing rules must not move "last read".
-            content.documentForRulesReload(currentBook, index)
+            // documentForRulesReload: editing rules must not move "last read".
+            content.documentForRulesReload(currentBook, index, allowTranslationOnly)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
@@ -339,6 +402,10 @@ class ReaderSessionStore(
     private fun applyAnchor(anchor: ReadingAnchor, offsetPx: Int) {
         val current = _state.value
         if (current.restorePhase != RestorePhase.Ready) return
+        // While a prev/next load is in flight the list still shows the previous
+        // chapter and keeps emitting its anchors. Adopting them here would move
+        // activeChapterIndex back and make the reader jump backwards.
+        if (current.navigatingTo != null) return
         val chapter = current.chapters.firstOrNull { it.chapterUrl == anchor.chapterUrl } ?: return
         val chapterChanged = chapter.index != current.activeChapterIndex
         _state.update {
@@ -428,13 +495,18 @@ class ReaderSessionStore(
         restoreAnchor: Boolean,
         makeActive: Boolean,
         atEnd: Boolean = false,
-    ): ReaderDocument? = try {
-        loadChapterInternal(index, saved, restoreAnchor, makeActive, atEnd)
-    } catch (cancelled: CancellationException) {
-        // A cancelled load must not leave the chapter Loading forever: the top
-        // gap would spin with no retry. Real Ready/Failed statuses are kept.
-        resetCancelledLoad(index)
-        throw cancelled
+        nav: Int? = null,
+    ): ReaderDocument? {
+        val owner = ++loadSeq
+        return try {
+            loadChapterInternal(index, saved, restoreAnchor, makeActive, atEnd, nav, owner)
+        } catch (cancelled: CancellationException) {
+            // A cancelled load must not leave the chapter Loading forever: the
+            // top gap would spin with no retry. Real Ready/Failed statuses are
+            // kept, and a newer load of the same chapter keeps its own Loading.
+            resetCancelledLoad(index, owner)
+            throw cancelled
+        }
     }
 
     private suspend fun loadChapterInternal(
@@ -443,8 +515,12 @@ class ReaderSessionStore(
         restoreAnchor: Boolean,
         makeActive: Boolean,
         atEnd: Boolean = false,
+        nav: Int? = null,
+        owner: Int = 0,
     ): ReaderDocument? {
         if (_state.value.chapters.none { it.index == index }) return null
+        if (isStaleNav(nav)) return null
+        loadOwner[index] = owner
         setStatus(index, ChapterLoadStatus.Loading)
         val startedAtMs = System.currentTimeMillis()
         var failure: ReaderLoadFailure? = null
@@ -472,6 +548,12 @@ class ReaderSessionStore(
             )
             null
         }
+        if (isStaleNav(nav)) {
+            // A newer tap owns the reader now: neither the chapter nor its
+            // outcome may reach the state.
+            resetCancelledLoad(index, owner)
+            return null
+        }
         if (document == null) {
             MiruLog.event(
                 "reader",
@@ -481,6 +563,25 @@ class ReaderSessionStore(
                 "ms" to (System.currentTimeMillis() - startedAtMs),
             )
             MiruLog.w("reader", "chapter failed index=$index")
+            // A transient failure heals on its own. Only an exhausted (or
+            // non-retryable) load publishes Failed, so the user sees an error
+            // surface instead of a spinner that retries forever.
+            val attempt = (autoRetries[index] ?: 0) + 1
+            // Only a typed transient transport/parser failure retries itself:
+            // an untyped crash and a login wall never heal by repeating.
+            if (failure?.retryable == true && failure.authUrl == null &&
+                attempt <= AutoRetryMax
+            ) {
+                autoRetries[index] = attempt
+                setStatus(index, ChapterLoadStatus.Loading)
+                rebuildFeed()
+                scope.launch {
+                    delay(AutoRetryDelaysMs[(attempt - 1).coerceIn(0, AutoRetryDelaysMs.lastIndex)])
+                    retry(index)
+                }
+                return null
+            }
+            autoRetries.remove(index)
             setStatus(
                 index,
                 ChapterLoadStatus.Failed(
@@ -494,6 +595,7 @@ class ReaderSessionStore(
             rebuildFeed()
             return null
         }
+        autoRetries.remove(index)
         MiruLog.event(
             "reader",
             "chapter-load",
@@ -522,10 +624,28 @@ class ReaderSessionStore(
         // first rendered frame is already translated; a miss changes nothing.
         if (makeActive) preloadActiveChapter?.invoke(index, document)
 
+        // The preload suspends: a newer navigation may have started meanwhile.
+        if (isStaleNav(nav)) {
+            resetCancelledLoad(index, owner)
+            return null
+        }
+        // Reading forward must not keep every parsed chapter: the feed only
+        // needs the active window, and restore reads the position, not this map.
+        val window = (index - PruneBack)..(index + PruneAhead)
+        loadOwner.remove(index)
         _state.update {
             it.copy(
-                documents = it.documents + (index to document),
-                statuses = it.statuses + (index to ChapterLoadStatus.Ready),
+                documents = if (makeActive) {
+                    FeedPlanner.prune(it.documents + (index to document), index, PruneBack, PruneAhead)
+                } else {
+                    it.documents + (index to document)
+                },
+                statuses = if (makeActive) {
+                    (it.statuses + (index to ChapterLoadStatus.Ready))
+                        .filterKeys { loaded -> loaded in window }
+                } else {
+                    it.statuses + (index to ChapterLoadStatus.Ready)
+                },
                 activeChapterIndex = if (makeActive) index else it.activeChapterIndex,
                 anchor = if (makeActive) anchor else it.anchor,
                 offsetPx = if (makeActive) offset else it.offsetPx,
@@ -540,12 +660,20 @@ class ReaderSessionStore(
         _state.update { it.copy(statuses = it.statuses + (index to status)) }
     }
 
+    /** True when a newer navigation started after [nav] was captured. */
+    private fun isStaleNav(nav: Int?): Boolean = nav != null && nav != navSeq
+
     /**
      * Runs under NonCancellable because a cancelled coroutine cannot take the
      * state mutex or publish the NotLoaded feed: the gap would stay Loading.
      */
-    private suspend fun resetCancelledLoad(index: Int) {
+    private suspend fun resetCancelledLoad(index: Int, owner: Int) {
         withContext(NonCancellable) {
+            // Only the load that set Loading may clear it: 3 -> 4 -> 3 leaves
+            // two loads of chapter 3, and the stale one must not reset the
+            // newer one's spinner.
+            if (loadOwner[index] != owner) return@withContext
+            loadOwner.remove(index)
             if (_state.value.statuses[index] != ChapterLoadStatus.Loading) return@withContext
             _state.update {
                 it.copy(statuses = it.statuses + (index to ChapterLoadStatus.NotLoaded))
@@ -591,5 +719,14 @@ class ReaderSessionStore(
             "reader",
             "position saved chapter=${anchor.chapterUrl} block=${anchor.blockId.index} seq=$seq",
         )
+    }
+
+    private companion object {
+        /** Two automatic attempts before the gap offers a manual Retry. */
+        const val AutoRetryMax = 2
+        val AutoRetryDelaysMs = longArrayOf(1_000L, 3_000L)
+        /** Loaded chapters kept around the active one; the rest are pruned. */
+        const val PruneBack = 2
+        const val PruneAhead = 2
     }
 }
