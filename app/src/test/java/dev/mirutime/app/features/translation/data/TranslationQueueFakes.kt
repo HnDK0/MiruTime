@@ -9,12 +9,15 @@ import dev.mirutime.app.features.translation.domain.TranslationEngine
 import dev.mirutime.app.features.translation.domain.TranslationRequest
 import dev.mirutime.core.api.Outcome
 import dev.mirutime.data.library.BookEntity
+import dev.mirutime.data.library.BookUrlRow
 import dev.mirutime.data.library.ChapterBodyEntity
 import dev.mirutime.data.library.ChapterEntity
 import dev.mirutime.data.library.ChapterTranslationEntity
 import dev.mirutime.data.library.ChapterTranslationQueueRow
+import dev.mirutime.data.library.LibraryDao
 import dev.mirutime.data.library.TranslationBlockEntity
 import dev.mirutime.translator.PromptSpec
+import java.lang.reflect.Proxy
 import java.security.MessageDigest
 
 internal fun translationTestBook(
@@ -204,6 +207,10 @@ internal class FakeTranslationCache(
 
     override suspend fun load(request: TranslationRequest): Map<Int, String>? = null
 
+    override suspend fun loadLatest(request: TranslationRequest): Map<Int, String>? = null
+
+    override suspend fun loadSameConfig(request: TranslationRequest): Map<Int, String>? = null
+
     override suspend fun save(request: TranslationRequest, result: ChapterTranslationResult) {
         saves++
         val existing = store.exact(
@@ -330,8 +337,102 @@ internal class FakeFileStore(
     override fun deleteBookFiles(bookId: Long) = Unit
 }
 
-internal fun prompt() = PromptSpec(text = "Translate faithfully", version = "1")
+/**
+ * Library DAO over the table the queue store already uses: in production Room
+ * is both the queue and the cache, so a saved translation must be visible to
+ * the next pass.
+ */
+internal class FakeLibraryDao(
+    private val books: List<BookEntity>,
+    private val chapters: List<ChapterEntity>,
+    val rows: MutableList<ChapterTranslationEntity>,
+    val blocks: MutableMap<Long, MutableList<TranslationBlockEntity>>,
+) {
+    private var nextId = 1_000L
 
+    val proxy: LibraryDao = Proxy.newProxyInstance(
+        LibraryDao::class.java.classLoader,
+        arrayOf(LibraryDao::class.java),
+    ) { _, method, args ->
+        when (method.name) {
+            "booksByUrl" -> books
+                .filter { it.url == args[0] }
+                .map { BookUrlRow(it.bookId, it.url) }
+            "bookByInstallAndUrl" -> books.firstOrNull {
+                it.installId == args[0] && it.url == args[1]
+            }
+            "chapterByUrl" -> chapters.firstOrNull {
+                it.bookId == args[0] && it.url == args[1]
+            }
+            "chapterTranslation" -> rows.firstOrNull {
+                it.chapterId == args[0] &&
+                    it.source == args[1] &&
+                    it.target == args[2] &&
+                    it.provider == args[3] &&
+                    it.promptHash == args[4] &&
+                    it.sourceHash == args[5] &&
+                    it.pipelineVersion == args[6]
+            }
+            "chapterTranslationAnySource" -> rows
+                .filter {
+                    it.chapterId == args[0] &&
+                        it.source == args[1] &&
+                        it.target == args[2] &&
+                        it.provider == args[3] &&
+                        it.promptHash == args[4] &&
+                        it.pipelineVersion == args[5]
+                }
+                .maxByOrNull { it.updatedAt }
+            "latestCompleteChapterTranslation" -> rows
+                .filter {
+                    it.chapterId == args[0] &&
+                        it.source == args[1] &&
+                        it.target == args[2] &&
+                        it.provider == args[3] &&
+                        it.status.equals("COMPLETE", ignoreCase = true)
+                }
+                .maxByOrNull { it.updatedAt }
+            "translationBlocks" -> blocks[args[0] as Long].orEmpty()
+            "saveTranslationWithBlocks" -> save(
+                args[0] as ChapterTranslationEntity,
+                (args[1] as List<*>).filterIsInstance<TranslationBlockEntity>(),
+            )
+            "saveTranslationFailure" -> save(
+                (args[0] as ChapterTranslationEntity).copy(status = "FAILED"),
+                emptyList(),
+            )
+            else -> throw AssertionError("Unexpected DAO call: ${method.name}")
+        }
+    } as LibraryDao
+
+    private fun save(
+        translation: ChapterTranslationEntity,
+        newBlocks: List<TranslationBlockEntity>,
+    ): Long {
+        val existing = rows.firstOrNull {
+            it.chapterId == translation.chapterId &&
+                it.source == translation.source &&
+                it.target == translation.target &&
+                it.provider == translation.provider &&
+                it.promptHash == translation.promptHash &&
+                it.pipelineVersion == translation.pipelineVersion
+        }
+        val id = existing?.translationId ?: nextId++
+        rows.removeAll {
+            it.chapterId == translation.chapterId &&
+                it.source == translation.source &&
+                it.target == translation.target &&
+                it.provider == translation.provider &&
+                it.promptHash == translation.promptHash &&
+                it.pipelineVersion == translation.pipelineVersion
+        }
+        rows += translation.copy(translationId = id)
+        blocks[id] = newBlocks.map { it.copy(translationId = id) }.toMutableList()
+        return id
+    }
+}
+
+internal fun prompt() = PromptSpec(text = "Translate faithfully", version = "1")
 internal fun testChapterConfig() = ChapterTranslationConfig(
     mode = TranslationMode(
         source = "en",

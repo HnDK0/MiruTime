@@ -13,6 +13,15 @@ import java.security.MessageDigest
 /** L2 cache for chapter translations; L1 stays in TranslationController. */
 interface ChapterTranslationCache {
     suspend fun load(request: TranslationRequest): Map<Int, String>?
+    suspend fun loadLatest(request: TranslationRequest): Map<Int, String>?
+
+    /**
+     * Same prompt/pipeline identity, ignoring only the source revision.
+     * Implementations must filter by prompt hash: a row made with another
+     * prompt is a different translation and must never be served as this one.
+     */
+    suspend fun loadSameConfig(request: TranslationRequest): Map<Int, String>?
+
     suspend fun save(request: TranslationRequest, result: ChapterTranslationResult)
     suspend fun markFailed(request: TranslationRequest)
 }
@@ -51,6 +60,36 @@ class RoomTranslationCache(
         return result
     }
 
+    override suspend fun loadLatest(request: TranslationRequest): Map<Int, String>? {
+        val chapterId = resolveChapterId(request) ?: return null
+        val row = library.latestCompleteChapterTranslation(
+            chapterId = chapterId,
+            source = request.source?.value.orEmpty(),
+            target = request.target.value,
+            provider = request.provider.name,
+        ) ?: return null
+        if (!row.status.equals(StatusComplete, ignoreCase = true)) return null
+        val blocks = library.translationBlocks(row.translationId)
+        if (blocks.isEmpty()) return null
+        return blocks.associate { it.blockIndex to it.translatedText }
+    }
+
+    override suspend fun loadSameConfig(request: TranslationRequest): Map<Int, String>? {
+        val chapterId = resolveChapterId(request) ?: return null
+        val row = library.latestChapterTranslation(
+            chapterId = chapterId,
+            source = request.source?.value.orEmpty(),
+            target = request.target.value,
+            provider = request.provider.name,
+            promptHash = promptHash(request),
+            pipelineVersion = request.revision.pipelineVersion,
+        ) ?: return null
+        if (!row.status.equals(StatusComplete, ignoreCase = true)) return null
+        val blocks = library.translationBlocks(row.translationId)
+        if (blocks.isEmpty()) return null
+        return blocks.associate { it.blockIndex to it.translatedText }
+    }
+
     override suspend fun save(request: TranslationRequest, result: ChapterTranslationResult) {
         val chapterId = resolveChapterId(request) ?: return
         val sourceByIndex = request.units.mapNotNull { unit ->
@@ -71,7 +110,9 @@ class RoomTranslationCache(
                 chapterId = chapterId,
                 source = request.source?.value.orEmpty(),
                 target = request.target.value,
-                provider = result.provider.name,
+                // The request owns the identity; the result provider may differ
+                // (a fallback provider answered) and would orphan the row.
+                provider = request.provider.name,
                 model = result.model,
                 promptHash = promptHash(request),
                 sourceHash = request.revision.sourceHash,

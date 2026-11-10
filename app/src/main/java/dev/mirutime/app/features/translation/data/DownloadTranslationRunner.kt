@@ -8,6 +8,7 @@ import dev.mirutime.core.api.Outcome
 import dev.mirutime.core.api.PluginError
 import dev.mirutime.data.library.ChapterTranslationEntity
 import dev.mirutime.data.library.ChapterTranslationQueueRow
+import dev.mirutime.data.library.libraryBookKey
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
@@ -46,12 +47,27 @@ class DownloadTranslationRunner(
 ) {
     suspend fun run(bookId: Long, attempt: Int = 1): TranslationRunOutcome {
         val book = store.book(bookId) ?: return TranslationRunOutcome()
-        val config = configFor(book.url) ?: return TranslationRunOutcome()
+        val allRows = store.queueRows(bookId)
+        // The worker sees the stored raw URL; per-book settings live under the
+        // route BookKey. Without this fallback every row reports configured=false.
+        val config = translationConfigKeys(book.url, book.installId)
+            .firstNotNullOfOrNull(configFor)
+        MiruLog.event(
+            "translation",
+            "download-translation-start",
+            "bookId" to bookId,
+            "rows" to allRows.size,
+            "pending" to allRows.count {
+                it.status.equals(DownloadTranslationQueue.STATUS_PENDING, true)
+            },
+            "configured" to (config != null),
+        )
+        if (config == null) return TranslationRunOutcome()
         val source = config.mode.source
         val target = config.mode.target
         val provider = config.mode.provider
         val promptHash = ChapterTranslationPlanner.promptHash(config.prompt)
-        val pending = store.queueRows(bookId)
+        val pending = allRows
             .filter { it.status.equals(DownloadTranslationQueue.STATUS_PENDING, true) }
 
         var translated = 0
@@ -104,7 +120,10 @@ class DownloadTranslationRunner(
                 continue
             }
             val request = ChapterTranslationPlanner.requestFromHtml(
-                bookUrl = book.url,
+                // The reader identifies a book by the route key; the raw URL
+                // can be ambiguous (two installs, one URL) and the cache would
+                // never resolve the chapter.
+                bookUrl = libraryBookKey(book.installId, book.url),
                 chapterUrl = chapter.url,
                 html = html,
                 config = config,

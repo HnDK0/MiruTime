@@ -4,6 +4,8 @@ import dev.mirutime.core.api.Outcome
 import dev.mirutime.core.api.PluginError
 import dev.mirutime.app.features.translation.domain.ChapterTranslationResult
 import dev.mirutime.data.library.ChapterBodyEntity
+import dev.mirutime.data.library.LibraryRepository
+import dev.mirutime.data.library.libraryBookKey
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -330,5 +332,55 @@ class DownloadTranslationRunnerTest {
 
         assertEquals(listOf(1_000L), delays)
         assertEquals(2, engine.requests.size)
+    }
+
+    @Test
+    fun `the runner identifies the book by its route key and saves the translation`() = runTest {
+        // Two installs share one URL: only the route key names the book.
+        val store = FakeTranslationQueueStore(
+            bookRow = translationTestBook(bookId = 1, url = SHARED_URL).copy(installId = INSTALL_A),
+            chapters = listOf(translationTestChapter(1L, 1, bookId = 1)),
+        )
+        val dao = FakeLibraryDao(
+            books = listOf(
+                translationTestBook(bookId = 1, url = SHARED_URL).copy(installId = INSTALL_A),
+                translationTestBook(bookId = 2, url = SHARED_URL).copy(installId = INSTALL_B),
+            ),
+            chapters = listOf(translationTestChapter(1L, 1, bookId = 1)),
+            rows = store.rows,
+            blocks = store.blocks,
+        )
+        val files = FakeFileStore()
+        val engine = FakeTranslationEngine()
+        val runner = DownloadTranslationRunner(
+            store = store,
+            engine = engine,
+            cache = RoomTranslationCache(LibraryRepository(dao.proxy)),
+            files = files,
+            configFor = { config },
+            now = { 20L },
+            chapterDelayMs = { 1_000L },
+            sleep = { },
+            chapterTimeout = kotlin.time.Duration.parse("5s"),
+        )
+        store.addRow(1L, DownloadTranslationQueue.STATUS_PENDING)
+        addDownloadedBody(store, files, 1L)
+
+        val outcome = runner.run(1, 1)
+
+        assertEquals(1, outcome.translated)
+        assertEquals(libraryBookKey(INSTALL_A, SHARED_URL), engine.requests.single().bookUrl)
+        assertEquals(1, store.rows.count { it.status == DownloadTranslationQueue.STATUS_COMPLETE })
+
+        // The saved row is found by the next pass: no second provider call.
+        val second = runner.run(1, 2)
+        assertEquals(0, second.translated)
+        assertEquals(1, engine.requests.size)
+    }
+
+    private companion object {
+        const val SHARED_URL = "https://example.test/book/shared"
+        const val INSTALL_A = "install-a"
+        const val INSTALL_B = "install-b"
     }
 }
