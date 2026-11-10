@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -68,6 +69,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -95,6 +97,7 @@ import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.uikit.ChipRail
 import dev.mirutime.uikit.MiruFilterChip
+import dev.mirutime.uikit.compactTouchTarget
 import dev.mirutime.uikit.MiruLabeledSliderRow
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.SheetHeaderAction
@@ -116,7 +119,11 @@ import dev.mirutime.feature.tts.TtsSettings
 import dev.mirutime.feature.tts.TtsSleepTimerMaxChapters
 import dev.mirutime.feature.tts.TtsSleepTimerMaxMinutes
 import dev.mirutime.feature.tts.TtsSleepTimerMode
+import dev.mirutime.feature.tts.TtsSleepTimerPresetChapters
+import dev.mirutime.feature.tts.TtsSleepTimerPresetMinutes
 import dev.mirutime.feature.tts.TtsSleepTimerState
+import dev.mirutime.feature.tts.isSleepTimerChaptersPresetActive
+import dev.mirutime.feature.tts.isSleepTimerPresetActive
 import dev.mirutime.feature.tts.TtsSpeedStep
 import dev.mirutime.feature.tts.TtsStatus
 import dev.mirutime.feature.tts.TtsVoice
@@ -276,6 +283,8 @@ fun TtsSettingsPanel(
     capabilities: TtsCapabilities,
     status: TtsStatus,
     message: String?,
+    ttsPreviewText: String = "",
+    ttsPreviewTranslatedText: String = "",
     highlight: Boolean,
     highlightColor: Long,
     highlightColors: List<Long>,
@@ -288,6 +297,8 @@ fun TtsSettingsPanel(
     onHighlightColorChange: (Long) -> Unit,
     onDismiss: () -> Unit,
     onDiscoverVoices: () -> Unit = {},
+    onPreviewVoice: (String?, String?, Float, Float, String) -> Unit = { _, _, _, _, _ -> },
+    onPreviewStop: () -> Unit = {},
     sleepTimer: StateFlow<TtsSleepTimerState?>? = null,
     onSleepTimerMinutes: (Int) -> Unit = {},
     onSleepTimerChapters: (Int) -> Unit = {},
@@ -297,25 +308,34 @@ fun TtsSettingsPanel(
     val failed = status == TtsStatus.Failed
     val playing = status == TtsStatus.Playing || status == TtsStatus.Loading
     val testText = stringResource(R.string.rd_tts_test_text)
+    val originalPreview = ttsPreviewText.ifBlank { testText }
+    val translatedPreview = ttsPreviewTranslatedText.ifBlank { originalPreview }
     var section by rememberSaveable { mutableStateOf<TtsSettingSection?>(null) }
     var overlay by rememberSaveable { mutableStateOf<TtsOverlay?>(null) }
     // Which voice slot the picker edits: the original-language voice or the
     // independent translated-text voice (FR-040).
-    var voiceSlotTranslated by rememberSaveable { mutableStateOf(false) }
+    var voiceSlotTranslated by rememberSaveable { mutableStateOf(true) }
+    val voicePreviewText = if (voiceSlotTranslated) translatedPreview else originalPreview
     var deleteIndex by rememberSaveable { mutableStateOf<Int?>(null) }
-    // The floating player needs the system overlay permission; ask in our own
-    // sheet (never AlertDialog) and enable the switch only after the grant.
+    // The floating player works in-app without any permission. The system
+    // overlay over OTHER apps needs the non-standard overlay grant, so it is a
+    // separate opt-in (never AlertDialog: our own sheet explains it).
     val context = LocalContext.current
     var overlayPrompt by rememberSaveable { mutableStateOf(false) }
+    var overlayAvailable by rememberSaveable {
+        mutableStateOf(Settings.canDrawOverlays(context))
+    }
     val overlayPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) {
-        if (Settings.canDrawOverlays(context)) {
-            onSettingsChange(settings.copy(floatingPlayer = true))
-        }
+        overlayAvailable = Settings.canDrawOverlays(context)
+        overlayPrompt = false
     }
     // The engine accordion must also see engines installed after app start.
     LaunchedEffect(Unit) { onDiscoverVoices() }
+    DisposableEffect(Unit) {
+        onDispose { onPreviewStop() }
+    }
 
     when (overlay) {
         TtsOverlay.Voices -> {
@@ -324,17 +344,18 @@ fun TtsSettingsPanel(
                 settings = settings,
                 onSettingsChange = onSettingsChange,
                 currentVoiceId = if (voiceSlotTranslated) {
-                    settings.translatedVoiceId
+                    settings.translatedVoiceId ?: settings.voiceId
                 } else {
                     settings.voiceId
                 },
                 currentEngineId = (if (voiceSlotTranslated) {
-                    settings.translatedEngineId
+                    settings.translatedEngineId ?: settings.engineId
                 } else {
                     settings.engineId
                 }) ?: capabilities.currentEngineId,
                 failed = failed,
                 onSelect = { voiceId, voiceEngineId ->
+                    onPreviewStop()
                     onSettingsChange(
                         if (voiceSlotTranslated) {
                             settings.copy(
@@ -349,6 +370,10 @@ fun TtsSettingsPanel(
                 },
                 onDismiss = { overlay = null },
                 onDiscover = onDiscoverVoices,
+                onPreviewVoice = onPreviewVoice,
+                onPreviewStop = onPreviewStop,
+                previewText = voicePreviewText,
+                translatedSlot = voiceSlotTranslated,
             )
             return
         }
@@ -362,6 +387,9 @@ fun TtsSettingsPanel(
                     overlay = TtsOverlay.DeleteSavedVoice
                 },
                 onDismiss = { overlay = null },
+                onPreviewVoice = onPreviewVoice,
+                onPreviewStop = onPreviewStop,
+                previewText = voicePreviewText,
             )
             return
         }
@@ -484,7 +512,7 @@ fun TtsSettingsPanel(
         ) {
             MiruFilterChip(
                 selected = false,
-                label = stringResource(R.string.rd_tts_voices),
+                label = stringResource(R.string.rd_tts_voice_original_slot),
                 leadingIcon = Icons.Outlined.RecordVoiceOver,
                 enabled = ready,
                 onClick = {
@@ -494,7 +522,7 @@ fun TtsSettingsPanel(
             )
             MiruFilterChip(
                 selected = false,
-                label = stringResource(R.string.rd_tts_voices_translation),
+                label = stringResource(R.string.rd_tts_voice_translation_slot),
                 leadingIcon = Icons.Outlined.Translate,
                 enabled = ready,
                 onClick = {
@@ -539,16 +567,20 @@ fun TtsSettingsPanel(
             title = stringResource(R.string.rd_tts_floating_player),
             subtitle = stringResource(R.string.rd_tts_floating_desc),
             checked = settings.floatingPlayer,
-            onChange = { enabled ->
-                when {
-                    !enabled -> onSettingsChange(settings.copy(floatingPlayer = false))
-                    Settings.canDrawOverlays(context) ->
-                        onSettingsChange(settings.copy(floatingPlayer = true))
-                    else -> overlayPrompt = true
-                }
-            },
+            onChange = { enabled -> onSettingsChange(settings.copy(floatingPlayer = enabled)) },
             horizontalPadding = 0.dp,
         )
+        // A second, explicit opt-in: the player over other apps needs the
+        // overlay grant, which the first switch must not silently demand.
+        if (settings.floatingPlayer && !overlayAvailable) {
+            SettingsSwitchRow(
+                title = stringResource(R.string.rd_tts_overlay_optin),
+                subtitle = stringResource(R.string.rd_tts_overlay_optin_desc),
+                checked = false,
+                onChange = { overlayPrompt = true },
+                horizontalPadding = 0.dp,
+            )
+        }
         MiruRowDivider()
 
         if (capabilities.engines.size > 1) {
@@ -756,6 +788,15 @@ private fun TtsSleepTimerAccordion(
             enabled = enabled,
             value = minutesDraft,
             max = TtsSleepTimerMaxMinutes,
+            presets = TtsSleepTimerPresetMinutes,
+            presetLabel = { minutes ->
+                stringResource(R.string.rd_tts_sleep_timer_minutes_value_fmt, minutes)
+            },
+            isPresetActive = { minutes -> isSleepTimerPresetActive(timerState, minutes) },
+            onPreset = { minutes ->
+                minutesDraft = minutes.toString()
+                onMinutes(minutes)
+            },
             onValueChange = { minutesDraft = it },
             onApply = {
                 minutesDraft = it.toString()
@@ -769,6 +810,17 @@ private fun TtsSleepTimerAccordion(
             enabled = enabled,
             value = chaptersDraft,
             max = TtsSleepTimerMaxChapters,
+            presets = TtsSleepTimerPresetChapters,
+            presetLabel = { chapters ->
+                stringResource(R.string.rd_tts_sleep_timer_chapters_preset_fmt, chapters)
+            },
+            isPresetActive = { chapters ->
+                isSleepTimerChaptersPresetActive(timerState, chapters)
+            },
+            onPreset = { chapters ->
+                chaptersDraft = chapters.toString()
+                onChapters(chapters)
+            },
             onValueChange = { chaptersDraft = it },
             onApply = {
                 chaptersDraft = it.toString()
@@ -798,6 +850,10 @@ private fun SleepTimerRow(
     enabled: Boolean,
     value: String,
     max: Int,
+    presets: List<Int>,
+    presetLabel: @Composable (Int) -> String,
+    isPresetActive: (Int) -> Boolean,
+    onPreset: (Int) -> Unit,
     onValueChange: (String) -> Unit,
     onApply: (Int) -> Unit,
     onCancel: () -> Unit,
@@ -816,8 +872,24 @@ private fun SleepTimerRow(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f),
+            maxLines = 1,
         )
+        // The preset rail takes the remaining width and scrolls sideways when
+        // it runs out, so the custom field and the action stay visible.
+        ChipRail(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(vertical = MiruSpace.Xxs),
+        ) {
+            items(presets, key = { "sleep-preset-$it" }) { preset ->
+                MiruFilterChip(
+                    selected = isPresetActive(preset),
+                    onClick = { onPreset(preset) },
+                    label = presetLabel(preset),
+                    enabled = enabled,
+                    touchTarget = compactTouchTarget(MiruSize.Chip),
+                )
+            }
+        }
         MiruCompactTextField(
             value = value,
             onValueChange = { input ->
@@ -875,6 +947,10 @@ private fun TtsVoicePickerSheet(
     onSelect: (String?, String?) -> Unit,
     onDismiss: () -> Unit,
     onDiscover: () -> Unit,
+    onPreviewVoice: (String?, String?, Float, Float, String) -> Unit,
+    onPreviewStop: () -> Unit,
+    previewText: String,
+    translatedSlot: Boolean = false,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var debouncedQuery by rememberSaveable { mutableStateOf("") }
@@ -968,7 +1044,10 @@ private fun TtsVoicePickerSheet(
     AppBottomSheet(
         title = stringResource(R.string.rd_tts_voices),
         description = stringResource(R.string.rd_tts_voices_desc),
-        onClose = onDismiss,
+        onClose = {
+            onPreviewStop()
+            onDismiss()
+        },
         // The LazyColumn below owns scrolling; wrapping it in the sheet's
         // verticalScroll would measure it with an infinite height.
         contentScrollable = false,
@@ -1018,6 +1097,15 @@ private fun TtsVoicePickerSheet(
                     selected = currentVoiceId == null,
                     enabled = true,
                     onClick = { onSelect(null, null) },
+                    onPreview = {
+                        onPreviewVoice(
+                            null,
+                            currentEngineId,
+                            settings.speed,
+                            settings.pitch,
+                            previewText,
+                        )
+                    },
                 )
             }
             if (currentVoiceId != null) {
@@ -1030,6 +1118,15 @@ private fun TtsVoicePickerSheet(
                             selected = true,
                             enabled = true,
                             onClick = { onSelect(currentVoice.id, currentVoice.engineId) },
+                            onPreview = {
+                                onPreviewVoice(
+                                    currentVoice.id,
+                                    currentVoice.engineId,
+                                    settings.speed,
+                                    settings.pitch,
+                                    previewText,
+                                )
+                            },
                         )
                     } else {
                         // The saved voice was removed by the engine; keep the
@@ -1085,8 +1182,18 @@ private fun TtsVoicePickerSheet(
                             preset = preset,
                             detail = detail,
                             onClick = {
-                                onSettingsChange(settings.applySavedVoice(preset))
+                                onPreviewStop()
+                                onSettingsChange(settings.applySavedVoice(preset, translatedSlot))
                                 onDismiss()
+                            },
+                            onPreview = {
+                                onPreviewVoice(
+                                    preset.voiceId,
+                                    preset.engineId,
+                                    preset.speed,
+                                    preset.pitch,
+                                    previewText,
+                                )
                             },
                         )
                     }
@@ -1145,6 +1252,15 @@ private fun TtsVoicePickerSheet(
                                 )
                             },
                             onClick = { onSelect(voice.id, voice.engineId) },
+                            onPreview = {
+                                onPreviewVoice(
+                                    voice.id,
+                                    voice.engineId,
+                                    settings.speed,
+                                    settings.pitch,
+                                    previewText,
+                                )
+                            },
                         )
                     }
                 }
@@ -1187,13 +1303,14 @@ private fun TtsSavedVoiceRow(
     preset: TtsSavedVoice,
     detail: String,
     onClick: () -> Unit,
+    onPreview: (() -> Unit)? = null,
 ) {
     val extra = LocalMiruExtraColors.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp)
+            .heightIn(min = MiruSize.Touch)
             .clickable(role = Role.Button, onClick = onClick)
             .padding(start = MiruSpace.S, top = MiruSpace.Xs, bottom = MiruSpace.Xs),
     ) {
@@ -1220,6 +1337,23 @@ private fun TtsSavedVoiceRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        if (onPreview != null) {
+            Box(
+                modifier = Modifier
+                    .size(MiruSize.Touch)
+                    .clickable(role = Role.Button, onClick = onPreview),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.PlayArrow,
+                    contentDescription = stringResource(
+                        R.string.rd_tts_voice_preview_named,
+                        preset.name,
+                    ),
+                    tint = extra.muted,
+                )
+            }
+        }
     }
 }
 
@@ -1230,6 +1364,9 @@ private fun TtsSavedVoicesSheet(
     onSettingsChange: (TtsSettings) -> Unit,
     onDeleteRequest: (Int) -> Unit,
     onDismiss: () -> Unit,
+    onPreviewVoice: (String?, String?, Float, Float, String) -> Unit,
+    onPreviewStop: () -> Unit,
+    previewText: String,
 ) {
     var presetName by rememberSaveable { mutableStateOf("") }
     val currentVoiceName = capabilities.voices.firstOrNull {
@@ -1262,7 +1399,10 @@ private fun TtsSavedVoicesSheet(
     AppBottomSheet(
         title = stringResource(R.string.rd_tts_saved_voices),
         description = currentVoiceName,
-        onClose = onDismiss,
+        onClose = {
+            onPreviewStop()
+            onDismiss()
+        },
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -1317,6 +1457,7 @@ private fun TtsSavedVoicesSheet(
                             .heightIn(min = 48.dp)
                             .clickable {
                                 // One write: engine, voice, speed and pitch.
+                                onPreviewStop()
                                 onSettingsChange(settings.applySavedVoice(preset))
                                 onDismiss()
                             },
@@ -1337,6 +1478,27 @@ private fun TtsSavedVoicesSheet(
                                 ),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                onPreviewVoice(
+                                    preset.voiceId,
+                                    preset.engineId,
+                                    preset.speed,
+                                    preset.pitch,
+                                    previewText,
+                                )
+                            },
+                            modifier = Modifier.size(MiruSize.Touch),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.PlayArrow,
+                                contentDescription = stringResource(
+                                    R.string.rd_tts_voice_preview_named,
+                                    preset.name,
+                                ),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         IconButton(
@@ -1550,6 +1712,7 @@ private fun TtsVoiceRow(
     onClick: () -> Unit,
     favorite: Boolean? = null,
     onToggleFavorite: (() -> Unit)? = null,
+    onPreview: (() -> Unit)? = null,
 ) {
     val extra = LocalMiruExtraColors.current
     Row(
@@ -1602,6 +1765,24 @@ private fun TtsVoiceRow(
                     color = LocalMiruExtraColors.current.muted,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        // The preview target is separate from selection; 48dp keeps it usable.
+        if (onPreview != null) {
+            Box(
+                modifier = Modifier
+                    .size(MiruSize.Touch)
+                    .clickable(role = Role.Button, onClick = onPreview),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.PlayArrow,
+                    contentDescription = stringResource(
+                        R.string.rd_tts_voice_preview_named,
+                        title,
+                    ),
+                    tint = extra.muted,
                 )
             }
         }

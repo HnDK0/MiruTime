@@ -28,6 +28,14 @@ class TtsVoiceSelectionTest {
     }
 
     @Test
+    fun `an unset original slot stays on the engine default`() {
+        assertEquals(
+            TtsVoiceSelection(null, null),
+            TtsSettings().voiceForSession(translated = false),
+        )
+    }
+
+    @Test
     fun `an unset translated slot falls back to the original voice`() {
         val settings = TtsSettings(voiceId = "orig", engineId = "eng-orig")
 

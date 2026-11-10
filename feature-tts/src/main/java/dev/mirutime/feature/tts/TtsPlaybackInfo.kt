@@ -16,6 +16,7 @@ object TtsPlaybackIntent {
     const val ActionStop = "dev.mirutime.app.action.TTS_PLAYBACK_STOP"
     const val ActionNextChapter = "dev.mirutime.app.action.TTS_PLAYBACK_NEXT_CHAPTER"
     const val ActionPreviousChapter = "dev.mirutime.app.action.TTS_PLAYBACK_PREVIOUS_CHAPTER"
+    const val ActionDismiss = "dev.mirutime.app.action.TTS_PLAYBACK_DISMISS"
 
     const val ExtraBookTitle = "book_title"
     const val ExtraChapterTitle = "chapter_title"

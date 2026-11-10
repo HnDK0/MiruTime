@@ -7,6 +7,7 @@ import dev.mirutime.core.log.MiruLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -19,6 +20,21 @@ enum class TtsStatus { Idle, Loading, Playing, Paused, Failed }
 
 /** Chapter hand-off the reader must resolve; the controller has no chapter list. */
 enum class TtsChapterDirection { Next, Previous }
+
+/**
+ * Text the rich TTS player renders. The reader parses the chapter, so it
+ * publishes the spoken sentence, its paragraph and the counterpart translation
+ * here; the in-app player and the system overlay then show the same plate.
+ */
+data class TtsPlayerText(
+    val sentence: String? = null,
+    val paragraph: String? = null,
+    val counterpart: String? = null,
+    val sentenceHighlightStart: Int = 0,
+    val sentenceHighlightEnd: Int = 0,
+    val chapterPercent: Int = 0,
+    val glowColorArgb: Long = 0L,
+)
 
 data class TtsState(
     val status: TtsStatus = TtsStatus.Idle,
@@ -49,6 +65,7 @@ class TtsController(
     private val settingsStore: TtsSettingsStore = InMemoryTtsSettingsStore(),
     /** Monotonic clock; tests inject the virtual scheduler time. */
     private val now: () -> Long = { SystemClock.elapsedRealtime() },
+    private val voicePreviewer: TtsVoicePreviewer = NoopTtsVoicePreviewer,
 ) : TtsHandoffSource {
     private val _state = MutableStateFlow(TtsState())
     override val state: StateFlow<TtsState> = _state.asStateFlow()
@@ -59,7 +76,13 @@ class TtsController(
     private val _capabilities = MutableStateFlow(TtsCapabilities())
     val capabilities: StateFlow<TtsCapabilities> = _capabilities.asStateFlow()
 
-    private val _chapterRequests = MutableSharedFlow<TtsChapterDirection>(extraBufferCapacity = 1)
+    // Conflated: a second arrow tap must not be dropped while the collector is
+    // still starting the first hand-off. The latest direction is what the user
+    // asked for, so dropping the older one is correct.
+    private val _chapterRequests = MutableSharedFlow<TtsChapterDirection>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
 
     /**
      * Emitted when playback needs the reader to open another chapter (manual
@@ -69,9 +92,21 @@ class TtsController(
     override val chapterRequests: SharedFlow<TtsChapterDirection> = _chapterRequests.asSharedFlow()
 
     private val _sleepTimer = MutableStateFlow<TtsSleepTimerState?>(null)
-
     /** Running sleep timer, or null. A tick updates only [TtsSleepTimerState.remainingSeconds]. */
     val sleepTimer: StateFlow<TtsSleepTimerState?> = _sleepTimer.asStateFlow()
+
+    private val _playerText = MutableStateFlow(TtsPlayerText())
+
+    /**
+     * Text the rich player shows. The reader owns the document, so it publishes
+     * the current sentence/paragraph here instead of passing text through a
+     * service intent; the overlay renders the same plate as the in-app player.
+     */
+    val playerText: StateFlow<TtsPlayerText> = _playerText.asStateFlow()
+
+    fun updatePlayerText(value: TtsPlayerText) {
+        _playerText.value = value
+    }
 
     /** Stops playback after [minutes]. Setting a new timer replaces the old one. */
     fun setSleepTimer(minutes: Int) {
@@ -151,6 +186,10 @@ class TtsController(
     private var ready = false
     private var pending: (() -> Unit)? = null
     private var chunks: List<TtsChunk> = emptyList()
+    // Language of the current session. Translation is a page-level decision:
+    // parallel ORIGINAL_FIRST passes an empty translation map. A partially
+    // translated page keeps this flag for the whole session by design.
+    private var sessionTranslated = false
     // Suffix sums of chunk text lengths: suffix[i] is "characters from chunk i
     // to the end". Rebuilt only when chunks change, so the timer estimate is
     // O(1) on every chunk/range update.
@@ -160,7 +199,7 @@ class TtsController(
     // Platform utterance ids are unique per queue (not chunk indexes), so a
     // late callback from a stopped queue cannot be mistaken for the current
     // one. Cleared whenever the queue is paused/skipped/replaced.
-    private val utteranceChunks = HashMap<Int, Int>()
+    private val utteranceChunks = java.util.concurrent.ConcurrentHashMap<Int, Int>()
     private var nextUtteranceId = 0
     private var bookUrl = ""
     private var chapterIndex = 0
@@ -174,6 +213,7 @@ class TtsController(
     // resurrect playback.
     @Volatile
     private var handoffPending = false
+    private var handoffTimeout: Job? = null
 
     /** True while a chapter hand-off is between the request and its document. */
     val isHandoffPending: Boolean
@@ -187,8 +227,23 @@ class TtsController(
     override val lastStoppedSession: TtsSession?
         get() = _lastStoppedSession
 
-    fun play(document: ReaderDocument, translations: Map<Int, String> = emptyMap()) {
-        playFrom(document, translations, blockIndex = null)
+    /**
+     * Language the live session speaks; null when there is no session. The
+     * reader compares the language the page wants with this one, so a settings
+     * switch restarts the speech instead of waiting for the next session.
+     */
+    override val sessionLanguage: TtsLanguage?
+        get() = when (_state.value.status) {
+            TtsStatus.Idle, TtsStatus.Failed -> null
+            else -> if (sessionTranslated) TtsLanguage.Translation else TtsLanguage.Original
+        }
+
+    fun play(
+        document: ReaderDocument,
+        translations: Map<Int, String> = emptyMap(),
+        language: TtsLanguage = TtsLanguage.from(translations),
+    ) {
+        playFrom(document, translations, blockIndex = null, language = language)
     }
 
     /**
@@ -201,17 +256,21 @@ class TtsController(
         translations: Map<Int, String> = emptyMap(),
         blockIndex: Int?,
         charOffset: Int = 0,
+        language: TtsLanguage = TtsLanguage.from(translations),
     ) {
+        voicePreviewer.stop()
         handoffPending = false
         _lastStoppedSession = null
-        val next = TtsChunker.chunks(document, translations)
+        val spoken = sessionTranslations(language, translations)
+        val next = TtsChunker.chunks(document, spoken)
         if (next.isEmpty()) {
             setState(TtsState(status = TtsStatus.Failed, message = "Nothing to read"))
             return
         }
-        // A session speaks one language: pick the matching original/translated
-        // voice slot before the engine is prepared (FR-041).
-        applySavedSettings(next.firstOrNull()?.translated == true)
+        // A session speaks one language: the caller decides from the page mode,
+        // not from whichever block happens to be first.
+        sessionTranslated = language == TtsLanguage.Translation
+        applySavedSettings(sessionTranslated)
         stopInternal(keepStatus = true)
         chunks = next
         rebuildChunkCharStats()
@@ -226,6 +285,8 @@ class TtsController(
             "chapter" to document.chapterIndex,
             "block" to blockIndex,
             "startChunk" to current,
+            "translated" to sessionTranslated,
+            "voice" to voiceId,
         )
         persist(wasPlaying = true, immediate = true, background = true)
         if (!ready) {
@@ -247,17 +308,20 @@ class TtsController(
         translations: Map<Int, String> = emptyMap(),
         blockIndex: Int,
         charOffset: Int = 0,
+        language: TtsLanguage = TtsLanguage.from(translations),
     ) {
         if (_state.value.status != TtsStatus.Paused) {
-            playFrom(document, translations, blockIndex, charOffset)
+            playFrom(document, translations, blockIndex, charOffset, language)
             return
         }
-        val next = TtsChunker.chunks(document, translations)
+        val spoken = sessionTranslations(language, translations)
+        val next = TtsChunker.chunks(document, spoken)
         if (next.isEmpty()) {
             setState(TtsState(status = TtsStatus.Failed, message = "Nothing to read"))
             return
         }
-        applySavedSettings(next.firstOrNull()?.translated == true)
+        sessionTranslated = language == TtsLanguage.Translation
+        applySavedSettings(sessionTranslated)
         stopInternal(keepStatus = true)
         pending = null
         chunks = next
@@ -287,10 +351,12 @@ class TtsController(
         document: ReaderDocument,
         translations: Map<Int, String> = emptyMap(),
         session: TtsSession,
+        language: TtsLanguage = TtsLanguage.from(translations),
     ): Boolean {
         if (document.chapterUrl != session.chapterUrl) return false
         if (document.chapterIndex != session.chapterIndex) return false
-        val next = TtsChunker.chunks(document, translations)
+        val spoken = sessionTranslations(language, translations)
+        val next = TtsChunker.chunks(document, spoken)
         val cursor = resolveTtsCursor(next, session) ?: return false
         stopInternal(keepStatus = true)
         pending = null
@@ -300,11 +366,28 @@ class TtsController(
         chapterIndex = document.chapterIndex
         current = cursor
         active = false
-        applyEngine(_settings.value.engineId)
-        voiceId = session.voiceId ?: _settings.value.voiceId
+        sessionTranslated = language == TtsLanguage.Translation
+        val restoredSelection = sessionVoiceSelection(_settings.value, sessionTranslated)
+        // The engine belongs to the session's slot, not to the original one:
+        // a translated session must speak with the translated engine.
+        applyEngine(restoredSelection.engineId)
+        // A saved session keeps its voice only while it speaks the same
+        // language. Switching parallel order must pick the new language's slot.
+        val sameLanguage = session.translated == sessionTranslated
+        voiceId = if (sameLanguage) {
+            session.voiceId ?: restoredSelection.voiceId
+        } else {
+            restoredSelection.voiceId
+        }
         speed = clampTtsSpeed(session.speed)
         pitch = clampTtsPitch(session.pitch)
         applyPlaybackSettings()
+        MiruLog.event(
+            "tts",
+            "restore",
+            "translated" to sessionTranslated,
+            "voice" to voiceId,
+        )
         setState(chunkState(cursor, TtsStatus.Paused))
         persist(wasPlaying = false, immediate = true)
         return true
@@ -356,6 +439,7 @@ class TtsController(
     }
 
     override fun resume() {
+        voicePreviewer.stop()
         handoffPending = false
         _lastStoppedSession = null
         pausedByFocusLoss = false
@@ -432,13 +516,41 @@ class TtsController(
     private fun requestHandoff(direction: TtsChapterDirection) {
         handoffPending = true
         _chapterRequests.tryEmit(direction)
+        handoffTimeout?.cancel()
+        handoffTimeout = scope.launch {
+            delay(HandoffTimeoutMs)
+            if (!handoffPending) return@launch
+            // No chapter arrived: drop the pending hand-off instead of holding
+            // Loading (and the service wake lock) forever.
+            handoffPending = false
+            if (_state.value.status == TtsStatus.Paused || _state.value.status == TtsStatus.Loading) {
+                setState(chunkState(current, TtsStatus.Paused))
+                persist(wasPlaying = false, immediate = true)
+            }
+            MiruLog.w("tts", "event=tts-handoff-timeout")
+        }
     }
 
-    fun toggle(document: ReaderDocument, translations: Map<Int, String> = emptyMap()) {
+    fun toggle(
+        document: ReaderDocument,
+        translations: Map<Int, String> = emptyMap(),
+        language: TtsLanguage = TtsLanguage.from(translations),
+    ) {
         when (_state.value.status) {
             TtsStatus.Playing, TtsStatus.Loading -> pause()
-            TtsStatus.Paused -> resume()
-            else -> play(document, translations)
+            // A paused session resumes only while it speaks the same language:
+            // a settings switch must not resume the old text in the old voice.
+            TtsStatus.Paused -> if (language != sessionLanguage) {
+                playFrom(
+                    document = document,
+                    translations = translations,
+                    blockIndex = chunks.getOrNull(current)?.blockId?.index,
+                    language = language,
+                )
+            } else {
+                resume()
+            }
+            else -> play(document, translations, language)
         }
     }
 
@@ -450,10 +562,13 @@ class TtsController(
     override fun playHandoff(
         document: ReaderDocument,
         translations: Map<Int, String>,
+        language: TtsLanguage,
     ): Boolean {
         if (!handoffPending) return false
         handoffPending = false
-        play(document, translations)
+        handoffTimeout?.cancel()
+        handoffTimeout = null
+        play(document, translations, language)
         return true
     }
 
@@ -465,6 +580,8 @@ class TtsController(
 
     private fun resetPlayback(clearSession: Boolean) {
         handoffPending = false
+        handoffTimeout?.cancel()
+        handoffTimeout = null
         pausedByFocusLoss = false
         active = false
         pending = null
@@ -475,6 +592,7 @@ class TtsController(
         chunks = emptyList()
         chunkCharSuffix = IntArray(0)
         current = 0
+        sessionTranslated = false
         bookUrl = ""
         chapterIndex = 0
         if (clearSession) sessions.clear(immediate = true)
@@ -483,12 +601,15 @@ class TtsController(
 
     fun close() {
         handoffPending = false
+        handoffTimeout?.cancel()
+        handoffTimeout = null
         clearSleepTimer()
         active = false
         pending = null
         invalidateUtterances()
         engine.stop()
         engine.shutdown()
+        voicePreviewer.shutdown()
         ready = false
         publishCapabilities()
     }
@@ -503,7 +624,6 @@ class TtsController(
         val previous = _settings.value
         val sanitized = settings.sanitized()
         // The session speaks one language: edits apply to that slot.
-        val sessionTranslated = chunks.firstOrNull()?.translated == true
         val previousSelection = previous.sanitized().voiceForSession(sessionTranslated)
         val nextSelection = sanitized.voiceForSession(sessionTranslated)
         // Only the slot this session speaks can affect playback: editing the
@@ -542,6 +662,15 @@ class TtsController(
         publishCapabilities()
     }
 
+    override fun switchLanguage(
+        document: ReaderDocument,
+        translations: Map<Int, String>,
+        blockIndex: Int,
+        language: TtsLanguage,
+    ) {
+        seekToBlock(document, translations, blockIndex, charOffset = 0, language = language)
+    }
+
     fun resetSettings() {
         updateSettings(TtsSettings())
     }
@@ -578,7 +707,7 @@ class TtsController(
             setState(TtsState())
             return
         }
-        applySavedSettings(chunks.firstOrNull()?.translated == true)
+        applySavedSettings(sessionTranslated)
         invalidateUtterances()
         setState(chunkState(current, TtsStatus.Loading))
         if (ready) {
@@ -603,6 +732,8 @@ class TtsController(
             val utteranceId = ++nextUtteranceId
             utteranceChunks[utteranceId] = i
             if (!engine.speak(chunks[i].text, utteranceId)) {
+                // Chunks already queued before the failure must stop too.
+                engine.stop()
                 setState(
                     _state.value.copy(
                         status = TtsStatus.Failed,
@@ -701,7 +832,7 @@ class TtsController(
     private fun applySavedSettings(translated: Boolean = false) {
         val saved = settingsStore.load().sanitized()
         _settings.value = saved
-        val selection = saved.voiceForSession(translated)
+        val selection = sessionVoiceSelection(saved, translated)
         voiceId = selection.voiceId
         speed = saved.speed
         pitch = saved.pitch
@@ -709,6 +840,76 @@ class TtsController(
         applyPlaybackSettings()
         publishCapabilities()
     }
+
+    /**
+     * The text a session speaks. An Original session never reads the
+     * translation; a Translation session reads it and falls back to the
+     * original text while the translation has not arrived yet.
+     */
+    private fun sessionTranslations(
+        language: TtsLanguage,
+        translations: Map<Int, String>,
+    ): Map<Int, String> {
+        if (language == TtsLanguage.Original) return emptyMap()
+        if (translations.isEmpty()) {
+            MiruLog.event("tts", "text-fallback", "reason" to "translation-missing")
+        }
+        return translations
+    }
+
+    /**
+     * The voice slot a session speaks with. A translated session without a
+     * translated voice falls back to the original one; the fallback is logged
+     * so a wrong language is visible in the diagnostics.
+     */
+    private fun sessionVoiceSelection(
+        settings: TtsSettings,
+        translated: Boolean,
+    ): TtsVoiceSelection {
+        val sanitized = settings.sanitized()
+        val selection = sanitized.voiceForSession(translated)
+        if (translated && sanitized.translatedVoiceId == null) {
+            MiruLog.event("tts", "voice-fallback", "reason" to "translated-voice-unset")
+        }
+        return selection
+    }
+
+    /** Re-reads the durable TTS prefs after a backup restore. */
+    fun reloadSettings() {
+        // Restore runs on an IO thread; the controller and engine are main-confined.
+        scope.launch {
+            // The session prefs were written directly by the backup store.
+            sessions.invalidate()
+            val saved = settingsStore.load().sanitized()
+            val selection = saved.voiceForSession(sessionTranslated)
+            val targetEngine = selection.engineId ?: engine.defaultEngineId
+            if (active && targetEngine != null && targetEngine != engine.currentEngineId) {
+                // The engine restarts and its queue dies with it: the session
+                // must re-queue the current chunk instead of staying "Playing"
+                // without sound.
+                invalidateUtterances()
+                engine.stop()
+                setState(chunkState(current, TtsStatus.Loading))
+                pending = { speakFrom(current) }
+            }
+            applySavedSettings(translated = sessionTranslated)
+        }
+    }
+
+    /** Auditions a voice without changing the selected voice/engine. */
+    fun previewVoice(
+        voiceId: String?,
+        engineId: String?,
+        speed: Float,
+        pitch: Float,
+        text: String,
+        onUnavailable: () -> Unit = {},
+    ) {
+        if (active) pauseFromSystem()
+        voicePreviewer.preview(voiceId, engineId, speed, pitch, text, onUnavailable)
+    }
+
+    fun stopVoicePreview() = voicePreviewer.stop()
 
     /** Returns true when the platform engine is being re-initialized. */
     private fun applyEngine(id: String?): Boolean {
@@ -729,6 +930,7 @@ class TtsController(
         engine.setPitch(pitch)
         if (!engine.setVoice(voiceId)) {
             // A saved engine voice may be gone after an engine switch.
+            MiruLog.event("tts", "voice-fallback", "reason" to "voice-unavailable")
             voiceId = null
             engine.setVoice(null)
         }
@@ -766,7 +968,7 @@ class TtsController(
                 speed = speed,
                 pitch = pitch,
                 wasPlaying = wasPlaying,
-                translated = chunk.translated,
+                translated = sessionTranslated,
                 textHash = "${chunk.text.length}:${chunk.text.hashCode()}",
                 updatedAt = System.currentTimeMillis(),
             ),
@@ -860,8 +1062,12 @@ class TtsController(
             }
         }
 
-        override fun onError() {
+        override fun onError(utteranceId: Int?) {
+            // Late errors from a stopped/skipped queue must not fail this one.
+            if (utteranceId != null && utteranceChunks[utteranceId] == null) return
             handoffPending = false
+            handoffTimeout?.cancel()
+            handoffTimeout = null
             clearSleepTimer()
             setState(_state.value.copy(status = TtsStatus.Failed, message = "TTS error"))
             active = false
@@ -920,3 +1126,6 @@ internal fun ttsStartIndex(
         .takeIf { it >= 0 }
         ?: chunks.lastIndex
 }
+
+/** A chapter hand-off that never arrives must not hold Loading forever. */
+private const val HandoffTimeoutMs = 30_000L

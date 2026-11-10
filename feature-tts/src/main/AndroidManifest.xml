@@ -29,5 +29,11 @@
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
         </receiver>
+
+        <!-- Notification deleteIntent. Explicit PendingIntent from our app;
+             never exported. -->
+        <receiver
+            android:name="dev.mirutime.feature.tts.service.TtsDismissReceiver"
+            android:exported="false" />
     </application>
 </manifest>

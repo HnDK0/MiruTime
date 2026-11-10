@@ -6,30 +6,70 @@ import java.util.concurrent.Executors
 
 /**
  * One global TTS slot, not per book: resuming TTS is only meaningful for the
- * book that was last spoken. [immediate] uses commit() for pause/stop writes so
- * a process kill right after the action cannot lose the cursor.
+ * book that was last spoken. Writes never block the caller: [immediate] asks
+ * for commit() on the writer thread. A process kill in the few milliseconds
+ * before the writer runs can lose the last write; accepted so pause/stop never
+ * block the main thread.
+ * shortcut: last write may be lost on a hard kill; only the current paragraph
+ * cursor is affected, recoverable on next open.
  */
 interface TtsSessionStore {
     fun load(): TtsSession?
     fun save(session: TtsSession, immediate: Boolean = false, background: Boolean = false)
     fun clear(immediate: Boolean = false, background: Boolean = false)
+
+    /** Drops the in-memory snapshot after settings/prefs were written externally. */
+    fun invalidate() = Unit
 }
 
 class InMemoryTtsSessionStore : TtsSessionStore {
     private var session: TtsSession? = null
-
     override fun load(): TtsSession? = session
-
     override fun save(session: TtsSession, immediate: Boolean, background: Boolean) {
         this.session = session
     }
-
     override fun clear(immediate: Boolean, background: Boolean) {
         session = null
     }
 }
 
-// commit() is deliberate: pause/stop must survive an immediate process kill.
+// In-memory first: the UI reads the cursor back immediately, while the
+// single-thread writer persists it. No caller ever blocks on the disk.
+internal class TtsSessionCache(
+    private val read: () -> String?,
+    private val write: (String?, Boolean, Int) -> Unit,
+    private val encode: (TtsSession) -> String = TtsSessionCodec::encode,
+    private val decode: (String?) -> TtsSession? = TtsSessionCodec::decode,
+) {
+    private var loaded = false
+    private var cached: TtsSession? = null
+
+    fun load(): TtsSession? {
+        if (!loaded) {
+            cached = decode(read())
+            loaded = true
+        }
+        return cached
+    }
+
+    fun save(session: TtsSession, immediate: Boolean, generation: Int = 0) {
+        cached = session
+        loaded = true
+        write(encode(session), immediate, generation)
+    }
+
+    fun clear(immediate: Boolean, generation: Int = 0) {
+        cached = null
+        loaded = true
+        write(null, immediate, generation)
+    }
+
+    fun invalidate() {
+        loaded = false
+        cached = null
+    }
+}
+
 @SuppressLint("ApplySharedPref")
 class PrefsTtsSessionStore(context: Context) : TtsSessionStore {
     private val prefs = context.applicationContext
@@ -37,43 +77,40 @@ class PrefsTtsSessionStore(context: Context) : TtsSessionStore {
     private val writer = Executors.newSingleThreadExecutor { task ->
         Thread(task, "tts-session-write").apply { isDaemon = true }
     }
+    @Volatile
+    private var generation = 0
+    private val cache = TtsSessionCache(
+        read = { prefs.getString(KEY_SESSION, null) },
+        write = { encoded, immediate, gen ->
+            writer.execute {
+                // Ignore stale writes from before an invalidate().
+                if (gen != generation) return@execute
+                val editor = prefs.edit()
+                if (encoded == null) {
+                    editor.remove(KEY_SESSION)
+                } else {
+                    editor.putString(KEY_SESSION, encoded)
+                }
+                if (immediate) editor.commit() else editor.apply()
+            }
+        },
+    )
 
-    override fun load(): TtsSession? {
-        // Read-your-writes: wait for the serialized writer to drain first.
-        runCatching { writer.submit {} .get() }
-        return runCatching {
-            TtsSessionCodec.decode(prefs.getString(KEY_SESSION, null))
-        }.getOrNull()
-    }
+    // First read is one small getString; later reads are the in-memory snapshot.
+    override fun load(): TtsSession? = cache.load()
 
+    // `background` is kept for API compatibility: every write is queued.
     override fun save(session: TtsSession, immediate: Boolean, background: Boolean) {
-        val encoded = TtsSessionCodec.encode(session)
-        write(immediate, background) { prefs.edit().putString(KEY_SESSION, encoded) }
+        cache.save(session, immediate, generation)
     }
 
     override fun clear(immediate: Boolean, background: Boolean) {
-        write(immediate, background) { prefs.edit().remove(KEY_SESSION) }
+        cache.clear(immediate, generation)
     }
 
-    // Play/chunk changes ask for an immediate durable write but must not block
-    // the main thread; pause/stop keep the synchronous commit guarantee.
-    private fun write(
-        immediate: Boolean,
-        background: Boolean,
-        edit: () -> android.content.SharedPreferences.Editor,
-    ) {
-        val apply = {
-            val editor = edit()
-            if (immediate) editor.commit() else editor.apply()
-            Unit
-        }
-        if (background) {
-            writer.execute(apply)
-        } else {
-            // Foreground pause/stop must order after queued play/chunk writes,
-            // otherwise a stale "wasPlaying=true" can land last.
-            runCatching { writer.submit(apply).get() }
-        }
+    override fun invalidate() {
+        generation++
+        cache.invalidate()
     }
 
     companion object {

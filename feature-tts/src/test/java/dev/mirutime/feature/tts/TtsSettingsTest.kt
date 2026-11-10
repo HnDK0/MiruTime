@@ -183,6 +183,43 @@ class TtsSettingsTest {
     }
 
     @Test
+    fun savedVoiceApplyTargetsOnlyTheEditedSlot() {
+        val preset = TtsSavedVoice("Night", "voice-b", 1.2f, 0.9f, "engine-b")
+        val settings = TtsSettings(
+            voiceId = "voice-a",
+            engineId = "engine-a",
+            translatedVoiceId = "voice-c",
+            translatedEngineId = "engine-a",
+        )
+
+        val original = settings.applySavedVoice(preset)
+        val translated = settings.applySavedVoice(preset, translated = true)
+
+        // Editing one slot must never relabel the other: a shared voice would
+        // make both chips show the same value.
+        assertEquals("voice-b", original.voiceId)
+        assertEquals("voice-c", original.translatedVoiceId)
+        assertEquals("voice-a", translated.voiceId)
+        assertEquals("voice-b", translated.translatedVoiceId)
+        assertEquals("engine-b", translated.translatedEngineId)
+    }
+
+    @Test
+    fun aLegacyPresetKeepsTheEditedSlotsEngine() {
+        val preset = TtsSavedVoice("Old", "voice-b", 1.2f, 0.9f)
+
+        val translated = TtsSettings(
+            translatedEngineId = "engine-c",
+            translatedVoiceId = "voice-a",
+        ).applySavedVoice(preset, translated = true)
+
+        assertEquals("engine-c", translated.translatedEngineId)
+        assertEquals("voice-b", translated.translatedVoiceId)
+        // The other slot stays untouched.
+        assertEquals(null, translated.voiceId)
+    }
+
+    @Test
     fun legacySavedVoiceKeepsTheSelectedEngine() {
         val preset = TtsSavedVoice("Old", "voice-b", 1.2f, 0.9f)
 

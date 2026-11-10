@@ -9,9 +9,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
-import android.graphics.drawable.Icon
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.Rect
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -20,10 +22,14 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.IBinder
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.KeyEvent
+import android.view.View
+import android.widget.RemoteViews
+import androidx.core.graphics.createBitmap
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
@@ -51,6 +57,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -140,6 +147,12 @@ class TtsPlaybackService : Service() {
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MiruTime:TtsPlayback")
             .apply { setReferenceCounted(false) }
         createChannel()
+        serviceScope.launch {
+            while (true) {
+                delay(WakeLockRenewMs)
+                if (isActive()) renewWakeLock()
+            }
+        }
         mediaSession = MediaSession(this, "MiruTimeTts").apply {
             setFlags(
                 MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or
@@ -156,7 +169,18 @@ class TtsPlaybackService : Service() {
                     }
 
                     override fun onStop() {
+                        MiruLog.event("tts", "media-session-stop")
                         ttsController.stop()
+                        stopPlayback()
+                    }
+
+                    override fun onCommand(
+                        command: String,
+                        extras: Bundle?,
+                        cb: android.os.ResultReceiver?,
+                    ) {
+                        MiruLog.event("tts", "media-session-command", "command" to command)
+                        super.onCommand(command, extras, cb)
                     }
 
                     // Media buttons skip chapters: the reader owns the chapter
@@ -172,6 +196,12 @@ class TtsPlaybackService : Service() {
                     // Some devices deliver the raw media-button KeyEvent here
                     // instead of routing it to onPlay/onPause/onSkip*.
                     override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
+                        MiruLog.event(
+                            "tts",
+                            "media-session-key",
+                            "action" to mediaButtonIntent.action,
+                            "hasKey" to (mediaButtonIntent.mediaButtonKey() != null),
+                        )
                         val key = mediaButtonIntent.mediaButtonKey()
                             ?: return super.onMediaButtonEvent(mediaButtonIntent)
                         if (key.action != KeyEvent.ACTION_DOWN) return true
@@ -194,6 +224,15 @@ class TtsPlaybackService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!::ttsController.isInitialized) return START_NOT_STICKY
+        if (intent?.action == TtsPlaybackIntent.ActionDismiss) {
+            // Swiping the media notification is a user stop, not a headless
+            // restart: keep the cursor, stop speech and remove the service.
+            MiruLog.event("tts", "notification-dismissed")
+            ttsController.pauseFromSystem()
+            stopPlayback()
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         val command = ttsTransportCommand(intent?.action)
         MiruLog.event(
             "tts",
@@ -252,9 +291,11 @@ class TtsPlaybackService : Service() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         MiruLog.event("tts", "tts-task-removed")
         if (::ttsController.isInitialized) {
-            ttsController.stop()
-            stopPlayback()
+            // Removing the task is not a Stop: keep the cursor so the user can
+            // resume where they left off.
+            ttsController.pauseFromSystem()
         }
+        stopPlayback()
         stopSelf()
         super.onTaskRemoved(rootIntent)
     }
@@ -275,6 +316,10 @@ class TtsPlaybackService : Service() {
         mediaSession.isActive = false
         mediaSession.release()
         if (isActive()) ttsController.pauseFromSystem()
+        if (foregroundStarted) {
+            stopForeground(Service.STOP_FOREGROUND_REMOVE)
+            foregroundStarted = false
+        }
         MiruLog.event("tts", "service-destroy")
         super.onDestroy()
     }
@@ -298,10 +343,12 @@ class TtsPlaybackService : Service() {
             ttsController.settings.collect { settings ->
                 // Re-check on every emission: the user may grant the overlay
                 // permission from the settings sheet while this service runs.
-                if (settings.floatingPlayer &&
-                    overlay == null &&
+                val allowed = settings.floatingPlayer &&
                     Settings.canDrawOverlays(this@TtsPlaybackService)
-                ) {
+                if (!allowed) {
+                    overlay?.destroy()
+                    overlay = null
+                } else if (overlay == null) {
                     overlay = TtsOverlayController(this@TtsPlaybackService, ttsController).also {
                         it.updateChapter(overlayChapter())
                         it.start()
@@ -379,11 +426,10 @@ class TtsPlaybackService : Service() {
             return
         }
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        // Two-argument overload: let the platform apply the manifest
+        // mediaPlayback type, as NoveLA does. The explicit type overload keeps
+        // media notifications in the NO_DISMISS class on newer releases.
+        startForeground(NOTIFICATION_ID, notification)
         foregroundStarted = true
         publishedKey = key
         MiruLog.event("tts", "service-foreground", "status" to ttsController.state.value.status)
@@ -459,66 +505,99 @@ class TtsPlaybackService : Service() {
     private fun buildNotification(): Notification {
         val info = ttsNotificationInfo(ttsController.state.value, bookTitle, chapterTitle)
         val fallback = getString(R.string.tts_notification_title)
-        val playPause = if (info.action == TtsTransportAction.Pause) {
-            Notification.Action.Builder(
-                Icon.createWithResource(this, R.drawable.ic_stat_pause),
-                getString(R.string.tts_action_pause),
-                serviceIntent(TtsPlaybackIntent.ActionPause, REQUEST_PAUSE),
-            ).build()
-        } else {
-            Notification.Action.Builder(
-                Icon.createWithResource(this, R.drawable.ic_stat_play),
-                getString(R.string.tts_action_play),
-                serviceIntent(TtsPlaybackIntent.ActionPlay, REQUEST_PLAY),
-            ).build()
-        }
-        val actions = mutableListOf<Notification.Action>()
-        var playPauseIndex = 0
-        if (info.canSkip) {
-            actions += Notification.Action.Builder(
-                Icon.createWithResource(this, R.drawable.ic_stat_previous_chapter),
-                getString(R.string.tts_action_prev_chapter),
-                serviceIntent(TtsPlaybackIntent.ActionPreviousChapter, REQUEST_PREVIOUS),
-            ).build()
-        }
-        playPauseIndex = actions.size
-        actions += playPause
-        if (info.canSkip) {
-            actions += Notification.Action.Builder(
-                Icon.createWithResource(this, R.drawable.ic_stat_next_chapter),
-                getString(R.string.tts_action_next_chapter),
-                serviceIntent(TtsPlaybackIntent.ActionNextChapter, REQUEST_NEXT),
-            ).build()
-        }
-        actions += Notification.Action.Builder(
-            Icon.createWithResource(this, R.drawable.ic_stat_stop),
-            getString(R.string.tts_action_stop),
-            serviceIntent(TtsPlaybackIntent.ActionStop, REQUEST_STOP),
-        ).build()
-        val compact = if (info.canSkip) {
-            intArrayOf(playPauseIndex - 1, playPauseIndex, playPauseIndex + 1)
-        } else {
-            intArrayOf(playPauseIndex)
-        }
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_play)
             .setContentTitle(info.title.ifEmpty { fallback })
             .setContentText(info.text.ifEmpty { fallback })
             .setContentIntent(contentIntent())
+            .setDeleteIntent(TtsDismissReceiver.pendingIntent(this))
             .setCategory(Notification.CATEGORY_TRANSPORT)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .setOngoing(true)
+            // Dismissible on purpose: the swipe is handled by TtsDismissReceiver
+            // (pause + keep the session). A custom view is used instead of
+            // MediaStyle because Android 15+ marks MediaStyle NO_CLEAR.
+            .setOngoing(false)
+            .setAutoCancel(false)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
-            .setActions(*actions.toTypedArray())
-            .setStyle(
-                Notification.MediaStyle()
-                    .setMediaSession(mediaSession.sessionToken)
-                    .setShowActionsInCompactView(*compact),
+            .setStyle(Notification.DecoratedCustomViewStyle())
+            .setCustomContentView(
+                buildRemoteViews(R.layout.notification_tts_compact, info, expanded = false),
             )
-        playbackSubtitle()?.let(builder::setSubText)
-        coverBitmap?.let(builder::setLargeIcon)
+            .setCustomBigContentView(
+                buildRemoteViews(R.layout.notification_tts_expanded, info, expanded = true),
+            )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+        }
         return builder.build()
+    }
+
+    private fun buildRemoteViews(
+        layout: Int,
+        info: TtsNotificationInfo,
+        expanded: Boolean,
+    ): RemoteViews {
+        val fallback = getString(R.string.tts_notification_title)
+        val views = RemoteViews(packageName, layout)
+        val progress = playbackSubtitle().orEmpty()
+        views.setTextViewText(
+            R.id.tts_notification_title,
+            info.title.ifEmpty { fallback },
+        )
+        views.setTextViewText(
+            R.id.tts_notification_subtitle,
+            info.text.ifEmpty { fallback },
+        )
+        views.setTextViewText(R.id.tts_notification_progress, progress)
+        views.setViewVisibility(
+            R.id.tts_notification_progress,
+            if (progress.isBlank()) View.GONE else View.VISIBLE,
+        )
+        val cover = coverBitmap
+        if (cover != null) {
+            views.setImageViewBitmap(R.id.tts_notification_cover, cover)
+        } else {
+            views.setImageViewResource(
+                R.id.tts_notification_cover,
+                R.drawable.ic_tts_notification_cover,
+            )
+        }
+        val playing = info.action == TtsTransportAction.Pause
+        views.setImageViewResource(
+            R.id.tts_notification_play,
+            if (playing) R.drawable.ic_stat_pause else R.drawable.ic_stat_play,
+        )
+        views.setContentDescription(
+            R.id.tts_notification_play,
+            getString(if (playing) R.string.tts_action_pause else R.string.tts_action_play),
+        )
+        views.setOnClickPendingIntent(
+            R.id.tts_notification_play,
+            if (playing) {
+                serviceIntent(TtsPlaybackIntent.ActionPause, REQUEST_PAUSE)
+            } else {
+                serviceIntent(TtsPlaybackIntent.ActionPlay, REQUEST_PLAY)
+            },
+        )
+        // The collapsed row fits a cover, two lines of text and one control;
+        // chapter navigation and stop live only in the expanded layout.
+        if (expanded) {
+            views.setOnClickPendingIntent(
+                R.id.tts_notification_previous,
+                serviceIntent(TtsPlaybackIntent.ActionPreviousChapter, REQUEST_PREVIOUS),
+            )
+            views.setOnClickPendingIntent(
+                R.id.tts_notification_next,
+                serviceIntent(TtsPlaybackIntent.ActionNextChapter, REQUEST_NEXT),
+            )
+            views.setOnClickPendingIntent(
+                R.id.tts_notification_stop,
+                serviceIntent(TtsPlaybackIntent.ActionStop, REQUEST_STOP),
+            )
+            views.setTextViewText(R.id.tts_notification_brand, getString(R.string.tts_notification_brand))
+        }
+        return views
     }
 
     /** "Chapter 3 / 24 · 42%" under the title when the data is available. */
@@ -652,12 +731,47 @@ class TtsPlaybackService : Service() {
             val bitmap = (result as? SuccessResult)?.image?.toBitmap() ?: return@runCatching null
             // Notification/meta need a software bitmap; Coil may hand back a
             // hardware-backed one on some devices.
-            if (bitmap.config == Bitmap.Config.HARDWARE) {
+            val software = if (bitmap.config == Bitmap.Config.HARDWARE) {
                 bitmap.copy(Bitmap.Config.ARGB_8888, false)
             } else {
                 bitmap
             }
+            roundedCover(software)
         }.getOrNull()
+    }
+
+    /**
+     * Custom notification views cannot clip themselves to rounded corners
+     * before API 31, so the rounding is baked into the bitmap. The square is a
+     * centre crop, keeping the ImageView's own scaleType behaviour.
+     */
+    private fun roundedCover(source: Bitmap): Bitmap {
+        val side = minOf(source.width, source.height)
+        val output = createBitmap(side, side, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val radius = side * CoverCornerFraction
+        canvas.clipPath(
+            Path().apply {
+                addRoundRect(
+                    0f,
+                    0f,
+                    side.toFloat(),
+                    side.toFloat(),
+                    radius,
+                    radius,
+                    Path.Direction.CW,
+                )
+            },
+        )
+        val left = (source.width - side) / 2
+        val top = (source.height - side) / 2
+        canvas.drawBitmap(
+            source,
+            Rect(left, top, left + side, top + side),
+            Rect(0, 0, side, side),
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG),
+        )
+        return output
     }
 
     private fun coverData(raw: String): Any = when {
@@ -711,7 +825,12 @@ class TtsPlaybackService : Service() {
     }
 
     private fun acquireWakeLock() {
-        if (!wakeLock.isHeld) wakeLock.acquire()
+        if (!wakeLock.isHeld) wakeLock.acquire(WakeLockTimeoutMs)
+    }
+
+    // The lock is non-refcounted: acquiring again while held resets its timeout.
+    private fun renewWakeLock() {
+        wakeLock.acquire(WakeLockTimeoutMs)
     }
 
     private fun releaseWakeLock() {
@@ -766,3 +885,12 @@ class TtsPlaybackService : Service() {
         }
     }
 }
+
+// The lock is renewed while a session is active; a stale timeout must not
+// keep the device awake after a crash.
+private const val WakeLockTimeoutMs = 15 * 60_000L
+private const val WakeLockRenewMs = 10 * 60_000L
+
+// Cover corner radius as a fraction of its side so it reads the same at 44dp
+// (collapsed notification) and 72dp (expanded).
+private const val CoverCornerFraction = 0.25f

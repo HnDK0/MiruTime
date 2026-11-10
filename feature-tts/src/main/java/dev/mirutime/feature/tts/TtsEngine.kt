@@ -1,6 +1,8 @@
 package dev.mirutime.feature.tts
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.os.Bundle
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
@@ -12,7 +14,7 @@ interface TtsEngineListener {
     fun onReady(ok: Boolean)
     fun onStart(utteranceId: Int)
     fun onDone(utteranceId: Int)
-    fun onError()
+    fun onError(utteranceId: Int?)
     fun onRangeStart(utteranceId: Int, start: Int, end: Int)
 
     /** Auxiliary engines finished scanning their voices. */
@@ -46,7 +48,9 @@ interface TtsEngine {
 
 class AndroidTtsEngine(context: Context) : TtsEngine {
     private val appContext = context.applicationContext
+    @Volatile
     private var tts: TextToSpeech? = null
+    @Volatile
     private var ready = false
     private var engineId: String? = null
 
@@ -124,7 +128,7 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
             return
         }
         refreshAuxiliaryVoices()
-        listener?.onVoicesChanged()
+        mainHandler.post { listener?.onVoicesChanged() }
     }
 
     private fun refreshAuxiliaryVoices() {
@@ -146,7 +150,7 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
             val stale = auxiliaryEngines.keys.filter { it !in keep }
             stale.forEach { id -> auxiliaryEngines.remove(id)?.shutdown() }
         }
-        if (removed) listener?.onVoicesChanged()
+        if (removed) mainHandler.post { listener?.onVoicesChanged() }
     }
 
     private fun loadAuxiliaryVoices(engine: String) {
@@ -191,7 +195,7 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
                         "count=${voices.size} ids=${voices.joinToString(",") { it.id }}",
                 )
                 auxiliary?.shutdown()
-                listener?.onVoicesChanged()
+                mainHandler.post { listener?.onVoicesChanged() }
             },
             engine,
         )
@@ -201,22 +205,49 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
         }
     }
 
+    // Engine callbacks arrive on binder threads; the controller is main-confined.
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    // Diagnostic: the platform may deliver these on a binder thread, not Main.
+    private fun logProgressThread(role: String, utteranceId: String?) {
+        MiruLog.d(
+            "tts",
+            "event=tts-thread role=$role thread=${Thread.currentThread().name} " +
+                "utterance=${utteranceId ?: "-"}",
+        )
+    }
+
+    // Incremented on every init/shutdown: a late onInit from an old engine
+    // must never mark the current (or a shut-down) engine ready.
+    @Volatile
+    private var engineGeneration = 0
+
     private val progress = object : UtteranceProgressListener() {
         override fun onStart(utteranceId: String?) {
-            utteranceId?.toIntOrNull()?.let { listener?.onStart(it) }
+            logProgressThread("onStart", utteranceId)
+            val value = utteranceId?.toIntOrNull() ?: return
+            mainHandler.post { listener?.onStart(value) }
         }
 
         override fun onDone(utteranceId: String?) {
-            utteranceId?.toIntOrNull()?.let { listener?.onDone(it) }
+            logProgressThread("onDone", utteranceId)
+            val value = utteranceId?.toIntOrNull() ?: return
+            mainHandler.post { listener?.onDone(value) }
         }
 
         @Deprecated("Deprecated in Java")
         override fun onError(utteranceId: String?) {
-            listener?.onError()
+            logProgressThread("onError", utteranceId)
+            // Preview ("tts-preview") and foreign ids must not fail the book.
+            if (!shouldReportPlaybackError(utteranceId)) return
+            val value = utteranceId?.toIntOrNull()
+            mainHandler.post { listener?.onError(value) }
         }
 
         override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
-            utteranceId?.toIntOrNull()?.let { listener?.onRangeStart(it, start, end) }
+            logProgressThread("onRangeStart", utteranceId)
+            val value = utteranceId?.toIntOrNull() ?: return
+            mainHandler.post { listener?.onRangeStart(value, start, end) }
         }
     }
 
@@ -225,6 +256,7 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
     }
 
     private fun initEngine(enginePackage: String?) {
+        val generation = ++engineGeneration
         ready = false
         tts?.stop()
         tts?.shutdown()
@@ -232,13 +264,15 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
         tts = TextToSpeech(
             appContext,
             { status ->
-                ready = status == TextToSpeech.SUCCESS
-                if (ready) {
-                    tts?.language = Locale.getDefault()
-                    tts?.setOnUtteranceProgressListener(progress)
-                    refreshAuxiliaryVoices()
+                if (generation == engineGeneration) {
+                    ready = status == TextToSpeech.SUCCESS
+                    if (ready) {
+                        tts?.language = Locale.getDefault()
+                        tts?.setOnUtteranceProgressListener(progress)
+                        refreshAuxiliaryVoices()
+                    }
+                    mainHandler.post { listener?.onReady(ready) }
                 }
-                listener?.onReady(ready)
             },
             enginePackage,
         )
@@ -287,6 +321,7 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
     }
 
     override fun shutdown() {
+        engineGeneration += 1
         tts?.stop()
         tts?.shutdown()
         tts = null
@@ -301,3 +336,7 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
         const val PREVIEW_UTTERANCE = "tts-preview"
     }
 }
+
+/** Only a real playback utterance id may fail the active session. */
+internal fun shouldReportPlaybackError(utteranceId: String?): Boolean =
+    utteranceId?.toIntOrNull() != null

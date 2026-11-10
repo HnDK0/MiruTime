@@ -20,6 +20,22 @@ data class TtsSleepTimerState(
 const val TtsSleepTimerMaxMinutes = 180
 const val TtsSleepTimerMaxChapters = 99
 
+/** One-tap minute presets, shown inside the Minutes row before the custom field. */
+val TtsSleepTimerPresetMinutes: List<Int> = listOf(15, 30, 45, 60)
+
+/** One-tap chapter presets, shown inside the Chapters row before the custom field. */
+val TtsSleepTimerPresetChapters: List<Int> = listOf(2, 5, 8, 12, 15)
+
+fun isSleepTimerPresetActive(timer: TtsSleepTimerState?, minutes: Int): Boolean =
+    timer != null &&
+        timer.mode == TtsSleepTimerMode.Minutes &&
+        timer.totalSeconds == minutes * 60
+
+fun isSleepTimerChaptersPresetActive(timer: TtsSleepTimerState?, chapters: Int): Boolean =
+    timer != null &&
+        timer.mode == TtsSleepTimerMode.Chapters &&
+        timer.chaptersTotal == chapters
+
 fun clampSleepTimerMinutes(minutes: Int): Int = minutes.coerceIn(1, TtsSleepTimerMaxMinutes)
 
 fun clampSleepTimerChapters(chapters: Int): Int = chapters.coerceIn(1, TtsSleepTimerMaxChapters)

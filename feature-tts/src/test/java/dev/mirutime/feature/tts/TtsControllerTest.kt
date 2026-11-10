@@ -56,8 +56,10 @@ class TtsControllerTest {
             get() = ready
 
         val spoken = mutableListOf<Int>()
+        val spokenTexts = mutableListOf<String>()
         val previews = mutableListOf<String>()
         var stops = 0
+        var failSpeak = false
         val availableVoices = setOf("voice-a", "voice-b")
         var voice: String? = null
         var appliedRate = 1f
@@ -87,7 +89,8 @@ class TtsControllerTest {
 
         override fun speak(text: String, utteranceId: Int): Boolean {
             spoken += utteranceId
-            return true
+            spokenTexts += text
+            return !failSpeak
         }
 
         override fun preview(text: String): Boolean {
@@ -182,6 +185,47 @@ class TtsControllerTest {
         assertEquals(1, engine.spoken.size)
         assertEquals(TtsStatus.Playing, controller.state.value.status)
         assertEquals(1, controller.state.value.currentChunk)
+    }
+
+    @Test
+    fun `a stale utterance error does not fail the live session`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        controller.play(document, emptyMap())
+        val live = engine.spoken.last()
+
+        engine.listener?.onError(live + 100_000)
+        assertEquals(TtsStatus.Playing, controller.state.value.status)
+
+        engine.listener?.onError(live)
+        assertEquals(TtsStatus.Failed, controller.state.value.status)
+    }
+
+    @Test
+    fun `a handoff that never arrives leaves the session paused`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        controller.play(document, emptyMap())
+
+        controller.skipNextChapter()
+        assertEquals(TtsStatus.Paused, controller.state.value.status)
+
+        advanceTimeBy(30_001)
+        runCurrent()
+
+        assertEquals(TtsStatus.Paused, controller.state.value.status)
+    }
+
+    @Test
+    fun `a speak failure stops the already queued chunks`() = runTest {
+        val engine = FakeEngine().apply { failSpeak = true }
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+
+        controller.play(document, emptyMap())
+
+        assertEquals(TtsStatus.Failed, controller.state.value.status)
+        // One stop before queueing, one stop on the failure.
+        assertTrue(engine.stops >= 2)
     }
 
     @Test
@@ -387,6 +431,22 @@ class TtsControllerTest {
     }
 
     @Test
+    fun `translated page uses the translated voice and original page uses the original voice`() = runTest {
+        val engine = FakeEngine()
+        val settings = InMemoryTtsSettingsStore(
+            TtsSettings(voiceId = "voice-a", translatedVoiceId = "voice-b"),
+        )
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore(), settings)
+
+        controller.play(document, mapOf(0 to "First sentence. Second sentence."))
+        assertEquals("voice-b", engine.voice)
+
+        controller.stop()
+        controller.play(document, emptyMap())
+        assertEquals("voice-a", engine.voice)
+    }
+
+    @Test
     fun `missing saved voice falls back to the engine default`() = runTest {
         val engine = FakeEngine()
         val settings = InMemoryTtsSettingsStore(TtsSettings(voiceId = "voice-gone"))
@@ -430,6 +490,169 @@ class TtsControllerTest {
         )
 
         assertEquals("voice-b", engine.voice)
+    }
+
+    @Test
+    fun `restore after a parallel language switch picks the new voice`() = runTest {
+        val engine = FakeEngine()
+        val settings = InMemoryTtsSettingsStore(
+            TtsSettings(voiceId = "voice-a", translatedVoiceId = "voice-b"),
+        )
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore(), settings)
+
+        assertTrue(
+            controller.restore(
+                document,
+                mapOf(0 to "First sentence. Second sentence."),
+                session().copy(translated = false, voiceId = "voice-a"),
+            ),
+        )
+
+        assertEquals("voice-b", engine.voice)
+    }
+
+    @Test
+    fun `restore of a translated session uses the translated engine`() = runTest {
+        val engine = FakeEngine()
+        val settings = InMemoryTtsSettingsStore(
+            TtsSettings(
+                voiceId = "voice-a",
+                engineId = "default",
+                translatedVoiceId = "voice-b",
+                translatedEngineId = "engine-b",
+            ),
+        )
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore(), settings)
+
+        assertTrue(
+            controller.restore(
+                document,
+                emptyMap(),
+                session(),
+                language = TtsLanguage.Translation,
+            ),
+        )
+
+        assertEquals("engine-b", engine.currentEngineId)
+        assertEquals("voice-b", engine.voice)
+    }
+
+    @Test
+    fun `translation language keeps the translated voice without a translation map`() = runTest {
+        val engine = FakeEngine()
+        val settings = InMemoryTtsSettingsStore(
+            TtsSettings(voiceId = "voice-a", translatedVoiceId = "voice-b"),
+        )
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore(), settings)
+
+        controller.playFrom(
+            document,
+            translations = emptyMap(),
+            blockIndex = null,
+            language = TtsLanguage.Translation,
+        )
+
+        // An explicit Translation language (the reader only asks for it when the
+        // chapter has translated text) keeps the translated voice even for an
+        // empty map; the text falls back to the original.
+        assertEquals("voice-b", engine.voice)
+        assertEquals(listOf("First sentence.", "Second sentence"), engine.spokenTexts)
+    }
+
+    @Test
+    fun `session language follows the played session and clears on stop`() = runTest {
+        val controller = TtsController(FakeEngine(), this, InMemoryTtsSessionStore())
+
+        assertNull(controller.sessionLanguage)
+
+        controller.play(document, mapOf(0 to "Переведённое предложение."))
+        assertEquals(TtsLanguage.Translation, controller.sessionLanguage)
+
+        controller.stop()
+        assertNull(controller.sessionLanguage)
+
+        controller.play(document, emptyMap())
+        assertEquals(TtsLanguage.Original, controller.sessionLanguage)
+    }
+
+    @Test
+    fun `toggle with a different language restarts the spoken block in the new voice`() = runTest {
+        val engine = FakeEngine()
+        val settings = InMemoryTtsSettingsStore(
+            TtsSettings(voiceId = "voice-a", translatedVoiceId = "voice-b"),
+        )
+        val store = InMemoryTtsSessionStore()
+        val controller = TtsController(engine, this, store, settings)
+        controller.play(document, mapOf(0 to "Переведённое предложение."))
+        controller.skipNextChunk()
+        controller.pause()
+        assertEquals("voice-b", engine.voice)
+        engine.spokenTexts.clear()
+
+        controller.toggle(document, emptyMap(), TtsLanguage.Original)
+
+        // The new language re-chunks the text and picks the original voice; the
+        // cursor stays in the spoken block instead of the chapter top.
+        assertEquals("voice-a", engine.voice)
+        assertEquals(listOf("First sentence.", "Second sentence"), engine.spokenTexts)
+        assertEquals(TtsLanguage.Original, controller.sessionLanguage)
+        assertFalse(engine.spokenTexts.any { it.contains("Переведённое") })
+        assertEquals(false, store.load()?.translated)
+    }
+
+    @Test
+    fun `toggle with the same language resumes instead of re-chunking`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        controller.play(document, emptyMap())
+        controller.skipNextChunk()
+        controller.pause()
+        assertEquals(1, controller.state.value.currentChunk)
+        engine.spokenTexts.clear()
+
+        controller.toggle(document, emptyMap(), TtsLanguage.Original)
+
+        // Resuming continues at the current chunk; a re-chunk would speak the
+        // chapter's first sentence again.
+        assertEquals(listOf("Second sentence"), engine.spokenTexts)
+    }
+
+    @Test
+    fun `seek to block with a new language stays paused and switches the voice`() = runTest {
+        val engine = FakeEngine()
+        val settings = InMemoryTtsSettingsStore(
+            TtsSettings(voiceId = "voice-a", translatedVoiceId = "voice-b"),
+        )
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore(), settings)
+        controller.play(document, mapOf(0 to "Переведённое предложение."))
+        controller.pause()
+        assertEquals("voice-b", engine.voice)
+        val spoken = engine.spokenTexts.size
+
+        controller.seekToBlock(document, emptyMap(), blockIndex = 0, language = TtsLanguage.Original)
+
+        assertEquals(TtsStatus.Paused, controller.state.value.status)
+        assertEquals("voice-a", engine.voice)
+        assertEquals(spoken, engine.spokenTexts.size)
+    }
+
+    @Test
+    fun `original language never reads the translation`() = runTest {
+        val engine = FakeEngine()
+        val settings = InMemoryTtsSettingsStore(
+            TtsSettings(voiceId = "voice-a", translatedVoiceId = "voice-b"),
+        )
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore(), settings)
+
+        controller.playFrom(
+            document,
+            translations = mapOf(0 to "Translated sentence."),
+            blockIndex = null,
+            language = TtsLanguage.Original,
+        )
+
+        assertEquals("voice-a", engine.voice)
+        assertEquals(listOf("First sentence.", "Second sentence"), engine.spokenTexts)
     }
 
     @Test
@@ -1159,6 +1382,124 @@ class TtsControllerTest {
     }
 
     @Test
+    fun `reload settings applies a restored store snapshot`() = runTest {
+        val engine = FakeEngine()
+        val settings = InMemoryTtsSettingsStore(
+            TtsSettings(voiceId = "voice-a", engineId = "default", speed = 1f, pitch = 1f),
+        )
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore(), settings)
+        engine.listener?.onReady(true)
+
+        settings.save(
+            TtsSettings(voiceId = "voice-b", engineId = "default", speed = 1.8f, pitch = 0.6f),
+        )
+        controller.reloadSettings()
+        runCurrent()
+
+        assertEquals("voice-b", controller.settings.value.voiceId)
+        assertEquals("voice-b", engine.voice)
+        assertEquals(1.8f, engine.appliedRate, 0.001f)
+        assertEquals(0.6f, engine.appliedPitch, 0.001f)
+    }
+
+    @Test
+    fun `reload settings with a new engine resumes the current chunk`() = runTest {
+        val engine = FakeEngine().apply { deferEngineReady = true }
+        val settings = InMemoryTtsSettingsStore(TtsSettings(engineId = "default"))
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore(), settings)
+        controller.play(document)
+        engine.listener?.onStart(engine.spoken[1])
+        engine.spoken.clear()
+        engine.stops = 0
+
+        settings.save(TtsSettings(engineId = "engine-b"))
+        controller.reloadSettings()
+        runCurrent()
+
+        // The engine restarts: the session must not stay "Playing" without sound.
+        assertEquals(TtsStatus.Loading, controller.state.value.status)
+        assertEquals(1, controller.state.value.currentChunk)
+        assertTrue(engine.spoken.isEmpty())
+
+        engine.completeEngineInit()
+
+        assertEquals(TtsStatus.Playing, controller.state.value.status)
+        assertEquals(1, controller.state.value.currentChunk)
+        assertEquals(1, engine.spoken.size)
+        assertEquals("engine-b", engine.currentEngineId)
+    }
+
+    @Test
+    fun `sleep timer presets set the expected duration`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(
+            engine = engine,
+            scope = this,
+            sessions = InMemoryTtsSessionStore(),
+            now = { 1_000L },
+        )
+        controller.play(document)
+
+        TtsSleepTimerPresetMinutes.forEach { minutes ->
+            controller.setSleepTimer(minutes)
+            val timer = controller.sleepTimer.value
+            assertEquals(minutes * 60, timer?.totalSeconds)
+            assertTrue(isSleepTimerPresetActive(timer, minutes))
+        }
+        controller.setSleepTimer(20)
+        assertFalse(isSleepTimerPresetActive(controller.sleepTimer.value, 15))
+        controller.setSleepTimerChapters(2)
+        assertFalse(isSleepTimerPresetActive(controller.sleepTimer.value, 15))
+    }
+
+    @Test
+    fun `preview voice delegates without changing the selected voice`() = runTest {
+        val engine = FakeEngine()
+        val previewer = FakeVoicePreviewer()
+        val settings = InMemoryTtsSettingsStore(TtsSettings(voiceId = "voice-a"))
+        val controller = TtsController(
+            engine = engine,
+            scope = this,
+            sessions = InMemoryTtsSessionStore(),
+            settingsStore = settings,
+            voicePreviewer = previewer,
+        )
+        val before = controller.settings.value
+
+        controller.previewVoice("voice-b", "engine-b", 1.4f, 0.9f, "sample")
+
+        assertEquals("voice-b", previewer.voiceId)
+        assertEquals("engine-b", previewer.engineId)
+        assertEquals(1.4f, previewer.speed)
+        assertEquals(0.9f, previewer.pitch)
+        assertEquals("sample", previewer.text)
+        assertEquals(before, controller.settings.value)
+        assertEquals("voice-a", controller.settings.value.voiceId)
+
+        controller.stopVoicePreview()
+        assertEquals(1, previewer.stops)
+    }
+
+    @Test
+    fun `preview voice pauses active reading`() = runTest {
+        val engine = FakeEngine()
+        val previewer = FakeVoicePreviewer()
+        val controller = TtsController(
+            engine = engine,
+            scope = this,
+            sessions = InMemoryTtsSessionStore(),
+            voicePreviewer = previewer,
+        )
+        controller.play(document)
+        assertEquals(TtsStatus.Playing, controller.state.value.status)
+
+        controller.previewVoice("voice-b", null, 1f, 1f, "sample")
+
+        assertEquals(TtsStatus.Paused, controller.state.value.status)
+        assertEquals("voice-b", previewer.voiceId)
+    }
+
+    @Test
     fun `stop remembers the last session`() = runTest {
         val sessions = InMemoryTtsSessionStore()
         val controller = TtsController(FakeEngine(), this, sessions)
@@ -1172,6 +1513,36 @@ class TtsControllerTest {
         assertEquals(document.chapterIndex, stopped?.chapterIndex)
     }
 
+}
+
+private class FakeVoicePreviewer : TtsVoicePreviewer {
+    var voiceId: String? = null
+    var engineId: String? = null
+    var speed: Float = 0f
+    var pitch: Float = 0f
+    var text: String = ""
+    var stops = 0
+
+    override fun preview(
+        voiceId: String?,
+        engineId: String?,
+        speed: Float,
+        pitch: Float,
+        text: String,
+        onUnavailable: () -> Unit,
+    ) {
+        this.voiceId = voiceId
+        this.engineId = engineId
+        this.speed = speed
+        this.pitch = pitch
+        this.text = text
+    }
+
+    override fun stop() {
+        stops++
+    }
+
+    override fun shutdown() = Unit
 }
 
 private class RecordingSessionStore : TtsSessionStore {

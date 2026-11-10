@@ -1,7 +1,9 @@
 package dev.mirutime.feature.tts
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TtsSleepTimerTest {
@@ -49,5 +51,28 @@ class TtsSleepTimerTest {
         assertEquals(180, clampSleepTimerMinutes(999))
         assertEquals(1, clampSleepTimerChapters(0))
         assertEquals(99, clampSleepTimerChapters(999))
+    }
+
+    @Test
+    fun `chapter presets are the four short stops`() {
+        assertEquals(listOf(2, 5, 8, 12, 15), TtsSleepTimerPresetChapters)
+    }
+
+    @Test
+    fun `chapter preset is active only for a matching chapter timer`() {
+        val chapters = TtsSleepTimerState(
+            mode = TtsSleepTimerMode.Chapters,
+            chaptersRemaining = 5,
+            chaptersTotal = 5,
+        )
+        val minutes = TtsSleepTimerState(
+            mode = TtsSleepTimerMode.Minutes,
+            totalSeconds = 5 * 60,
+        )
+
+        assertTrue(isSleepTimerChaptersPresetActive(chapters, 5))
+        assertFalse(isSleepTimerChaptersPresetActive(chapters, 2))
+        assertFalse(isSleepTimerChaptersPresetActive(minutes, 5))
+        assertFalse(isSleepTimerChaptersPresetActive(null, 5))
     }
 }

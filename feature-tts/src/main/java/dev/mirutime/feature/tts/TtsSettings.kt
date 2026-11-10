@@ -10,11 +10,19 @@ const val TtsMinPitch = 0.5f
 const val TtsMaxPitch = 3f
 const val TtsPitchStep = 0.01f
 
-const val TtsFloatingMinWidth = 220f
+/**
+ * 230dp keeps six 32dp plate controls plus their gaps on one line inside the
+ * panel's 8dp padding; below that the action row wrapped to a second line and
+ * the plate grew by a whole row.
+ */
+const val TtsFloatingMinWidth = 230f
 const val TtsFloatingMaxWidth = 480f
 const val TtsFloatingMinOpacity = 0.35f
 const val TtsFloatingDefaultOpacity = 0.95f
 const val TtsFloatingDefaultWidth = 300f
+
+/** Screen edge margin for the panel width range; matches MiruSpace.M (12dp). */
+const val TtsFloatingRangeMargin = 12f
 
 /** Auto-next is the product default; the store and the data class share it. */
 internal const val TtsAutoNextChapterDefault = true
@@ -80,9 +88,10 @@ private fun finiteOrUnset(value: Float): Float = if (value.isFinite()) value els
 data class TtsVoiceSelection(val voiceId: String?, val engineId: String?)
 
 /**
- * A session speaks ONE language, so it uses the matching saved slot. An unset
- * translated slot falls back to the original voice, keeping pre-existing
- * behavior until the user picks a separate one (FR-040..042).
+ * A page/session speaks ONE language, so it uses the matching saved slot. An
+ * unset translated slot falls back to the original voice; an unset original
+ * slot leaves the engine default. Translation presence is decided by the page
+ * mode, not by the first block.
  */
 fun TtsSettings.voiceForSession(translated: Boolean): TtsVoiceSelection =
     if (translated && translatedVoiceId != null) {
@@ -97,6 +106,44 @@ fun clampTtsFloatingWidth(value: Float): Float =
     } else {
         TtsFloatingDefaultWidth
     }
+
+/**
+ * Width range for the floating panel, derived from the SCREEN.
+ *
+ * Never from the panel itself: the panel's own width changes while the user
+ * drags the width slider, so a range that follows it produces a positive
+ * feedback loop (the max edge chases the value and the handle snaps back).
+ * NoveLA derives the same range from `screenWidthDp`.
+ */
+fun floatingWidthRange(
+    screenWidthDp: Float,
+    marginDp: Float,
+): ClosedFloatingPointRange<Float> {
+    val usable = if (screenWidthDp.isFinite()) screenWidthDp - 2f * marginDp else 0f
+    val max = usable.coerceAtLeast(TtsFloatingMinWidth + 1f)
+    return TtsFloatingMinWidth..max
+}
+
+/** Clamps a stored width into [range]; a corrupt value falls back to the default. */
+fun clampFloatingPanelWidth(
+    width: Float,
+    range: ClosedFloatingPointRange<Float>,
+): Float = if (width.isFinite()) width.coerceIn(range.start, range.endInclusive) else TtsFloatingDefaultWidth
+
+/**
+ * One pinch step. The multiplier applies to the CURRENT panel width (the stored
+ * value), not to the clamped display value, so a pinch can also grow past it.
+ */
+fun pinchPanelWidth(
+    current: Float,
+    previousSpan: Float,
+    span: Float,
+    range: ClosedFloatingPointRange<Float>,
+): Float = if (previousSpan <= 0f || span <= 0f) {
+    clampFloatingPanelWidth(current, range)
+} else {
+    clampFloatingPanelWidth(current * (span / previousSpan), range)
+}
 
 fun clampTtsFloatingOpacity(value: Float): Float =
     if (value.isFinite()) {
@@ -393,16 +440,29 @@ fun ttsGroupSavedVoices(
     .sortedWith(compareBy({ engineRank(engineOrder, it.engineId) }, { it.label }))
 
 /**
- * Applies a saved preset in one settings write. A preset saved before
- * per-engine favorites has no engine id; it keeps the engine that is already
- * selected instead of silently jumping to the system default.
+ * Applies a saved preset in one settings write, to the slot being edited. A
+ * preset saved before per-engine favorites has no engine id; it keeps the
+ * engine that is already selected instead of silently jumping to the system
+ * default.
  */
-fun TtsSettings.applySavedVoice(preset: TtsSavedVoice): TtsSettings = copy(
-    voiceId = preset.voiceId,
-    engineId = preset.engineId ?: engineId,
-    speed = clampTtsSpeed(preset.speed),
-    pitch = clampTtsPitch(preset.pitch),
-)
+fun TtsSettings.applySavedVoice(
+    preset: TtsSavedVoice,
+    translated: Boolean = false,
+): TtsSettings = if (translated) {
+    copy(
+        translatedVoiceId = preset.voiceId,
+        translatedEngineId = preset.engineId ?: translatedEngineId,
+        speed = clampTtsSpeed(preset.speed),
+        pitch = clampTtsPitch(preset.pitch),
+    )
+} else {
+    copy(
+        voiceId = preset.voiceId,
+        engineId = preset.engineId ?: engineId,
+        speed = clampTtsSpeed(preset.speed),
+        pitch = clampTtsPitch(preset.pitch),
+    )
+}
 
 /**
  * Adds a preset once. Same engine, voice, speed and pitch is the same setting

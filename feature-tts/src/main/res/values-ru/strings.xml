@@ -57,7 +57,6 @@
     <string name="rd_tts_advanced">Голос и воспроизведение</string>
     <string name="rd_tts_test_reset">Проверка и сброс</string>
     <string name="rd_tts_voices">Голоса</string>
-    <string name="rd_tts_voices_translation">Голос перевода</string>
     <string name="rd_tts_prev_paragraph">Предыдущий абзац</string>
     <string name="rd_tts_next_paragraph">Следующий абзац</string>
     <string name="rd_tts_voices_desc">Выберите голос. Сохранённые избранные также применяют скорость и тон.</string>
@@ -65,6 +64,9 @@
     <string name="rd_tts_voice_all">Все голоса</string>
     <string name="rd_tts_voice_favorite_add">Сохранить голос в избранное</string>
     <string name="rd_tts_voice_favorite_remove">Убрать голос из избранного</string>
+    <string name="rd_tts_voice_preview">Прослушать голос</string>
+    <string name="rd_tts_voice_preview_named">Прослушать: %1$s</string>
+    <string name="rd_tts_voice_preview_failed">Не удалось прослушать этот голос</string>
     <string name="rd_tts_saved_voices">Сохранённые голоса</string>
     <string name="rd_tts_saved_name">Название пресета</string>
     <string name="rd_tts_saved_save">Сохранить</string>
@@ -80,6 +82,8 @@
     <string name="rd_tts_floating_open">Открыть плавающий TTS-плеер</string>
     <string name="rd_tts_floating_collapse">Свернуть в пузырь</string>
     <string name="rd_tts_floating_desc">Показывать состояние и управление поверх страницы.</string>
+    <string name="rd_tts_overlay_optin">Плеер поверх других приложений</string>
+    <string name="rd_tts_overlay_optin_desc">Оставлять тот же плеер видимым после выхода из приложения. Нужно разрешение «поверх других приложений».</string>
     <string name="rd_tts_overlay_permission_title">Плеер поверх других приложений</string>
     <string name="rd_tts_overlay_permission_desc">Разрешите MiruTime рисовать поверх других приложений, чтобы плеер оставался видимым во время озвучивания. Без разрешения плеер работает только внутри читалки.</string>
     <string name="rd_tts_overlay_permission_open">Открыть настройки</string>
@@ -138,8 +142,9 @@
     <string name="rd_tts_sleep_timer_off">Выкл.</string>
     <string name="rd_tts_sleep_timer_minutes">Минуты</string>
     <string name="rd_tts_sleep_timer_chapters">Главы</string>
-    <string name="rd_tts_sleep_timer_minutes_value_fmt">%1$d мин</string>
+    <string name="rd_tts_sleep_timer_minutes_value_fmt">%1$dм</string>
     <string name="rd_tts_sleep_timer_chapters_value_fmt">%1$d гл.</string>
+    <string name="rd_tts_sleep_timer_chapters_preset_fmt">%1$d</string>
     <string name="rd_tts_sleep_timer_active_fmt">Таймер сна: сработает через %1$s</string>
     <string name="rd_tts_sleep_timer_pause_cancels">Пауза отменяет таймер.</string>
     <string name="rd_tts_sleep_timer_start_hint">Сначала запустите озвучку.</string>
@@ -147,4 +152,7 @@
     <string name="rd_tts_sleep_timer_cancel">Отменить таймер</string>
     <string name="tts_sleep_timer_until_fmt">Сон до %1$s</string>
     <string name="tts_sleep_timer_chapters_fmt">Сон: ещё %1$d гл.</string>
+    <string name="tts_notification_brand">MIRUTIME · TTS</string>
+    <string name="rd_tts_voice_translation_slot">Голос перевода</string>
+    <string name="rd_tts_voice_original_slot">Голос оригинала</string>
 </resources>
