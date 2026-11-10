@@ -14,6 +14,7 @@ import dev.mirutime.data.library.ChapterBodyEntity
 import dev.mirutime.data.library.ChapterEntity
 import dev.mirutime.data.library.ChapterPageEntity
 import dev.mirutime.data.library.DownloadTaskEntity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -39,6 +40,9 @@ data class ChapterDeleteResult(val deleted: Int, val failed: Int)
  * in-memory job registry, so process death loses nothing but the current
  * network call.
  */
+private const val PAGE_ATTEMPTS = 3
+private val PAGE_RETRY_MS = longArrayOf(5_000L, 15_000L)
+
 class DownloadEngine(
     private val store: DownloadStore,
     private val provider: BookDataProvider,
@@ -71,23 +75,23 @@ class DownloadEngine(
     suspend fun bookTitle(bookId: Long): String? = store.book(bookId)?.title
 
     fun pause(bookId: Long) {
-        scope.launch { runCatching { pauseNow(bookId) } }
+        scope.launch { runCatching { pauseNow(bookId) }.onFailure { MiruLog.w("downloads", "event=pause-failed bookId=$bookId", it) } }
     }
 
     fun resume(bookId: Long) {
-        scope.launch { runCatching { resumeNow(bookId) } }
+        scope.launch { runCatching { resumeNow(bookId) }.onFailure { MiruLog.w("downloads", "event=resume-failed bookId=$bookId", it) } }
     }
 
     fun retry(bookId: Long) {
-        scope.launch { runCatching { retryNow(bookId) } }
+        scope.launch { runCatching { retryNow(bookId) }.onFailure { MiruLog.w("downloads", "event=retry-failed bookId=$bookId", it) } }
     }
 
     fun cancel(bookId: Long) {
-        scope.launch { runCatching { cancelNow(bookId) } }
+        scope.launch { runCatching { cancelNow(bookId) }.onFailure { MiruLog.w("downloads", "event=cancel-failed bookId=$bookId", it) } }
     }
 
     fun delete(bookId: Long) {
-        scope.launch { runCatching { deleteNow(bookId) } }
+        scope.launch { runCatching { deleteNow(bookId) }.onFailure { MiruLog.w("downloads", "event=delete-failed bookId=$bookId", it) } }
     }
 
     fun deleteChapters(bookUrl: String, indexes: Set<Int>) {
@@ -112,6 +116,8 @@ class DownloadEngine(
         var queued = 0
         var skipped = 0
         var unknown = 0
+        var adopted = 0
+        var cached = 0
         val requestedChapters = ArrayList<ChapterEntity>()
         val pendingTasks = ArrayList<DownloadTaskEntity>()
         val requested = indexes ?: chapters.map { it.idx }
@@ -127,13 +133,21 @@ class DownloadEngine(
             requestedChapters += chapter
             val current = existing[chapter.chapterId]
             if (isStored(kind, chapter.chapterId)) {
-                if (current != null && current.state != DownloadState.COMPLETED.wire) {
-                    pendingTasks += current.copy(
+                if (chapter.downloaded) {
+                    val completed = current?.copy(
                         state = DownloadState.COMPLETED.wire,
                         progress = 1.0,
                         error = null,
                         updatedAt = clock(),
-                    )
+                    ) ?: completedTask(book.bookId, chapter.chapterId, kind, clock())
+                    if (current == null || current.state != DownloadState.COMPLETED.wire) {
+                        pendingTasks += completed
+                        adopted++
+                    }
+                } else {
+                    // Cache-on-read is readable but is not a download: never
+                    // write a download_tasks row for it.
+                    cached++
                 }
                 skipped++
                 return@forEach
@@ -207,8 +221,26 @@ class DownloadEngine(
             translationsAlreadyQueued = translation?.alreadyQueued ?: 0,
             translationsSkipped = (translation?.skippedPages ?: 0) +
                 if (kind == DownloadKind.MANGA) requestedChapters.size else 0,
+            adopted = adopted,
+            cached = cached,
         )
     }
+
+    private fun completedTask(
+        bookId: Long,
+        chapterId: Long,
+        kind: DownloadKind,
+        now: Long,
+    ): DownloadTaskEntity = DownloadTaskEntity(
+        bookId = bookId,
+        chapterId = chapterId,
+        kind = kind.wire,
+        state = DownloadState.COMPLETED.wire,
+        progress = 1.0,
+        error = null,
+        createdAt = now,
+        updatedAt = now,
+    )
 
     suspend fun enqueueNext100Now(
         bookUrl: String,
@@ -219,12 +251,20 @@ class DownloadEngine(
         bookUrl: String,
         count: Int,
         translateAfter: Boolean = false,
-    ): EnqueueResult {
+    ): EnqueueResult = withContext(Dispatchers.IO) {
         val book = store.bookByUrl(bookUrl)
-            ?: return EnqueueResult(reason = EnqueueFailure.BOOK_NOT_SAVED)
-        if (isOfflineBook(book, bookUrl)) return EnqueueResult(reason = EnqueueFailure.LOCAL_BOOK)
+            ?: return@withContext EnqueueResult(reason = EnqueueFailure.BOOK_NOT_SAVED)
+        if (isOfflineBook(book, bookUrl)) {
+            return@withContext EnqueueResult(reason = EnqueueFailure.LOCAL_BOOK)
+        }
         val chapters = loadChapters(book, bookUrl)
-        if (chapters.isEmpty()) return EnqueueResult(reason = EnqueueFailure.NO_CHAPTERS)
+        if (chapters.isEmpty()) {
+            return@withContext EnqueueResult(reason = EnqueueFailure.NO_CHAPTERS)
+        }
+        val kind = kindOf(book)
+        val (adopted, cached) = lockFor(book.bookId).withLock {
+            adoptDownloaded(book, chapters, kind) to countCached(chapters, kind)
+        }
         val snapshot = store.statusSnapshot(book.bookId)
         val indexByChapterId = chapters.associate { it.chapterId to it.idx }
         val active = store.tasks(book.bookId)
@@ -238,9 +278,47 @@ class DownloadEngine(
             count = count,
         )
         if (next.isEmpty()) {
-            return EnqueueResult(skipped = chapters.size)
+            return@withContext EnqueueResult(
+                skipped = chapters.size,
+                adopted = adopted,
+                cached = cached,
+            )
         }
-        return enqueueNow(bookUrl, next, translateAfter)
+        val nested = enqueueNow(bookUrl, next, translateAfter)
+        nested.copy(adopted = adopted + nested.adopted, cached = cached + nested.cached)
+    }
+
+    /** Turns persisted `downloaded` chapters into honest COMPLETED queue rows. */
+    private suspend fun adoptDownloaded(
+        book: BookEntity,
+        chapters: List<ChapterEntity>,
+        kind: DownloadKind,
+    ): Int {
+        val existing = store.tasks(book.bookId).associateBy { it.chapterId }
+        val now = clock()
+        var adopted = 0
+        val tasks = chapters.mapNotNull { chapter ->
+            if (!chapter.downloaded || !isStored(kind, chapter.chapterId)) return@mapNotNull null
+            val current = existing[chapter.chapterId]
+            if (current?.state == DownloadState.COMPLETED.wire) return@mapNotNull null
+            adopted++
+            current?.copy(
+                state = DownloadState.COMPLETED.wire,
+                progress = 1.0,
+                error = null,
+                updatedAt = now,
+            ) ?: completedTask(book.bookId, chapter.chapterId, kind, now)
+        }
+        if (tasks.isNotEmpty()) store.saveTasks(tasks)
+        return adopted
+    }
+
+    /** Cache-on-read bodies are readable but are not downloads. */
+    private suspend fun countCached(
+        chapters: List<ChapterEntity>,
+        kind: DownloadKind,
+    ): Int = chapters.count { chapter ->
+        !chapter.downloaded && isStored(kind, chapter.chapterId)
     }
 
     /**
@@ -263,6 +341,8 @@ class DownloadEngine(
         val candidates = store.tasks(bookId).filter {
             DownloadState.from(it.state) in RUNNABLE_STATES
         }
+        // Batch the chapter lookups once instead of one query per candidate.
+        val chaptersById = store.chapters(bookId).associateBy { it.chapterId }
         log(
             "run-start bookId=$bookId attempt=$attempt candidates=${candidates.size} " +
                 "kind=${kindOf(book).wire}",
@@ -274,7 +354,7 @@ class DownloadEngine(
         var waitingNetwork = false
         for ((position, candidate) in candidates.withIndex()) {
             val taskStarted = System.nanoTime()
-            val chapter = store.chapter(candidate.chapterId)
+            val chapter = chaptersById[candidate.chapterId]
             if (chapter == null) {
                 if (failQueued(candidate, "Chapter record missing")) failed++
                 log(
@@ -411,6 +491,17 @@ class DownloadEngine(
         else -> "done"
     }
 
+    /**
+     * The worker may finish while new QUEUED rows arrived after its snapshot.
+     * Re-arm the unique work instead of leaving those rows without a worker.
+     */
+    suspend fun rearmPending(bookId: Long) {
+        val pending = store.tasks(bookId).any { DownloadState.from(it.state) in RUNNABLE_STATES }
+        if (!pending) return
+        log("action=rearm-pending bookId=$bookId")
+        scheduler.enqueue(bookId)
+    }
+
     suspend fun pauseNow(bookId: Long) = lockFor(bookId).withLock {
         val tasks = store.tasks(bookId)
         var paused = 0
@@ -451,6 +542,33 @@ class DownloadEngine(
         log("action=resume bookId=$bookId queued=$queued")
         notifier?.clearStatus(bookId)
         if (queued > 0) scheduler.enqueue(bookId)
+    }
+
+    /** A default-network callback may re-arm only rows parked by transport. */
+    suspend fun retryWaitingNetwork() {
+        store.activeBookIds().forEach { bookId ->
+            lockFor(bookId).withLock {
+                val tasks = store.tasks(bookId)
+                var queued = 0
+                for (task in tasks) {
+                    if (DownloadState.from(task.state) != DownloadState.WAITING_NETWORK) continue
+                    store.saveTask(
+                        task.copy(
+                            state = DownloadState.QUEUED.wire,
+                            progress = 0.0,
+                            error = null,
+                            updatedAt = clock(),
+                        ),
+                    )
+                    queued++
+                }
+                if (queued > 0) {
+                    log("action=network-retry bookId=$bookId queued=$queued")
+                    notifier?.clearStatus(bookId)
+                    scheduler.enqueue(bookId)
+                }
+            }
+        }
     }
 
     suspend fun retryNow(bookId: Long) = lockFor(bookId).withLock {
@@ -748,7 +866,7 @@ class DownloadEngine(
         chapter: ChapterEntity,
         task: DownloadTaskEntity,
     ): Boolean {
-        val html = provider.downloadChapterText(book.url, chapter.idx)
+        val html = provider.downloadChapterText(book.url, chapter.idx, book.installId)
         if (html.isBlank()) error("Chapter text is empty")
         // File write and row commit share the book lock, so a concurrent
         // delete (or a second writer) cannot interleave them.
@@ -779,7 +897,7 @@ class DownloadEngine(
         chapter: ChapterEntity,
         task: DownloadTaskEntity,
     ): Boolean {
-        val urls = provider.downloadChapterPages(book.url, chapter.idx)
+        val urls = provider.downloadChapterPages(book.url, chapter.idx, book.installId)
         if (urls.isEmpty()) error("Chapter pages are unavailable")
         val paths = ArrayList<String>(urls.size)
         var totalBytes = 0L
@@ -790,7 +908,12 @@ class DownloadEngine(
                 }
                 return false
             }
-            val bytes = fetchPage(book.url, url) ?: error("Page download failed")
+            val bytes = fetchPageWithRetry(book.url, url, task.id) ?: run {
+                lockFor(book.bookId).withLock {
+                    discardUncommittedOutput(book.bookId, chapter.chapterId, task.id)
+                }
+                return false
+            }
             // Page write and the commit/progress update are one locked step;
             // deletion never sees a half-written page set outside the lock.
             var active = true
@@ -835,6 +958,47 @@ class DownloadEngine(
             complete(task)
             true
         }
+    }
+
+    private suspend fun fetchPageWithRetry(
+        bookUrl: String,
+        url: String,
+        taskId: Long,
+    ): ByteArray? {
+        var last: ChapterDownloadException? = null
+        for (attempt in 0 until PAGE_ATTEMPTS) {
+            // A DB-driven stop (pause/cancel/delete) is not coroutine
+            // cancellation: return to processManga so it can discard this
+            // chapter without aborting the whole run.
+            if (!stillRunning(taskId)) return null
+            try {
+                return fetchPage(bookUrl, url)
+                    ?: throw ChapterDownloadException(
+                        ChapterFailureKind.NETWORK,
+                        retryable = true,
+                        message = "Manga page is empty",
+                    )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: ChapterDownloadException) {
+                last = failure
+                if (!failure.retryable || attempt == PAGE_ATTEMPTS - 1) throw failure
+                sleep(PAGE_RETRY_MS[attempt])
+            } catch (failure: Exception) {
+                last = ChapterDownloadException(
+                    ChapterFailureKind.NETWORK,
+                    retryable = true,
+                    message = "Manga page download failed",
+                )
+                if (attempt == PAGE_ATTEMPTS - 1) throw last
+                sleep(PAGE_RETRY_MS[attempt])
+            }
+        }
+        throw last ?: ChapterDownloadException(
+            ChapterFailureKind.NETWORK,
+            retryable = true,
+            message = "Manga page unavailable",
+        )
     }
 
     private suspend fun complete(task: DownloadTaskEntity) {

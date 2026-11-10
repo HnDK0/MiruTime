@@ -64,6 +64,18 @@ class DownloadEngineTest {
     )
 
     @Test
+    fun `rearmPending enqueues only when runnable rows remain`() = runTest {
+        val engine = engine()
+        engine.rearmPending(1)
+        assertTrue(scheduler.enqueued.isEmpty())
+
+        store.addTask(chapterId = 1, state = DownloadState.QUEUED)
+        engine.rearmPending(1)
+
+        assertEquals(listOf(1L), scheduler.enqueued)
+    }
+
+    @Test
     fun `a book deleted during fetch is not committed`() = runTest {
         provider.contents[1] = FakeProvider.Update("<p>Hello</p>")
         provider.onContent = { store.bookRow = null }
@@ -75,6 +87,152 @@ class DownloadEngineTest {
         assertEquals(0, outcome.completed)
         assertTrue(store.bodies.isEmpty())
         assertTrue(store.downloaded.isEmpty())
+    }
+
+    @Test
+    fun `plain download forwards the persisted install id`() = runTest {
+        store.bookRow = testBook().copy(installId = "persisted-a")
+        provider.contents[1] = FakeProvider.Update("<p>Hello</p>")
+        val engine = engine()
+
+        engine.enqueueNow(bookUrl, listOf(1))
+        val outcome = engine.run(1)
+
+        assertEquals(1, outcome.completed)
+        assertEquals(listOf("persisted-a"), provider.downloadSources)
+    }
+
+    @Test
+    fun `manga download forwards the persisted install id`() = runTest {
+        store.bookRow = testBook(contentType = "Manga").copy(installId = "persisted-manga")
+        provider.pageUrls[1] = listOf("https://img.test/1.jpg")
+        val engine = engine(pageFetcher = { _, _ -> byteArrayOf(1, 2, 3) })
+
+        engine.enqueueNow(bookUrl, listOf(1))
+        val outcome = engine.run(1)
+
+        assertEquals(1, outcome.completed)
+        assertEquals(listOf("persisted-manga"), provider.downloadPageSources)
+    }
+
+    @Test
+    fun `a manga page is retried twice before success`() = runTest {
+        store.bookRow = testBook(contentType = "Manga")
+        provider.pageUrls[1] = listOf("https://img.test/1.jpg")
+        var attempts = 0
+        val delays = mutableListOf<Long>()
+        val engine = engine(
+            pageFetcher = { _, _ ->
+                attempts++
+                if (attempts < 3) {
+                    throw ChapterDownloadException(ChapterFailureKind.NETWORK, true, "retry")
+                }
+                byteArrayOf(1, 2, 3)
+            },
+            sleep = { delays += it },
+        )
+
+        engine.enqueueNow(bookUrl, listOf(1))
+        val outcome = engine.run(1)
+
+        assertEquals(1, outcome.completed)
+        assertEquals(3, attempts)
+        assertEquals(listOf(5_000L, 15_000L), delays)
+    }
+
+    @Test
+    fun `a forbidden manga page pauses the source without retrying`() = runTest {
+        store.bookRow = testBook(contentType = "Manga")
+        provider.pageUrls[1] = listOf("https://img.test/1.jpg")
+        var attempts = 0
+        val engine = engine(pageFetcher = { _, _ ->
+            attempts++
+            throw ChapterDownloadException(ChapterFailureKind.AUTH_REQUIRED, false, "403")
+        })
+
+        engine.enqueueNow(bookUrl, listOf(1))
+        val outcome = engine.run(1)
+
+        assertTrue(outcome.needsSourceAction)
+        assertEquals(1, attempts)
+    }
+
+    @Test
+    fun `a network return re-queues only waiting rows`() = runTest {
+        store.bookRow = testBook()
+        val waiting = store.addTask(chapterId = 1, state = DownloadState.WAITING_NETWORK)
+        val failed = store.addTask(chapterId = 2, state = DownloadState.FAILED)
+        val blocked = store.addTask(chapterId = 3, state = DownloadState.NEEDS_SOURCE_ACTION)
+        val engine = engine()
+
+        engine.retryWaitingNetwork()
+
+        assertEquals(DownloadState.QUEUED.wire, store.tasksById.getValue(waiting.id).state)
+        assertEquals(DownloadState.FAILED.wire, store.tasksById.getValue(failed.id).state)
+        assertEquals(
+            DownloadState.NEEDS_SOURCE_ACTION.wire,
+            store.tasksById.getValue(blocked.id).state,
+        )
+        assertTrue(scheduler.enqueued.contains(1L))
+    }
+
+    @Test
+    fun `a stored downloaded chapter is adopted and reported`() = runTest {
+        provider.contents[1] = FakeProvider.Update("<p>Hello</p>")
+        val engine = engine()
+        engine.enqueueNow(bookUrl, listOf(1))
+        engine.run(1)
+        store.tasksById.clear()
+        store.downloaded += 1L
+        store.chapterRows.clear()
+        store.chapterRows += testChapter(1, idx = 1).copy(downloaded = true)
+
+        val result = engine.enqueueNextNow(bookUrl, 100)
+
+        assertEquals(1, result.adopted)
+        assertEquals(0, result.queued)
+        assertEquals(
+            DownloadState.COMPLETED.wire,
+            store.tasksById.values.single().state,
+        )
+
+        val again = engine.enqueueNextNow(bookUrl, 100)
+        assertEquals(0, again.adopted)
+        assertEquals(1, store.tasksById.size)
+    }
+
+    @Test
+    fun `a stale queued row is completed in place instead of duplicated`() = runTest {
+        provider.contents[1] = FakeProvider.Update("<p>Hello</p>")
+        val engine = engine()
+        engine.enqueueNow(bookUrl, listOf(1))
+        engine.run(1)
+        store.tasksById.clear()
+        store.downloaded += 1L
+        store.chapterRows[0] = store.chapterRows[0].copy(downloaded = true)
+        val stale = store.addTask(chapterId = 1, state = DownloadState.QUEUED)
+
+        val result = engine.enqueueNow(bookUrl, listOf(1))
+
+        assertEquals(1, result.adopted)
+        assertEquals(1, store.tasksById.size)
+        assertEquals(DownloadState.COMPLETED.wire, store.tasksById.getValue(stale.id).state)
+    }
+
+    @Test
+    fun `a cache-on-read chapter is not written to download_tasks`() = runTest {
+        provider.contents[1] = FakeProvider.Update("<p>Hello</p>")
+        val engine = engine()
+        engine.enqueueNow(bookUrl, listOf(1))
+        engine.run(1)
+        store.tasksById.clear()
+        store.downloaded.clear()
+        store.chapterRows[0] = store.chapterRows[0].copy(downloaded = false)
+
+        val result = engine.enqueueNow(bookUrl, listOf(1))
+
+        assertEquals(1, result.cached)
+        assertTrue(store.tasksById.isEmpty())
     }
 
     @Test
@@ -150,14 +308,39 @@ class DownloadEngineTest {
     fun `failed manga page leaves no chapter page row`() = runTest {
         store.bookRow = testBook(contentType = "Manga")
         provider.pageUrls[1] = listOf("https://cdn.test/1.jpg")
-        val engine = engine(pageFetcher = { _, _ -> null })
+        var attempts = 0
+        val engine = engine(pageFetcher = { _, _ -> attempts++; null })
 
         engine.enqueueNow(bookUrl, listOf(1))
         val outcome = engine.run(1)
 
-        assertEquals(1, outcome.failed)
+        assertTrue(outcome.waitingNetwork)
+        assertEquals(3, attempts)
         assertTrue(store.pages.isEmpty())
         assertTrue(store.downloaded.isEmpty())
+    }
+
+    @Test
+    fun `a pause during page backoff stops the chapter without cancelling the run`() = runTest {
+        store.bookRow = testBook(contentType = "Manga")
+        provider.pageUrls[1] = listOf("https://cdn.test/1.jpg")
+        var attempts = 0
+        var engine: DownloadEngine? = null
+        engine = engine(
+            pageFetcher = { _, _ ->
+                attempts++
+                throw ChapterDownloadException(ChapterFailureKind.NETWORK, true, "retry")
+            },
+            sleep = { engine!!.pauseNow(1) },
+        )
+
+        engine.enqueueNow(bookUrl, listOf(1))
+        val outcome = engine.run(1)
+
+        assertEquals(1, attempts)
+        assertTrue(store.pages.isEmpty())
+        assertTrue(store.downloaded.isEmpty())
+        assertFalse(outcome.waitingNetwork)
     }
 
     @Test

@@ -120,6 +120,10 @@ data class EnqueueResult(
     val translationsQueued: Int = 0,
     val translationsAlreadyQueued: Int = 0,
     val translationsSkipped: Int = 0,
+    // Already downloaded rows adopted into the queue, and cache-on-read bodies
+    // that are readable but are not downloads. Both explain a "0 queued" toast.
+    val adopted: Int = 0,
+    val cached: Int = 0,
 ) {
     val success: Boolean get() = queued > 0
 }

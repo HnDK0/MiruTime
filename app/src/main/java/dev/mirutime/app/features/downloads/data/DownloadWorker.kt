@@ -1,6 +1,7 @@
 package dev.mirutime.app.features.downloads.data
 
 import android.content.Context
+import android.os.PowerManager
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import dev.mirutime.app.MiruApp
@@ -28,6 +29,16 @@ class DownloadWorker(
         val engine = app.downloadEngine
         val bookId = inputData.getLong(KEY_BOOK_ID, -1L)
         if (bookId <= 0) return Result.failure()
+        // A page queue can outlive the screen; keep the CPU awake so the
+        // WorkManager job actually progresses through its retries in Doze.
+        val wakeLock = (applicationContext.getSystemService(Context.POWER_SERVICE) as? PowerManager)
+            ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MiruTime:download:$bookId")
+            ?.apply {
+                setReferenceCounted(false)
+                acquire(WAKE_LOCK_TIMEOUT_MS)
+            }
+        MiruLog.d("downloads", "wake-lock bookId=$bookId held=${wakeLock?.isHeld == true}")
+        try {
         val title = engine.bookTitle(bookId).orEmpty()
         val progress = engine.progressOf(bookId, null)
         var foreground = try {
@@ -98,6 +109,7 @@ class DownloadWorker(
                     Result.success()
                 }
                 DownloadWorkDecision.DONE -> {
+                    if (outcome.pending > 0) engine.rearmPending(bookId)
                     val resultLabel = if (outcome.failed > 0) "failed-chapters" else "success"
                     when {
                         outcome.needsSourceAction -> notifySourceAction(app, engine, bookId, title)
@@ -151,6 +163,9 @@ class DownloadWorker(
                 Result.failure()
             }
         }
+        } finally {
+            if (wakeLock?.isHeld == true) wakeLock.release()
+        }
     }
 
     private suspend fun notifySourceAction(
@@ -181,6 +196,7 @@ class DownloadWorker(
 
     companion object {
         const val KEY_BOOK_ID = "bookId"
+        private const val WAKE_LOCK_TIMEOUT_MS = 60L * 60L * 1000L
         private const val RETRY_EXHAUSTED = "Retry attempts exhausted"
         private const val NETWORK_WAITING = "No network; retry when connected"
     }

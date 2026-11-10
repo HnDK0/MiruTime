@@ -171,7 +171,8 @@ internal class FakeDownloadStore(
 
     override suspend fun activeBookIds(): List<Long> =
         tasksById.values.filter {
-            DownloadState.from(it.state)?.isActive == true
+            val state = DownloadState.from(it.state)
+            state?.isActive == true || state == DownloadState.WAITING_NETWORK
         }.map { it.bookId }.distinct()
 
     override fun tasksFlow(): Flow<List<DownloadTaskEntity>> =
@@ -228,6 +229,8 @@ internal class FakeProvider : BookDataProvider {
     var pageUrls: MutableMap<Int, List<String>> = mutableMapOf()
     var failures: MutableMap<Int, Throwable> = mutableMapOf()
     val chapterDownloadedCalls = mutableListOf<Triple<String, IntRange, Boolean>>()
+    val downloadSources = mutableListOf<String?>()
+    val downloadPageSources = mutableListOf<String?>()
 
     data class Update(val text: String?, val pages: List<String> = emptyList())
 
@@ -253,6 +256,24 @@ internal class FakeProvider : BookDataProvider {
     override suspend fun chapterPages(bookUrl: String, chapterIndex: Int): List<String> {
         failures[chapterIndex]?.let { throw it }
         return pageUrls[chapterIndex].orEmpty()
+    }
+
+    override suspend fun downloadChapterText(
+        bookUrl: String,
+        chapterIndex: Int,
+        sourceId: String?,
+    ): String {
+        downloadSources += sourceId
+        return super<BookDataProvider>.downloadChapterText(bookUrl, chapterIndex, sourceId)
+    }
+
+    override suspend fun downloadChapterPages(
+        bookUrl: String,
+        chapterIndex: Int,
+        sourceId: String?,
+    ): List<String> {
+        downloadPageSources += sourceId
+        return super<BookDataProvider>.downloadChapterPages(bookUrl, chapterIndex, sourceId)
     }
 
     override suspend fun moveShelf(bookUrl: String, shelfId: String) = Unit

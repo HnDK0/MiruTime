@@ -27,7 +27,7 @@ class LocalDownloadFileStore(private val root: File) : DownloadFileStore {
     }
 
     override fun readText(path: String): String? =
-        runCatching { File(path).takeIf { it.isFile }?.readText() }.getOrNull()
+        runCatching { containedFile(path)?.takeIf { it.isFile }?.readText() }.getOrNull()
 
     override fun writePage(
         bookId: Long,
@@ -48,11 +48,11 @@ class LocalDownloadFileStore(private val root: File) : DownloadFileStore {
         return target.absolutePath
     }
 
-    override fun textExists(path: String): Boolean = File(path).isFile
+    override fun textExists(path: String): Boolean = containedFile(path)?.isFile == true
 
     override fun pagesExist(pagePathsJson: String): Boolean {
         val paths = pagePaths(pagePathsJson)
-        return paths.isNotEmpty() && paths.all { File(it).isFile }
+        return paths.isNotEmpty() && paths.all { containedFile(it)?.isFile == true }
     }
 
     override fun pagePaths(pagePathsJson: String): List<String> = runCatching {
@@ -71,6 +71,18 @@ class LocalDownloadFileStore(private val root: File) : DownloadFileStore {
 
     override fun encodePagePaths(paths: List<String>): String = Json.encodeToString(paths)
 
+    private fun containedFile(path: String): File? {
+        val candidate = runCatching { File(path).canonicalFile }.getOrNull() ?: return null
+        val rootCanonical = root.canonicalFile
+        return if (candidate == rootCanonical ||
+            candidate.path.startsWith(rootCanonical.path + File.separator)
+        ) {
+            File(path)
+        } else {
+            null
+        }
+    }
+
     private fun textFile(bookId: Long, chapterId: Long): File =
         File(root, "text/$bookId/$chapterId.html")
 
@@ -87,6 +99,6 @@ class LocalDownloadFileStore(private val root: File) : DownloadFileStore {
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
     private companion object {
-        val PAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "gif", "avif", "bmp")
+        val PAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp")
     }
 }
