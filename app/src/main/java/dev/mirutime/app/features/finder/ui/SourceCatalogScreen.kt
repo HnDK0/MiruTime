@@ -53,6 +53,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.res.stringResource
@@ -76,13 +79,10 @@ import dev.mirutime.uikit.MiruContentKind
 import dev.mirutime.uikit.MiruRoundIconButton
 import dev.mirutime.uikit.MiruSearchBar
 import dev.mirutime.app.features.book.data.MembershipResult
-import dev.mirutime.app.features.finder.data.CatalogCacheKey
+import dev.mirutime.app.features.finder.data.CatalogSessionRegistry
 import dev.mirutime.app.features.finder.data.FinderDataProvider
-import dev.mirutime.app.features.finder.data.FinderSearchCache
 import dev.mirutime.app.features.finder.domain.CatalogBook
 import dev.mirutime.app.features.finder.domain.CatalogFilters
-import dev.mirutime.app.features.finder.domain.dedupeCatalogBooks
-import dev.mirutime.app.features.finder.domain.setMembership
 import dev.mirutime.app.features.finder.domain.LocalSources
 import dev.mirutime.app.features.finder.domain.PluginFilter
 import dev.mirutime.app.features.finder.domain.shouldShowSearchLanguageHint
@@ -100,6 +100,7 @@ import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.core.api.MiruError
 import dev.mirutime.core.api.Outcome
 import dev.mirutime.core.api.PluginError
+import dev.mirutime.core.log.MiruLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -113,10 +114,13 @@ import kotlin.random.Random
 // error state (Reload / Copy). Long-press on a tile adds or removes the book
 // from the library with a toast; the cover badge shows what is already there.
 @Composable
-fun SourceCatalogScreen(
+internal fun SourceCatalogScreen(
     sourceId: String,
     contentPadding: PaddingValues,
     provider: FinderDataProvider,
+    // Process-wide paging sessions; a visit keeps loading after the screen goes
+    // away, which is what makes "open a book and come back" instant.
+    sessions: CatalogSessionRegistry,
     readerGraph: ReaderGraph,
     // Installed plugin display name for the report; null means id only.
     sourceName: String? = null,
@@ -168,26 +172,18 @@ fun SourceCatalogScreen(
     DisposableEffect(debouncer) {
         onDispose { debouncer.cancel() }
     }
-    // A local catalogue is a live folder scan, never a cached answer: rebuilding
-    // the screen (return from a book) or an explicit refresh rescans the tree.
-    // Plugin catalogues keep the snapshot so backing out of a book is instant.
-    val cacheKey = remember(sourceId, filters) { CatalogCacheKey(sourceId, filters) }
-    val cached = remember(cacheKey) {
-        if (LocalSources.isLocal(sourceId)) null else FinderSearchCache.catalog(cacheKey)
-    }
-    val gridState = rememberLazyGridState(
-        initialFirstVisibleItemIndex = cached?.scrollIndex ?: 0,
-        initialFirstVisibleItemScrollOffset = cached?.scrollOffset ?: 0,
-    )
-    var books by remember(sourceId) { mutableStateOf(cached?.books ?: emptyList()) }
-    var pagesLoaded by remember(sourceId) { mutableIntStateOf(cached?.pagesLoaded ?: 0) }
-    var hasMore by remember(sourceId) { mutableStateOf(cached?.hasMore ?: true) }
-    var loading by remember(sourceId) { mutableStateOf(cached == null) }
-    var error by remember(sourceId) { mutableStateOf<String?>(null) }
-    var pluginFailure by remember(sourceId) { mutableStateOf<PluginRequestException?>(null) }
+    // The session owns paging beyond the composition: opening a book does not
+    // cancel the page that is already in flight.
+    val session = remember(sourceId, filters) { sessions.get(sourceId, filters) }
+    val pageState by session.state.collectAsState()
+    val books = pageState.books
+    val loading = pageState.loading
+    val hasMore = pageState.hasMore
+    val error = pageState.error
+    val pluginFailure = pageState.failure
+    val gridState = rememberLazyGridState()
     var reloadTick by remember(sourceId) { mutableIntStateOf(0) }
-    // Bumped on every restart so a late page of the OLD query is dropped.
-    var generation by remember(sourceId) { mutableIntStateOf(0) }
+    var scrollRestored by remember(sourceId, filters) { mutableStateOf(false) }
     var sheetOpen by remember(sourceId) { mutableStateOf(false) }
     var foldersOpen by remember(sourceId) { mutableStateOf(false) }
     var history by remember(sourceId) { mutableStateOf(AppSettings.searchHistoryFor(sourceId)) }
@@ -207,22 +203,41 @@ fun SourceCatalogScreen(
     // Catalogue rows are not persisted: a repaired cover URL lives here so a
     // disposed tile reopens with the fixed art instead of the failed one.
     val coverFixes = remember(sourceId) { mutableStateMapOf<String, String>() }
-    // Persist the snapshot (incl. scroll) when the screen leaves composition.
-    DisposableEffect(cacheKey) {
+    // The session survives navigation; only the screen's activation changes.
+    LaunchedEffect(session) {
+        session.activate()
+        session.ensureLoaded()
+    }
+    DisposableEffect(session) {
         onDispose {
-            if (!LocalSources.isLocal(sourceId) && books.isNotEmpty()) {
-                FinderSearchCache.putCatalog(
-                    cacheKey,
-                    FinderSearchCache.CatalogSnapshot(
-                        books = books,
-                        pagesLoaded = pagesLoaded,
-                        hasMore = hasMore,
-                        scrollIndex = gridState.firstVisibleItemIndex,
-                        scrollOffset = gridState.firstVisibleItemScrollOffset,
-                        storedAt = System.currentTimeMillis(),
-                    ),
-                )
+            val loaded = session.state.value.books
+            session.saveScroll(
+                loaded.getOrNull(bookIndexFromGridIndex(gridState.firstVisibleItemIndex))?.bookUrl,
+                gridState.firstVisibleItemScrollOffset,
+            )
+            session.deactivate()
+        }
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(session, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> session.activate()
+                Lifecycle.Event.ON_STOP -> session.deactivate()
+                else -> Unit
             }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    // Restore the position that belonged to this session before a return.
+    LaunchedEffect(books.size, scrollRestored) {
+        if (!scrollRestored && books.isNotEmpty()) {
+            val index = session.scrollIndex(books)
+            if (index > 0) {
+                gridState.scrollToItem(gridIndexForBookIndex(index), session.scrollOffset())
+            }
+            scrollRestored = true
         }
     }
 
@@ -262,44 +277,8 @@ fun SourceCatalogScreen(
         schemaLoading = false
     }
 
-    // First page: a new query/filters/reload restarts the list; a cache hit
-    // (back from a book) keeps the seeded page and skips the fetch. Local
-    // sources always take the fetch branch.
-    LaunchedEffect(sourceId, filters, reloadTick) {
-        if (!LocalSources.isLocal(sourceId) &&
-            reloadTick == 0 &&
-            FinderSearchCache.catalog(cacheKey)?.books?.isNotEmpty() == true
-        ) {
-            // Restored from cache (back from a book): the list is already on
-            // screen. Clear the flag too — a superseded loadMore may have left
-            // it set, which made the next filter request spin forever.
-            loading = false
-            return@LaunchedEffect
-        }
-        generation++
-        loading = true
-        error = null
-        pluginFailure = null
-        books = emptyList()
-        hasMore = true
-        pagesLoaded = 0
-        try {
-            val result = provider.page(sourceId, filters, 1)
-            books = dedupeCatalogBooks(result.books)
-            hasMore = result.hasMore
-            pagesLoaded = 1
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: PluginRequestException) {
-            pluginFailure = e
-        } catch (e: Exception) {
-            error = e.message ?: e.toString()
-        }
-        loading = false
-    }
-
     // Lazy backfill for entries the listing returned without any cover, the
-    // NoveLA pattern: one source call per item, two at a time and staggered,
+    // NoveLA pattern: one source call per item, one at a time and staggered,
     // with the result landing in the reactive map read inside the tile. The
     // workers belong to the query generation, not to the list object: paging
     // and membership flips must not cancel them.
@@ -307,13 +286,18 @@ fun SourceCatalogScreen(
     val coverInflight = remember(sourceId, filters, reloadTick) { mutableSetOf<String>() }
     LaunchedEffect(sourceId, filters, reloadTick) {
         if (isLocal) return@LaunchedEffect
-        val gate = Semaphore(2)
-        snapshotFlow { books }.collect { list ->
+        // One request at a time: the plugin serializes all calls on a single
+        // Lua mutex, so two cover workers would starve paging and book opens.
+        val gate = Semaphore(1)
+        snapshotFlow {
+            pageState.books to (pageState.active && !pageState.loading)
+        }.collect { (list, allowed) ->
             val urls = list.mapTo(HashSet()) { it.bookUrl }
             // A query change must forget both the repairs and the "already
             // asked" marks of URLs that left the result set.
             coverDone.retainAll(urls)
             coverFixes.keys.retainAll(urls)
+            if (!allowed) return@collect
             list.forEach { book ->
                 val url = book.bookUrl
                 if (!book.coverUrl.isNullOrBlank()) return@forEach
@@ -328,8 +312,14 @@ fun SourceCatalogScreen(
                         }
                     } catch (e: CancellationException) {
                         throw e
-                    } catch (_: Exception) {
-                        // A source hiccup is not a reason to kill the batch.
+                    } catch (e: Exception) {
+                        // A source hiccup is not a reason to kill the batch, but
+                        // it must not vanish: type only, never the URL.
+                        MiruLog.w(
+                            "finder",
+                            "catalog cover backfill failed source=${MiruLog.idHash(sourceId)} " +
+                                "error=${e.javaClass.simpleName}",
+                        )
                     } finally {
                         coverInflight.remove(url)
                         // Success and failure both count as done: a URL that
@@ -345,10 +335,11 @@ fun SourceCatalogScreen(
     // is reverted only when the data layer reports a real failure.
     fun toggleMembership(book: CatalogBook) {
         val key = book.bookKey
+        val url = book.bookUrl
         if (key in membershipPending) return
         val target = !book.inLibrary
         membershipPending = membershipPending + key
-        books = books.setMembership(key, target)
+        session.updateBook(url) { it.copy(inLibrary = target) }
         scope.launch {
             val result = try {
                 provider.setInLibrary(key, target)
@@ -359,15 +350,13 @@ fun SourceCatalogScreen(
             }
             membershipPending = membershipPending - key
             if (result.success) {
-                books = books.map {
-                    if (it.bookKey != key) {
-                        it
-                    } else {
-                        // The optimistic setMembership already carries the
-                        // committed inLibrary/badge; a local add only clears
-                        // the "not imported" mark.
-                        it.copy(notImported = if (isLocal && target) false else it.notImported)
-                    }
+                // The optimistic flip already carries the committed state; a
+                // local add only clears the "not imported" mark.
+                session.updateBook(url) {
+                    it.copy(
+                        inLibrary = target,
+                        notImported = if (isLocal && target) false else it.notImported,
+                    )
                 }
                 val message = when {
                     result.fileCleanupFailed -> R.string.book_library_cleanup_failed
@@ -377,7 +366,7 @@ fun SourceCatalogScreen(
                 onLibraryChanged()
                 Toast.makeText(context, resources.getString(message), Toast.LENGTH_SHORT).show()
             } else {
-                books = books.setMembership(key, !target)
+                session.updateBook(url) { it.copy(inLibrary = !target) }
                 Toast.makeText(
                     context,
                     resources.getString(R.string.book_library_update_failed),
@@ -387,43 +376,16 @@ fun SourceCatalogScreen(
         }
     }
 
-    val loadMore: () -> Unit = {
-        if (!loading && error == null && pluginFailure == null && hasMore && pagesLoaded > 0) {
-            val mine = generation
-            val next = pagesLoaded + 1
-            loading = true
-            scope.launch {
-                try {
-                    val result = provider.page(sourceId, filters, next)
-                    if (mine == generation) {
-                        books = dedupeCatalogBooks(books + result.books)
-                        hasMore = result.hasMore
-                        pagesLoaded = next
-                    }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: PluginRequestException) {
-                    if (mine == generation) pluginFailure = e
-                } catch (e: Exception) {
-                    if (mine == generation) error = e.message ?: e.toString()
-                }
-                if (mine == generation) loading = false
-            }
-        }
-    }
+    val loadMore: () -> Unit = { session.requestNext() }
 
     // One retry path for both a typed plugin failure and a generic error.
     fun retryList() {
-        error = null
-        pluginFailure = null
         debouncer.cancel()
         if (input != filters.query) {
             // Flush a typed query: restart the list on it.
             filters = filters.copy(query = input)
-        } else if (books.isEmpty()) {
-            reloadTick++
         } else {
-            loadMore()
+            session.retry()
         }
     }
 
@@ -534,7 +496,7 @@ fun SourceCatalogScreen(
                         MiruRoundIconButton(
                             icon = Icons.Filled.Refresh,
                             contentDescription = stringResource(R.string.finder_local_refresh_cd),
-                            onClick = { reloadTick++ },
+                            onClick = { reloadTick++; session.refresh(force = true) },
                         )
                         MiruRoundIconButton(
                             icon = Icons.Filled.Folder,
@@ -567,7 +529,7 @@ fun SourceCatalogScreen(
                     book = shown,
                     importing = false,
                     error = null,
-                    onClick = { onBookOpen(book.bookKey) },
+                    onClick = { session.deactivate(); onBookOpen(book.bookKey) },
                     onLongClick = { toggleMembership(book) },
                     inLibrary = book.inLibrary,
                     kind = if (LocalSources.kindOf(sourceId) == "manga") {
@@ -585,7 +547,7 @@ fun SourceCatalogScreen(
                     style = catalogStyle,
                     compactInfo = true,
                     showTypeChip = false,
-                    onOpen = { onBookOpen(book.bookKey) },
+                    onOpen = { session.deactivate(); onBookOpen(book.bookKey) },
                     onLongPress = { toggleMembership(book) },
                     membership = book.badge?.toMiruBadge(),
                     onRetry = {
@@ -749,7 +711,7 @@ fun SourceCatalogScreen(
             provider = provider,
             onClose = { foldersOpen = false },
             // Every folder change is a scan change: reload the live catalogue.
-            onCatalogChanged = { reloadTick++ },
+            onCatalogChanged = { reloadTick++; session.refresh(force = true) },
         )
     }
 }
@@ -864,3 +826,8 @@ private fun filterSchemaErrorMessage(
         sourceName = sourceName,
         operation = "filters",
     ).detailText
+
+// The grid's first slot is the search bar; books start after it.
+internal fun bookIndexFromGridIndex(gridIndex: Int): Int = (gridIndex - 1).coerceAtLeast(0)
+
+internal fun gridIndexForBookIndex(bookIndex: Int): Int = bookIndex + 1

@@ -43,20 +43,10 @@ object FinderSearchCache {
             get() = done >= total && results.none { it.books.isNotEmpty() }
     }
 
-    data class CatalogSnapshot(
-        val books: List<CatalogBook>,
-        val pagesLoaded: Int,
-        val hasMore: Boolean,
-        val scrollIndex: Int,
-        val scrollOffset: Int,
-        val storedAt: Long = System.currentTimeMillis(),
-    )
-
     // shortcut: one process-wide singleton instead of a ViewModel/repository;
     // hoist to a ViewModel when search state must outlive navigation or be
     // testable in isolation.
     private var global: GlobalSnapshot? = null
-    private val catalog = LinkedHashMap<CatalogCacheKey, CatalogSnapshot>()
 
     fun global(key: String, now: Long = System.currentTimeMillis()): GlobalSnapshot? =
         global?.takeIf {
@@ -67,28 +57,8 @@ object FinderSearchCache {
         global = snapshot
     }
 
-    fun catalog(key: CatalogCacheKey, now: Long = System.currentTimeMillis()): CatalogSnapshot? {
-        val snapshot = catalog[key] ?: return null
-        if (!AppCacheConfig.isFresh(snapshot.storedAt, AppCacheConfig.CATALOG_CACHE_TTL_MS, now)) {
-            // Drop expired entries instead of letting every lookup pay for them.
-            catalog.remove(key)
-            return null
-        }
-        return snapshot
-    }
-
-    fun putCatalog(key: CatalogCacheKey, snapshot: CatalogSnapshot) {
-        // Bound the map: typing filters the catalogue live, so one entry per
-        // keystroke would pile up; keep only the most recent.
-        if (key !in catalog && catalog.size >= AppCacheConfig.CATALOG_CACHE_MAX_ENTRIES) {
-            catalog.remove(catalog.keys.first())
-        }
-        catalog[key] = snapshot
-    }
-
     fun clear() {
         global = null
-        catalog.clear()
     }
 }
 
