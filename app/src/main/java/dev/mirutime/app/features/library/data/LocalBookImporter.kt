@@ -6,6 +6,7 @@ import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import dev.mirutime.core.api.ContentType
 import dev.mirutime.core.api.getOrNull
+import dev.mirutime.core.log.MiruLog
 import dev.mirutime.core.host.FileSystem
 import dev.mirutime.core.local.CbzFileReader
 import dev.mirutime.core.local.ComicInfoMeta
@@ -13,6 +14,12 @@ import dev.mirutime.core.local.EpubFileReader
 import dev.mirutime.core.local.Fb2FileReader
 import dev.mirutime.core.local.LocalChapter
 import dev.mirutime.core.local.parseComicInfo
+import dev.mirutime.app.features.finder.data.ScannedNode
+import dev.mirutime.app.features.finder.data.collectMangaChapters
+import dev.mirutime.app.features.finder.data.firstComicInfoUri
+import dev.mirutime.app.features.local.data.MAX_LOCAL_SCAN_DEPTH
+import dev.mirutime.app.features.local.data.PageImageExtensions
+import dev.mirutime.app.features.local.data.naturalSortKey
 import dev.mirutime.data.library.BookEntity
 import dev.mirutime.data.library.BookTagEntity
 import dev.mirutime.data.library.ChapterBodyEntity
@@ -68,24 +75,6 @@ internal enum class LocalImportFormat(
 internal fun localCopyPath(format: LocalImportFormat, sha256: String): String =
     "local_books/${format.installId}/$sha256.${format.extension}"
 
-// ── image-folder layout (pure, unit-testable) ───────────────────────────────
-
-internal val PageImageExtensions = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp")
-
-internal data class FolderTree(
-    val name: String,
-    val files: List<String> = emptyList(),
-    val dirs: List<FolderTree> = emptyList(),
-)
-
-internal sealed interface FolderLayout {
-    data class SingleChapter(val pages: List<String>) : FolderLayout
-    data class ChapterDirs(val chapters: List<FolderChapter>) : FolderLayout
-    data object None : FolderLayout
-}
-
-internal data class FolderChapter(val name: String, val pages: List<String>)
-
 // One CBZ archive is one manga chapter; the stage keeps every page path in
 // natural order and its first page as the cover.
 internal data class CbzPageStage(
@@ -138,41 +127,6 @@ internal fun stageCbzPages(
     return CbzPageStage(paths = paths, totalBytes = totalBytes, coverBytes = cover)
 }
 
-internal fun isPageImageName(name: String): Boolean {
-    val base = name.substringAfterLast('/').substringAfterLast('\\')
-    if (base.startsWith(".") || base.startsWith("._")) return false
-    val lower = base.lowercase()
-    // Thumbnail caches are not pages.
-    if (lower.contains("thumb")) return false
-    return lower.substringAfterLast('.', "") in PageImageExtensions
-}
-
-internal fun naturalSortKey(name: String): String =
-    name.replace(Regex("\\d+")) { it.value.padStart(12, '0') }
-
-internal fun naturalCompare(a: String, b: String): Int =
-    naturalSortKey(a).compareTo(naturalSortKey(b))
-
-internal fun isChapterDirName(name: String): Boolean {
-    val base = name.substringAfterLast('/').substringAfterLast('\\')
-    if (base.startsWith(".")) return false
-    return !base.lowercase().contains("thumb")
-}
-
-internal fun detectFolderLayout(root: FolderTree): FolderLayout {
-    // Chapter subdirectories win over a stray root cover.jpg/ComicInfo.xml.
-    val chapters = root.dirs
-        .filter { isChapterDirName(it.name) }
-        .mapNotNull { dir ->
-            val pages = dir.files.filter(::isPageImageName).sortedWith(compareBy(::naturalSortKey))
-            if (pages.isEmpty()) null else FolderChapter(dir.name, pages)
-        }
-        .sortedWith { a, b -> naturalCompare(a.name, b.name) }
-    if (chapters.isNotEmpty()) return FolderLayout.ChapterDirs(chapters)
-    val rootPages = root.files.filter(::isPageImageName).sortedWith(compareBy(::naturalSortKey))
-    return if (rootPages.isEmpty()) FolderLayout.None else FolderLayout.SingleChapter(rootPages)
-}
-
 // Only the basename is used in app storage; separators/traversal prefixes are
 // stripped and unsafe names get a deterministic fallback.
 internal fun safePageName(name: String, fallback: String): String {
@@ -183,18 +137,13 @@ internal fun safePageName(name: String, fallback: String): String {
     return base
 }
 
-internal fun folderTitle(comic: ComicInfoMeta?, folderName: String): String =
-    comic?.displayTitle?.takeIf { it.isNotBlank() }
-        ?: folderName.takeIf { it.isNotBlank() }
-        ?: "Untitled"
-
 internal fun folderAuthor(comic: ComicInfoMeta?): String =
     listOfNotNull(
         comic?.author?.takeIf { it.isNotBlank() },
         comic?.artist?.takeIf { it.isNotBlank() },
     ).distinct().joinToString(", ").ifBlank { "Unknown" }
 
-private const val MAX_TREE_DEPTH = 8
+private const val MAX_TREE_DEPTH = MAX_LOCAL_SCAN_DEPTH
 private const val MAX_COMIC_INFO_BYTES = 512L * 1024
 
 // Streamed per-file cap; the source is never materialized as one ByteArray.
@@ -325,17 +274,36 @@ private data class SafDir(
     val files: List<SafFile> = emptyList(),
     val dirs: List<SafDir> = emptyList(),
 ) {
-    fun toTree(): FolderTree = FolderTree(
+    // The importer shares the catalogue's chapter walker; ScannedNode keeps the
+    // SAF document URI so archives and pages stay addressable.
+    fun toScannedNode(): ScannedNode = ScannedNode(
+        uri = "",
+        documentId = name,
         name = name,
-        files = files.map { it.name },
-        dirs = dirs.map { it.toTree() },
+        isDirectory = true,
+        children = files.map {
+            ScannedNode(
+                uri = it.uri.toString(),
+                documentId = it.name,
+                name = it.name,
+                isDirectory = false,
+            )
+        } + dirs.map { it.toScannedNode() },
     )
+
+    fun findFile(uri: String): SafFile? {
+        files.firstOrNull { it.uri.toString() == uri }?.let { return it }
+        for (dir in dirs) {
+            dir.findFile(uri)?.let { return it }
+        }
+        return null
+    }
 }
 
 private data class ChapterPlan(
     val title: String,
-    val pages: List<SafFile>,
-    val comic: ComicInfoMeta?,
+    val pages: List<SafFile> = emptyList(),
+    val archive: SafFile? = null,
 )
 
 /**
@@ -726,37 +694,22 @@ class LocalBookImporter(
         val rootId = documentId ?: rootDocumentId(uri)
         val rootName = treeRootName(uri, rootId)
         val root = walkTree(uri, rootId, rootName, depth = 0)
-        val layout = detectFolderLayout(root.toTree())
-        if (layout is FolderLayout.None) {
-            // A directory of CBZ archives is a multi-chapter manga folder: it
-            // has no image layout but is still readable without copying SAF.
-            return importCbzSetTree(
-                root = root,
-                rootName = rootName,
-                sourceDocumentUri = documentUri(uri, rootId).toString(),
-                addToLibrary = addToLibrary,
-            )
-        }
+        val units = collectMangaChapters(root.toScannedNode())
+        if (units.isEmpty()) return null
 
-        val rootComic = readComicInfo(root)
-        val chapters = when (layout) {
-            is FolderLayout.SingleChapter -> listOf(
-                ChapterPlan(
-                    title = rootName.ifBlank { "Chapter 1" },
-                    pages = pageFiles(root, layout.pages),
-                    comic = rootComic,
-                ),
-            )
-            is FolderLayout.ChapterDirs -> layout.chapters.map { chapter ->
-                val dir = root.dirs.firstOrNull { it.name == chapter.name }
-                ChapterPlan(
-                    title = dir?.let { readComicInfo(it)?.displayTitle } ?: chapter.name,
-                    pages = dir?.let { pageFiles(it, chapter.pages) }.orEmpty(),
-                    comic = dir?.let(::readComicInfo),
-                )
+        // Root ComicInfo wins; many libraries keep it inside the first chapter
+        // folder, so fall back to the first one found in the tree.
+        val comic = readComicInfo(root)
+            ?: firstComicInfoUri(root.toScannedNode())?.let { readComicInfo(it) }
+        val chapters = units.mapNotNull { unit ->
+            val archiveUri = unit.archiveUri
+            if (archiveUri != null) {
+                root.findFile(archiveUri)?.let { ChapterPlan(title = unit.title, archive = it) }
+            } else {
+                val pages = unit.pages.mapNotNull(root::findFile)
+                if (pages.isEmpty()) null else ChapterPlan(title = unit.title, pages = pages)
             }
-            FolderLayout.None -> return null
-        }.filter { it.pages.isNotEmpty() }
+        }
         if (chapters.isEmpty()) return null
 
         var job = ImportJobEntity(
@@ -774,27 +727,64 @@ class LocalBookImporter(
             val digest = MessageDigest.getInstance("SHA-256")
             var totalBytes = 0L
             val stagedChapters = chapters.mapIndexed { chapterIndex, chapter ->
-                var chapterBytes = 0L
-                val paths = chapter.pages.mapIndexed { pageIndex, page ->
-                    val bytes = resolver.openInputStream(page.uri)?.use { readLimited(it, MAX_PAGE_BYTES) }
-                        ?: throw IllegalStateException("Cannot read ${page.name}")
-                    if (bytes.isEmpty()) throw IllegalStateException("Empty page: ${page.name}")
-                    totalBytes += bytes.size
-                    if (totalBytes > MAX_FOLDER_BYTES) throw IllegalStateException("Folder too large")
-                    digest.update("$chapterIndex:${page.name}\u0000".encodeToByteArray())
-                    digest.update(bytes)
-                    val extension = page.name.substringAfterLast('.', "").lowercase()
-                        .takeIf { it in PageImageExtensions } ?: "jpg"
-                    val safe = safePageName(page.name, "page-${pageIndex + 1}.$extension")
-                    val path = "$stagingRoot/chapters/${chapterIndex + 1}/" +
-                        "${(pageIndex + 1).toString().padStart(5, '0')}-$safe"
-                    fileSystem.write(path, bytes)
-                    if (!fileSystem.exists(path)) throw IllegalStateException("Cannot copy ${page.name}")
-                    staged += path
-                    chapterBytes += bytes.size
-                    path
+                val archive = chapter.archive
+                if (archive != null) {
+                    val temp = File(context.applicationContext.cacheDir, "local-cbz-${newId()}.tmp")
+                    try {
+                        val known = fileSize(archive.uri)
+                        if (known != null && known > maxBytes) {
+                            throw IllegalStateException("File too large ($known bytes)")
+                        }
+                        val (sha, size) = copyToTemp(archive.uri, temp)
+                        digest.update("$chapterIndex:${archive.name}:$sha\u0000".encodeToByteArray())
+                        totalBytes += size
+                        if (totalBytes > MAX_FOLDER_BYTES) {
+                            throw IllegalStateException("Folder too large")
+                        }
+                        CbzFileReader(temp).use { reader ->
+                            val stage = stageCbzPages(
+                                bookDir = stagingRoot,
+                                imageNames = reader.imageNames.sortedWith(compareBy(::naturalSortKey)),
+                                readPage = reader::readPage,
+                                fileSystem = fileSystem,
+                                chapterIndex = chapterIndex + 1,
+                            )
+                            staged += stage.paths
+                            StagedChapter(
+                                title = chapter.title,
+                                paths = stage.paths,
+                                bytes = stage.totalBytes,
+                            )
+                        }
+                    } finally {
+                        temp.delete()
+                    }
+                } else {
+                    var chapterBytes = 0L
+                    val paths = chapter.pages.mapIndexed { pageIndex, page ->
+                        val bytes = resolver.openInputStream(page.uri)
+                            ?.use { readLimited(it, MAX_PAGE_BYTES) }
+                            ?: throw IllegalStateException("Cannot read ${page.name}")
+                        if (bytes.isEmpty()) throw IllegalStateException("Empty page: ${page.name}")
+                        totalBytes += bytes.size
+                        if (totalBytes > MAX_FOLDER_BYTES) throw IllegalStateException("Folder too large")
+                        digest.update("$chapterIndex:${page.name}\u0000".encodeToByteArray())
+                        digest.update(bytes)
+                        val extension = page.name.substringAfterLast('.', "").lowercase()
+                            .takeIf { it in PageImageExtensions } ?: "jpg"
+                        val safe = safePageName(page.name, "page-${pageIndex + 1}.$extension")
+                        val path = "$stagingRoot/chapters/${chapterIndex + 1}/" +
+                            "${(pageIndex + 1).toString().padStart(5, '0')}-$safe"
+                        fileSystem.write(path, bytes)
+                        if (!fileSystem.exists(path)) {
+                            throw IllegalStateException("Cannot copy ${page.name}")
+                        }
+                        staged += path
+                        chapterBytes += bytes.size
+                        path
+                    }
+                    StagedChapter(title = chapter.title, paths = paths, bytes = chapterBytes)
                 }
-                StagedChapter(title = chapter.title, paths = paths, bytes = chapterBytes)
             }
             val sha256 = digest.digest().joinToString("") { "%02x".format(it) }
             update(job, progress = 0.55)
@@ -835,8 +825,9 @@ class LocalBookImporter(
             staged.clear()
             update(job, progress = 0.75)
 
-            val comic = rootComic ?: chapters.firstNotNullOfOrNull { it.comic }
-            val title = folderTitle(comic, rootName)
+            // A local manga book is named after its folder; ComicInfo Title
+            // belongs to a chapter and never names the book.
+            val title = rootName.ifBlank { "Manga folder" }
             val author = folderAuthor(comic)
             val genres = comic?.genres.orEmpty()
             val timestamp = now()
@@ -938,206 +929,6 @@ class LocalBookImporter(
         }
     }
 
-    // A CBZ set is a folder of archives: one archive = one chapter. Pages are
-    // copied into the same app-private layout as image folders, so the reader
-    // does not care how the manga arrived. Source SAF bytes are never modified.
-    private suspend fun importCbzSetTree(
-        root: SafDir,
-        rootName: String,
-        sourceDocumentUri: String,
-        addToLibrary: Boolean,
-    ): LocalImportResult? {
-        val cbzFiles = root.files
-            .filter { it.name.lowercase().endsWith(".cbz") }
-            .sortedWith { a, b -> naturalCompare(a.name, b.name) }
-        if (cbzFiles.isEmpty()) return null
-
-        var job = ImportJobEntity(
-            kind = LocalMangaInstallId,
-            status = "RUNNING",
-            progress = 0.05,
-            createdAt = now(),
-        )
-        job = job.copy(id = library.saveImportJob(job))
-        val stagingRoot = "local_books/$LocalMangaInstallId/.import-${newId()}"
-        val staged = mutableListOf<String>()
-        var finalRoot: String? = null
-        var createdBookId: Long? = null
-        data class CbzChapter(val title: String, val paths: List<String>, val bytes: Long, val cover: ByteArray?)
-        try {
-            val digest = MessageDigest.getInstance("SHA-256")
-            var totalBytes = 0L
-            val chapters = cbzFiles.mapIndexed { chapterIndex, cbz ->
-                val temp = File(context.applicationContext.cacheDir, "local-cbz-${newId()}.tmp")
-                try {
-                    val known = fileSize(cbz.uri)
-                    if (known != null && known > maxBytes) {
-                        throw IllegalStateException("File too large ($known bytes)")
-                    }
-                    val (sha, size) = copyToTemp(cbz.uri, temp)
-                    digest.update("$chapterIndex:${cbz.name}:$sha\u0000".encodeToByteArray())
-                    totalBytes += size
-                    if (totalBytes > MAX_FOLDER_BYTES) throw IllegalStateException("Folder too large")
-                    CbzFileReader(temp).use { reader ->
-                        val names = reader.imageNames.sortedWith(compareBy(::naturalSortKey))
-                        val stage = stageCbzPages(
-                            bookDir = stagingRoot,
-                            imageNames = names,
-                            readPage = reader::readPage,
-                            fileSystem = fileSystem,
-                            chapterIndex = chapterIndex + 1,
-                        )
-                        staged += stage.paths
-                        val title = reader.title
-                            .takeIf { it.isNotBlank() && it != "Unknown Title" }
-                            ?: cbz.name.substringBeforeLast('.').ifBlank { "Chapter ${chapterIndex + 1}" }
-                        CbzChapter(
-                            title = title,
-                            paths = stage.paths,
-                            bytes = stage.totalBytes,
-                            cover = stage.coverBytes,
-                        )
-                    }
-                } finally {
-                    temp.delete()
-                }
-            }
-            update(job, progress = 0.55)
-            val sha256 = digest.digest().joinToString("") { "%02x".format(it) }
-
-            val existing = library.localBookFileBySha(sha256)
-            val existingBook = existing?.let { library.book(it.bookId) }
-            if (existingBook != null) {
-                if (addToLibrary && !existingBook.inLibrary) {
-                    library.addToLibrary(existingBook.bookId, now())
-                }
-                staged.forEach { runCatching { fileSystem.delete(it) } }
-                staged.clear()
-                deleteTree(stagingRoot)
-                update(job, progress = 1.0, status = "COMPLETE")
-                return LocalImportResult.Success(
-                    bookId = existingBook.bookId,
-                    bookUrl = existingBook.url,
-                    title = existingBook.title,
-                    duplicate = true,
-                )
-            }
-
-            finalRoot = "local_books/$LocalMangaInstallId/$sha256"
-            deleteTree(finalRoot)
-            val finalChapters = chapters.mapIndexed { index, chapter ->
-                val chapterDir = "$finalRoot/chapters/${index + 1}"
-                val paths = chapter.paths.mapIndexed { pageIndex, stagedPath ->
-                    val fileName = stagedPath.substringAfterLast('/')
-                    val finalPath = "$chapterDir/$fileName"
-                    if (fileSystem.exists(finalPath)) fileSystem.delete(finalPath)
-                    fileSystem.rename(stagedPath, finalPath)
-                    if (!fileSystem.exists(finalPath)) throw IllegalStateException("Cannot move $finalPath")
-                    finalPath
-                }
-                chapter.copy(paths = paths)
-            }
-            deleteTree(stagingRoot)
-            staged.clear()
-            update(job, progress = 0.75)
-
-            val timestamp = now()
-            val bookUrl = "local://${newId()}"
-            val title = rootName.ifBlank { "Manga folder" }
-            val bookId = library.saveBook(
-                BookEntity(
-                    installId = LocalMangaInstallId,
-                    url = bookUrl,
-                    title = title,
-                    author = "Unknown",
-                    coverUrl = null,
-                    contentType = "Manga",
-                    rating = 0.0,
-                    shelfId = "reading",
-                    totalChapters = finalChapters.size,
-                    inLibrary = localImportMembership(addToLibrary, timestamp).inLibrary,
-                    addedAt = timestamp,
-                    updatedAt = timestamp,
-                    lastReadAt = null,
-                    lastChapterId = null,
-                    lastChapterIndex = null,
-                    chapterListHash = null,
-                    lastUpdateAt = null,
-                    genresJson = "[]",
-                    firstSeenAt = timestamp,
-                    addedToLibraryAt = localImportMembership(addToLibrary, timestamp).addedToLibraryAt,
-                    authorRaw = "",
-                    authorsJson = "[]",
-                    description = "",
-                    metadataSource = "LOCAL",
-                    metadataUpdatedAt = timestamp,
-                ),
-            )
-            createdBookId = bookId
-            library.saveLocalBookFile(
-                LocalBookFileEntity(
-                    bookId = bookId,
-                    uri = sourceDocumentUri,
-                    displayName = title,
-                    format = "CBZ",
-                    mime = null,
-                    sizeBytes = totalBytes,
-                    sha256 = sha256,
-                    copyPath = finalRoot,
-                    parserVersion = FolderParserVersion,
-                    importedAt = timestamp,
-                ),
-            )
-            val savedChapters = library.replaceChapters(
-                bookId = bookId,
-                seeds = finalChapters.mapIndexed { index, chapter ->
-                    ChapterSeed(
-                        index = index + 1,
-                        url = LocalBookProvider.chapterUrl(bookUrl, index + 1),
-                        title = chapter.title,
-                    )
-                },
-                at = timestamp,
-            )
-            val byIndex = savedChapters.associateBy { it.idx }
-            finalChapters.forEachIndexed { index, chapter ->
-                val chapterId = byIndex[index + 1]?.chapterId ?: return@forEachIndexed
-                library.saveChapterPage(
-                    ChapterPageEntity(
-                        chapterId = chapterId,
-                        format = "images",
-                        pagePathsJson = JSONArray(chapter.paths).toString(),
-                        totalBytes = chapter.bytes,
-                        parserVersion = FolderParserVersion,
-                    ),
-                )
-            }
-            runCatching {
-                finalChapters.firstOrNull()?.cover?.let { bytes ->
-                    coverStore?.storeLocalCover(bookId, remoteUrl = null, bytes)
-                }
-            }
-            update(job, progress = 1.0, status = "COMPLETE")
-            return LocalImportResult.Success(
-                bookId = bookId,
-                bookUrl = bookUrl,
-                title = title,
-                duplicate = false,
-            )
-        } catch (e: CancellationException) {
-            withContext(NonCancellable) {
-                cleanupFolderImport(createdBookId, staged, stagingRoot, finalRoot)
-                update(job, progress = 0.0, status = "FAILED", error = "Cancelled")
-            }
-            throw e
-        } catch (e: Exception) {
-            cleanupFolderImport(createdBookId, staged, stagingRoot, finalRoot)
-            val message = e.message ?: e::class.simpleName ?: "CBZ set import failed"
-            update(job, progress = 0.0, status = "FAILED", error = message)
-            return LocalImportResult.Failure(message)
-        }
-    }
-
     private suspend fun cleanupFolderImport(
         bookId: Long?,
         staged: List<String>,
@@ -1161,11 +952,6 @@ class LocalBookImporter(
         val paths: List<String>,
         val bytes: Long,
     )
-
-    private fun pageFiles(dir: SafDir, names: List<String>): List<SafFile> {
-        val byName = dir.files.associateBy { it.name }
-        return names.mapNotNull { byName[it] }
-    }
 
     private fun treeRootName(uri: Uri, documentId: String): String =
         displayName(documentUri(uri, documentId))
@@ -1207,7 +993,11 @@ class LocalBookImporter(
         name: String,
         depth: Int,
     ): SafDir {
-        if (depth > MAX_TREE_DEPTH) return SafDir(name)
+        if (depth > MAX_TREE_DEPTH) {
+            // The cut branch would otherwise vanish from the imported book.
+            MiruLog.w("local", "import tree truncated at depth=$depth")
+            return SafDir(name)
+        }
         val files = mutableListOf<SafFile>()
         val dirs = mutableListOf<SafDir>()
         val projection = arrayOf(
@@ -1245,6 +1035,12 @@ class LocalBookImporter(
                 ?.let(::parseComicInfo)
         }.getOrNull()
     }
+
+    private fun readComicInfo(documentUri: String): ComicInfoMeta? = runCatching {
+        resolver.openInputStream(Uri.parse(documentUri))
+            ?.use { readLimited(it, MAX_COMIC_INFO_BYTES) }
+            ?.let(::parseComicInfo)
+    }.getOrNull()
 
     private fun deleteTree(path: String) {
         fileSystem.list(path).forEach { child -> deleteTree(child) }

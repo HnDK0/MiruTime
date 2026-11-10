@@ -774,6 +774,19 @@ interface LibraryDao {
         pipelineVersion: String,
     ): ChapterTranslationEntity?
 
+    @Query(
+        "SELECT * FROM chapter_translations WHERE chapterId = :chapterId " +
+            "AND source = :source AND target = :target AND provider = :provider " +
+            "AND UPPER(status) = 'COMPLETE' " +
+            "ORDER BY updatedAt DESC, translationId DESC LIMIT 1",
+    )
+    suspend fun latestCompleteChapterTranslation(
+        chapterId: Long,
+        source: String,
+        target: String,
+        provider: String,
+    ): ChapterTranslationEntity?
+
     // Progress wins over the book row's denormalized lastChapterId; both are
     // optional, so an untouched book returns no row.
     @Query(
@@ -1197,6 +1210,9 @@ interface LibraryDao {
     @Query("SELECT * FROM local_book_files WHERE bookId = :bookId")
     suspend fun localBookFile(bookId: Long): LocalBookFileEntity?
 
+    @Query("DELETE FROM local_book_files WHERE bookId = :bookId")
+    suspend fun deleteLocalBookFile(bookId: Long)
+
     // Live local catalogue: match a scanned SAF document URI to the book that
     // was already imported from it. URI is the stable scan identity.
     @Query("SELECT * FROM local_book_files WHERE uri = :uri LIMIT 1")
@@ -1249,8 +1265,9 @@ interface LibraryDao {
 
     // --- local backup selection ---------------------------------------------
 
-    // Only library books from the two local installs own files the backup has
-    // to carry. History-only copies and plugin books stay out of the archive.
+    // Only novel installs own files the backup has to carry. Manga pages and
+    // video files are deliberately excluded: the archive keeps their metadata
+    // but not the heavy content. History-only copies and plugin books stay out.
     @Query(
         """
         SELECT b.bookId AS bookId, b.installId AS installId, b.title AS title,
@@ -1260,7 +1277,7 @@ interface LibraryDao {
         INNER JOIN local_book_files l ON l.bookId = b.bookId
         LEFT JOIN book_covers c ON c.bookId = b.bookId
         WHERE b.inLibrary = 1
-            AND b.installId IN ('local-books', 'local-manga')
+            AND b.installId = 'local-books'
         ORDER BY b.bookId
         """,
     )
@@ -1273,7 +1290,7 @@ interface LibraryDao {
         INNER JOIN chapters c ON c.chapterId = cb.chapterId
         INNER JOIN books b ON b.bookId = c.bookId
         WHERE b.inLibrary = 1
-            AND b.installId IN ('local-books', 'local-manga')
+            AND b.installId = 'local-books'
         """,
     )
     suspend fun localBackupBodyPaths(): List<LocalBackupPathRow>
@@ -1294,17 +1311,39 @@ interface LibraryDao {
     )
     suspend fun localBackupCovers(): List<LocalBackupCoverRow>
 
+    // Manga content is not backed up. After restore, rows whose files are gone
+    // must stop claiming the chapter is downloaded; the app supplies the
+    // filesystem predicate because this module has no File API.
     @Query(
         """
-        SELECT c.bookId AS bookId, cp.pagePathsJson AS pathsJson
+        SELECT cp.chapterId AS chapterId, cp.pagePathsJson AS pagePathsJson
         FROM chapter_pages cp
         INNER JOIN chapters c ON c.chapterId = cp.chapterId
         INNER JOIN books b ON b.bookId = c.bookId
-        WHERE b.inLibrary = 1
-            AND b.installId IN ('local-books', 'local-manga')
         """,
     )
-    suspend fun localBackupPagePaths(): List<LocalBackupPageRow>
+    suspend fun restorePageRows(): List<RestorePageRow>
+
+    @Query(
+        """
+        SELECT cb.chapterId AS chapterId, cb.path AS path
+        FROM chapter_bodies cb
+        INNER JOIN chapters c ON c.chapterId = cb.chapterId
+        INNER JOIN books b ON b.bookId = c.bookId
+        WHERE b.installId = 'local-manga'
+        """,
+    )
+    suspend fun localMangaBodyRows(): List<LocalMangaBodyRow>
+
+    @Query(
+        """
+        SELECT l.bookId AS bookId, l.copyPath AS copyPath
+        FROM local_book_files l
+        INNER JOIN books b ON b.bookId = l.bookId
+        WHERE b.installId = 'local-manga'
+        """,
+    )
+    suspend fun localMangaFileRows(): List<LocalMangaFileRow>
 
     // Legacy rows without copyPath still own page files. Normal imports derive
     // their valid folder name from copyPath, so parsing every page JSON on each

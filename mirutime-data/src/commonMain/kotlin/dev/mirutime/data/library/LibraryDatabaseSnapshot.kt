@@ -36,6 +36,23 @@ fun createDatabaseSnapshot(
 suspend fun pruneHistoryOnlyBooks(
     targetPath: String,
     expectedSchemaVersion: Int = LibrarySchemaVersion,
+) = pruneBooks(targetPath, "inLibrary = 0", expectedSchemaVersion)
+
+/**
+ * Drops local-manga books from a snapshot. Manga page files are never packed,
+ * so a restored row would keep a book with no readable content. FK cascades
+ * remove chapters and every dependent row; the standalone FTS row is removed
+ * explicitly. The result is re-verified.
+ */
+suspend fun pruneLocalMangaBooks(
+    targetPath: String,
+    expectedSchemaVersion: Int = LibrarySchemaVersion,
+) = pruneBooks(targetPath, "installId = 'local-manga'", expectedSchemaVersion)
+
+private suspend fun pruneBooks(
+    targetPath: String,
+    predicate: String,
+    expectedSchemaVersion: Int,
 ) {
     var removed = 0
     BundledSQLiteDriver().open(targetPath).use { connection ->
@@ -44,7 +61,7 @@ suspend fun pruneHistoryOnlyBooks(
             currentCoroutineContext().ensureActive()
             connection.execute(
                 "DELETE FROM books WHERE bookId IN (" +
-                    "SELECT bookId FROM books WHERE inLibrary = 0 LIMIT $PRUNE_CHUNK)",
+                    "SELECT bookId FROM books WHERE $predicate LIMIT $PRUNE_CHUNK)",
             )
             val changes = connection.changes()
             removed += changes
@@ -67,6 +84,49 @@ private fun SQLiteConnection.changes(): Int =
     prepare("SELECT changes()").use { statement ->
         if (statement.step()) statement.getInt(0) else 0
     }
+
+/**
+ * Books a snapshot actually contains: every row, and the in-library ones.
+ * Counts taken from the live database before pruning overstate an archive after
+ * local-manga rows are dropped.
+ */
+fun snapshotBookCounts(databasePath: String): Pair<Int, Int> =
+    BundledSQLiteDriver().open(databasePath).use { connection ->
+        fun count(sql: String): Int =
+            connection.prepare(sql).use { statement ->
+                if (statement.step()) statement.getInt(0) else 0
+            }
+        count("SELECT COUNT(*) FROM books") to
+            count("SELECT COUNT(*) FROM books WHERE inLibrary = 1")
+    }
+
+/**
+ * Old->new book ids between a staged snapshot and the live database, matched by
+ * the book identity the importer merges on (installId + raw URL). Used by the
+ * journalless crash recovery, where the file mapping was never written: without
+ * it a cover cannot be placed, because its target path carries the new book id.
+ */
+fun restoreBookIdMap(stagedPath: String, livePath: String): Map<Long, Long> {
+    val staged = HashMap<Pair<String, String>, Long>()
+    BundledSQLiteDriver().open(stagedPath).use { connection ->
+        connection.prepare("SELECT bookId, installId, url FROM books").use { statement ->
+            while (statement.step()) {
+                staged[statement.getText(1) to statement.getText(2)] = statement.getLong(0)
+            }
+        }
+    }
+    if (staged.isEmpty()) return emptyMap()
+    val map = LinkedHashMap<Long, Long>()
+    BundledSQLiteDriver().open(livePath).use { connection ->
+        connection.prepare("SELECT bookId, installId, url FROM books").use { statement ->
+            while (statement.step()) {
+                val old = staged[statement.getText(1) to statement.getText(2)] ?: continue
+                map[old] = statement.getLong(0)
+            }
+        }
+    }
+    return map
+}
 
 private const val PRUNE_CHUNK = 500
 

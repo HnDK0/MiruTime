@@ -59,6 +59,7 @@ suspend fun LibraryDatabase.importLibraryBackup(
     journalNow: Long = 0L,
     onBookKeyRewritten: suspend (oldUrl: String, newUrl: String) -> Unit = { _, _ -> },
     repair: suspend () -> Unit = {},
+    onCommitted: suspend (LibraryImportReport) -> Unit = {},
 ): LibraryImportReport {
     val rewrites = mutableListOf<Pair<String, String>>()
     val report = withWriteTransaction {
@@ -72,6 +73,10 @@ suspend fun LibraryDatabase.importLibraryBackup(
             rewrites = rewrites,
         )
     }
+    // The transaction is durable now. Tell the caller before any post-commit
+    // work (repair/FTS) so a cancellation there cannot be mistaken for a
+    // failed import and roll back committed files.
+    onCommitted(report)
     // Settings writes are not part of the DB transaction: apply them only after
     // a successful commit. Cancellation is never swallowed.
     rewrites.forEach { (oldUrl, newUrl) ->

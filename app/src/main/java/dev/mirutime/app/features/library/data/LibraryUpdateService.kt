@@ -4,6 +4,7 @@ import dev.mirutime.data.library.BookEntity
 import dev.mirutime.data.library.LibraryRepository
 import dev.mirutime.data.library.libraryBookKey
 import dev.mirutime.core.api.PluginError
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.coroutineScope
@@ -55,16 +56,18 @@ class LibraryUpdateService(
         val gate = Semaphore(maxConcurrency.coerceAtLeast(1))
         val total = books.size
         val done = java.util.concurrent.atomic.AtomicInteger(0)
-        var checked = 0
-        var updated = 0
-        var failed = 0
+        val checked = AtomicInteger(0)
+        val updated = AtomicInteger(0)
+        val failed = AtomicInteger(0)
         val firstError = AtomicReference<UpdateResult.Failed?>(null)
-        onProgress(UpdateProgress(0, total, ""))
+        val progressLock = Any()
+        fun report(progress: UpdateProgress) = synchronized(progressLock) { onProgress(progress) }
+        report(UpdateProgress(0, total, ""))
         coroutineScope {
             books.forEach { row ->
                 launch {
                     gate.withPermit {
-                        onProgress(UpdateProgress(done.get(), total, row.title))
+                        report(UpdateProgress(done.get(), total, row.title))
                         when (val result = check(
                             row.bookId,
                             row.url,
@@ -73,26 +76,26 @@ class LibraryUpdateService(
                             row.installId,
                         )) {
                             is UpdateResult.Failed -> {
-                                failed++
+                                failed.incrementAndGet()
                                 firstError.compareAndSet(null, result)
                             }
-                            UpdateResult.NoChange -> checked++
+                            UpdateResult.NoChange -> checked.incrementAndGet()
                             is UpdateResult.Updated -> {
-                                checked++
-                                updated++
+                                checked.incrementAndGet()
+                                updated.incrementAndGet()
                             }
                         }
                         val completed = done.incrementAndGet()
-                        onProgress(UpdateProgress(completed, total, row.title))
+                        report(UpdateProgress(completed, total, row.title))
                     }
                 }
             }
         }
         val first = firstError.get()
         return UpdateCheckSummary(
-            checked = checked,
-            updated = updated,
-            failed = failed,
+            checked = checked.get(),
+            updated = updated.get(),
+            failed = failed.get(),
             firstError = first?.error,
             firstErrorSource = first?.takeIf { it.error != null }?.sourceId,
         )

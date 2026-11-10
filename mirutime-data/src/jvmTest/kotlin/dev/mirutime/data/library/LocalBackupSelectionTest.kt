@@ -8,7 +8,6 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class LocalBackupSelectionTest {
@@ -32,7 +31,7 @@ class LocalBackupSelectionTest {
     }
 
     @Test
-    fun `only in-library local books and their files are selected`() = runTest {
+    fun `only in-library novel books are selected for file backup`() = runTest {
         val novelId = localNovel()
         val mangaId = localMangaFolder()
         val outOfLibraryId = book("local://out", "local-books", inLibrary = false).let { row ->
@@ -48,8 +47,12 @@ class LocalBackupSelectionTest {
 
         val selected = repository.localBackupBooks()
 
-        assertEquals(setOf(novelId, mangaId), selected.map { it.bookId }.toSet())
-        assertTrue(selected.none { it.bookId == outOfLibraryId || it.bookId == pluginId })
+        assertEquals(setOf(novelId), selected.map { it.bookId }.toSet())
+        assertTrue(
+            selected.none {
+                it.bookId == mangaId || it.bookId == outOfLibraryId || it.bookId == pluginId
+            },
+        )
 
         val novel = selected.first { it.bookId == novelId }
         assertEquals("local_books/local-books/novel.epub", novel.copyPath)
@@ -59,13 +62,32 @@ class LocalBackupSelectionTest {
             listOf("local_books/local-books/novel/chapters/1.html"),
             novel.bodyPaths,
         )
-        assertEquals(listOf("""["local_books/local-books/novel/pages/1/00001.jpg"]"""), novel.pagePathsJson)
+    }
 
-        val manga = selected.first { it.bookId == mangaId }
-        assertEquals("local_books/local-manga/folder", manga.copyPath)
-        assertNull(manga.coverLocalPath)
-        assertEquals(emptyList(), manga.bodyPaths)
-        assertEquals(listOf("""["local_books/local-manga/folder/chapters/1/00001.jpg"]"""), manga.pagePathsJson)
+    @Test
+    fun `restore prune queries separate pages from manga-only rows`() = runTest {
+        val novelId = localNovel()
+        val mangaId = localMangaFolder()
+        val novelChapter = db.libraryDao().chapters(novelId).single().chapterId
+        val mangaChapter = db.libraryDao().chapters(mangaId).single().chapterId
+        repository.saveChapterBody(
+            ChapterBodyEntity(
+                chapterId = mangaChapter,
+                format = "html",
+                path = "local_books/local-manga/folder/chapters/1/00001.html",
+                bytes = 5,
+                sha256 = "manga-body",
+                fetchedAt = 1L,
+            ),
+        )
+
+        val pages = db.libraryDao().restorePageRows()
+        assertEquals(setOf(novelChapter, mangaChapter), pages.map { it.chapterId }.toSet())
+        assertEquals(
+            listOf(mangaChapter),
+            db.libraryDao().localMangaBodyRows().map { it.chapterId },
+        )
+        assertEquals(listOf(mangaId), db.libraryDao().localMangaFileRows().map { it.bookId })
     }
 
     private suspend fun localNovel(): Long {

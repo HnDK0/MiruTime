@@ -1,5 +1,6 @@
 package dev.mirutime.app.features.library.data
 
+import dev.mirutime.app.features.local.data.naturalSortKey
 import dev.mirutime.app.features.reader.document.ReaderDocument
 import dev.mirutime.app.features.reader.document.mangaPages
 import dev.mirutime.core.reader.html.ReaderHtmlParser

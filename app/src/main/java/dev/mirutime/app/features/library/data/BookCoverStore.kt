@@ -10,6 +10,8 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -37,16 +39,23 @@ class BookCoverStore(
 
     // Valid file fast path: never touch the network. Callers use this before
     // enqueueing a backfill so already-covered books cost one stat.
-    suspend fun localCoverUrl(bookId: Long): String? {
+    suspend fun localCoverUrl(bookId: Long): String? = withContext(Dispatchers.IO) {
         val row = runCatching { load(bookId) }.getOrNull()
-        return localCoverUrl(bookId, row)
+        val file = validLocal(bookId, row) ?: return@withContext null
+        coverUri(file, row?.sha256)
     }
 
-    // Batch variant: the caller already loaded every book_covers row, so this
-    // only stats the file (no per-book DB query).
+    // Batch variant: the caller already loaded every book_covers row. List
+    // screens run on the UI thread, so trust the persisted row here instead of
+    // stat-ing every file; the suspend variant above does the file check on IO.
     fun localCoverUrl(bookId: Long, row: BookCoverEntity?): String? {
-        val file = validLocal(bookId, row) ?: return null
-        return coverUri(file, row?.sha256)
+        val stored = row?.localPath
+            ?.takeIf { it.isNotBlank() && (row.bytes ?: 0L) > 0L }
+            ?.let(::File)
+            ?: return null
+        // No file stat here: list screens run on Main. The stored size is the
+        // version fallback when a legacy row has no sha256.
+        return coverUri(stored, row.sha256, row.bytes ?: 0L)
     }
 
     // A dead remote URL (404/410/transport/invalid body) is worth one repair:
@@ -271,10 +280,15 @@ class BookCoverStore(
     // The fragment is the Coil cache key: a repaired file gets a new one even
     // though the path never changes. Devices where Coil ignores file-URI
     // fragments are covered by renaming — VERIFY, see plan.
-    private fun coverUri(file: File, sha256: String?): String {
+    private fun coverUri(file: File, sha256: String?): String =
+        coverUri(file, sha256, file.length())
+
+    private fun coverUri(file: File, sha256: String?, sizeFallback: Long): String {
         val version = sha256?.takeIf { it.length >= SHA_PREFIX }?.take(SHA_PREFIX)
-            ?: file.length().toString()
-        return "${file.toURI()}#v=$version"
+            ?: sizeFallback.toString()
+        // File.toURI() stats the path (isDirectory); list screens run on Main.
+        val uri = java.net.URI("file", null, file.absolutePath, null).toASCIIString()
+        return "$uri#v=$version"
     }
 
     private fun validLocal(bookId: Long, row: BookCoverEntity?): File? {

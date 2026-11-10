@@ -59,7 +59,7 @@ class LocalBookProvider(
             return stored.map { Chapter(title = it.title, url = it.url) }
         }
         val (source, path) = resolve(bookUrl) ?: return null
-        val parsed = source.chapters(path).getOrNull() ?: return null
+        val parsed = withContext(Dispatchers.IO) { source.chapters(path).getOrNull() } ?: return null
         return parsed.mapIndexed { position, chapter ->
             Chapter(title = chapter.title, url = chapterUrl(bookUrl, position + 1))
         }
@@ -81,7 +81,7 @@ class LocalBookProvider(
                     bookUrl = bookUrl,
                     chapterIndex = index,
                     title = chapterRow?.title ?: "Chapter $index",
-                    html = file.readText(),
+                    html = withContext(Dispatchers.IO) { file.readText() },
                     chapterUrl = chapterUrl,
                     source = ChapterSource.IMPORTED_DB_BODY,
                     chapterId = chapterRow?.chapterId,
@@ -108,17 +108,22 @@ class LocalBookProvider(
         }
         val (source, path) = resolve(bookUrl) ?: return null
         if (path.endsWith(".cbz")) {
-            val chapters = source.chapters(path).getOrNull() ?: return null
+            val chapters = withContext(Dispatchers.IO) { source.chapters(path).getOrNull() } ?: return null
             val parserChapter = chapters.getOrNull(index - 1) ?: return null
-            val parsed = source.chapterContent("", parserChapter.url).getOrNull()
+            val parsed = withContext(Dispatchers.IO) {
+                source.chapterContent("", parserChapter.url).getOrNull()
+            }
             if (parsed !is CoreChapterContent.Pages) return null
             val pageDir = "${path.substringBeforeLast('.')}/pages/$index"
             val inlinePages = parsed.pageUrls.mapIndexedNotNull { pageIndex, pageUrl ->
-                val bytes = source.pageBytes(pageUrl) ?: return@mapIndexedNotNull null
+                val bytes = withContext(Dispatchers.IO) { source.pageBytes(pageUrl) }
+                    ?: return@mapIndexedNotNull null
                 val extension = pageUrl.substringAfter('#').substringAfterLast('.', "jpg")
                 val pagePath = "$pageDir/$pageIndex.$extension"
-                fileSystem.write(pagePath, bytes)
-                if (!fileSystem.exists(pagePath)) return@mapIndexedNotNull null
+                withContext(Dispatchers.IO) { fileSystem.write(pagePath, bytes) }
+                if (!withContext(Dispatchers.IO) { fileSystem.exists(pagePath) }) {
+                    return@mapIndexedNotNull null
+                }
                 InlinePage(position = pageIndex, url = File(baseDir, pagePath).toURI().toString())
             }
             if (inlinePages.isEmpty()) return null
@@ -135,7 +140,9 @@ class LocalBookProvider(
 
         // Pre-release data is always imported, so a missing body only remains
         // reachable for unexpected files; parse text without lazy image writes.
-        val parsedChapter = source.localChapterAt(path, index - 1) ?: return null
+        val parsedChapter = withContext(Dispatchers.IO) {
+            source.localChapterAt(path, index - 1)
+        } ?: return null
         return ChapterContent(
             bookUrl = bookUrl,
             chapterIndex = index,

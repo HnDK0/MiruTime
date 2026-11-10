@@ -9,6 +9,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import kotlinx.coroutines.test.runTest
 
 class LibraryDatabaseSnapshotTest {
     private val tempDirs = mutableListOf<File>()
@@ -65,9 +66,106 @@ class LibraryDatabaseSnapshotTest {
         }
     }
 
+    @Test
+    fun `local manga books are pruned from the snapshot`() = runTest {
+        val dir = tempDir()
+        val live = File(dir, "live.db")
+        val snapshot = File(dir, "snapshot-manga.db")
+        val db = buildLibraryDatabase(libraryDatabaseBuilder(live))
+        try {
+            val repository = LibraryRepository(db.libraryDao())
+            val novel = repository.saveBook(book("local://novel", "local-books"))
+            repository.replaceChapters(
+                novel,
+                listOf(ChapterSeed(1, "local://novel#1", "One")),
+                at = 1L,
+            )
+            val manga = repository.saveBook(book("local://manga", "local-manga"))
+            repository.replaceChapters(
+                manga,
+                listOf(ChapterSeed(1, "local://manga#1", "One")),
+                at = 1L,
+            )
+        } finally {
+            db.close()
+        }
+
+        createDatabaseSnapshot(live.absolutePath, snapshot.absolutePath)
+        pruneLocalMangaBooks(snapshot.absolutePath)
+
+        BundledSQLiteDriver().open(snapshot.absolutePath).use { connection ->
+            assertEquals(1, connection.long("SELECT COUNT(*) FROM books"))
+            assertEquals(1, connection.long("SELECT COUNT(*) FROM chapters"))
+            assertEquals("local-books", connection.text("SELECT installId FROM books"))
+            assertEquals(1, connection.long("SELECT COUNT(*) FROM book_search"))
+        }
+        // The manifest must describe the snapshot, not the live database.
+        assertEquals(1 to 1, snapshotBookCounts(snapshot.absolutePath))
+    }
+
+    @Test
+    fun `book id map joins the staged snapshot to the live database`() = runTest {
+        val dir = tempDir()
+        val staged = File(dir, "staged-identity.db")
+        val live = File(dir, "live-identity.db")
+
+        val stagedDb = buildLibraryDatabase(libraryDatabaseBuilder(staged))
+        try {
+            stagedDb.libraryDao().upsertBook(book("https://a/book", "plugin-a"))
+        } finally {
+            stagedDb.close()
+        }
+        val liveDb = buildLibraryDatabase(libraryDatabaseBuilder(live))
+        try {
+            // A different install with the same URL must not match, and an
+            // earlier row shifts the target id.
+            liveDb.libraryDao().upsertBook(book("https://a/book", "plugin-b"))
+            liveDb.libraryDao().upsertBook(book("https://a/book", "plugin-a"))
+        } finally {
+            liveDb.close()
+        }
+
+        val map = restoreBookIdMap(staged.absolutePath, live.absolutePath)
+
+        assertEquals(mapOf(1L to 2L), map)
+    }
+
     private fun tempDir(): File =
         Files.createTempDirectory("mirutime-db-snapshot").toFile().also { tempDirs += it }
 }
+
+private fun book(url: String, installId: String) = BookEntity(
+    installId = installId,
+    url = url,
+    title = "Book",
+    author = "Author",
+    coverUrl = null,
+    contentType = "Novel",
+    rating = 0.0,
+    shelfId = "reading",
+    totalChapters = 1,
+    inLibrary = true,
+    addedAt = 1L,
+    updatedAt = 1L,
+    lastReadAt = null,
+    lastChapterId = null,
+    lastChapterIndex = null,
+    chapterListHash = null,
+    lastUpdateAt = null,
+    genresJson = "[]",
+)
+
+private fun SQLiteConnection.long(sql: String): Long =
+    prepare(sql).use { statement ->
+        check(statement.step()) { "no row for: $sql" }
+        statement.getLong(0)
+    }
+
+private fun SQLiteConnection.text(sql: String): String =
+    prepare(sql).use { statement ->
+        check(statement.step()) { "no row for: $sql" }
+        statement.getText(0)
+    }
 
 private fun SQLiteConnection.execute(sql: String) {
     prepare(sql).use { it.step() }

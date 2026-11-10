@@ -20,6 +20,8 @@ import dev.mirutime.data.library.LibraryRepository
 import dev.mirutime.data.library.ShelfEntity
 import java.net.URI
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 // Library screen's real data source: shelves and books come from the Room
 // library store, read flags from chapter_read. Ranks follow the DAO order
@@ -378,7 +380,11 @@ class RoomLibraryDataProvider(
     // provider only aggregates the per-file outcomes for the UI toast.
     override suspend fun importFiles(files: List<PickedImportFile>): ImportSummary {
         val importer = importer ?: return ImportSummary(failures = files.size)
-        return summarizeImports(files.map { importer.import(it.documentUri()) })
+        // The UI entry point is a composition scope (Main); copy/hash/parse
+        // must not run there.
+        return withContext(Dispatchers.IO) {
+            summarizeImports(files.map { importer.import(it.documentUri()) })
+        }
     }
 
     private data class LibraryBatch(

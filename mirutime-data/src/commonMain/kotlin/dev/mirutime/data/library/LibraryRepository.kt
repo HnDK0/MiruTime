@@ -1143,7 +1143,6 @@ class LibraryRepository(
         val rows = dao.localBackupBooks()
         if (rows.isEmpty()) return emptyList()
         val bodies = dao.localBackupBodyPaths().groupBy({ it.bookId }, { it.path })
-        val pages = dao.localBackupPagePaths().groupBy({ it.bookId }, { it.pathsJson })
         return rows.map { row ->
             LocalBackupBook(
                 bookId = row.bookId,
@@ -1154,7 +1153,6 @@ class LibraryRepository(
                 format = row.format,
                 coverLocalPath = row.coverLocalPath,
                 bodyPaths = bodies[row.bookId].orEmpty(),
-                pagePathsJson = pages[row.bookId].orEmpty(),
             )
         }
     }
@@ -1355,6 +1353,23 @@ class LibraryRepository(
         provider = provider,
         promptHash = promptHash,
         pipelineVersion = pipelineVersion,
+    )
+
+    /**
+     * Latest COMPLETE translation for a chapter/language pair/provider, even
+     * when the source text or prompt changed. The reader uses this as the
+     * fallback when the original cannot be loaded.
+     */
+    suspend fun latestCompleteChapterTranslation(
+        chapterId: Long,
+        source: String,
+        target: String,
+        provider: String,
+    ): ChapterTranslationEntity? = dao.latestCompleteChapterTranslation(
+        chapterId = chapterId,
+        source = source,
+        target = target,
+        provider = provider,
     )
 
     suspend fun chapterTranslationQueueRows(bookId: Long): List<ChapterTranslationQueueRow> =

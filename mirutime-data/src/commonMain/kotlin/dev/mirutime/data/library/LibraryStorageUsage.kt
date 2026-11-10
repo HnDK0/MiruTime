@@ -143,7 +143,6 @@ data class LocalBackupBook(
     val format: String,
     val coverLocalPath: String?,
     val bodyPaths: List<String>,
-    val pagePathsJson: List<String>,
 )
 
 // Room projections; aliases match the query columns.
@@ -158,6 +157,12 @@ data class LocalBackupBookRow(
 )
 
 data class LocalBackupPathRow(val bookId: Long, val path: String)
+
+// Rows that point at manga content. Restore prunes only those whose files are
+// absent, so a same-device restore keeps working downloads.
+data class RestorePageRow(val chapterId: Long, val pagePathsJson: String)
+data class LocalMangaBodyRow(val chapterId: Long, val path: String)
+data class LocalMangaFileRow(val bookId: Long, val copyPath: String)
 // Every in-library cover that has a local file. Unlike LocalBackupBook this
 // deliberately includes plugin books: a user-override cover is user data, not
 // a cache entry, and must survive a clean restore.
