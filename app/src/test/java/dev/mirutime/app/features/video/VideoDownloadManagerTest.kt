@@ -1,21 +1,32 @@
 package dev.mirutime.app.features.video
 
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.offline.Download
+import dev.mirutime.app.features.video.data.ChapterDownloadRow
 import dev.mirutime.app.features.video.data.VideoDownloadAction
 import dev.mirutime.app.features.video.data.VideoDownloadData
+import dev.mirutime.app.features.video.data.VideoDownloadItem
 import dev.mirutime.app.features.video.data.VideoDownloadMeta
 import dev.mirutime.app.features.video.data.VideoDownloadState
 import dev.mirutime.app.features.video.data.VideoDownloaderKind
+import dev.mirutime.app.features.video.data.hasConflictingDownload
 import dev.mirutime.app.features.video.data.isCancellableVideoState
 import dev.mirutime.app.features.video.data.isPausableVideoState
+import dev.mirutime.app.features.video.data.mergeDownloadItems
+import dev.mirutime.app.features.video.data.replaceableChapterDownloadIds
+import dev.mirutime.app.features.video.data.sameBookIdentity
 import dev.mirutime.app.features.video.data.videoDownloadActions
 import dev.mirutime.app.features.video.data.videoDownloadId
 import dev.mirutime.app.features.video.data.videoDownloadState
 import dev.mirutime.app.features.video.data.videoDownloaderKind
+import dev.mirutime.data.library.libraryBookKey
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+@UnstableApi
 class VideoDownloadManagerTest {
 
     @Test
@@ -129,12 +140,111 @@ class VideoDownloadManagerTest {
     }
 
     @Test
-    fun `download ids keep book and episode distinct`() {
-        val one = videoDownloadId("https://a/book", "https://a/1.m3u8")
-        val two = videoDownloadId("https://a/book", "https://a/2.m3u8")
-        val otherBook = videoDownloadId("https://b/book", "https://a/1.m3u8")
+    fun `book identity keeps two installs apart and accepts a legacy raw url`() {
+        val first = libraryBookKey("plugin-a", "https://a/book")
+        val second = libraryBookKey("plugin-b", "https://a/book")
+
+        assertTrue(sameBookIdentity(first, first))
+        assertFalse(sameBookIdentity(first, second))
+        // Rows written before route keys carry the raw URL.
+        assertTrue(sameBookIdentity(first, "https://a/book"))
+        assertTrue(sameBookIdentity("https://a/book", first))
+        assertFalse(sameBookIdentity(first, "https://a/other"))
+    }
+
+    @Test
+    fun `download ids key the episode, not the stream url`() {
+        val one = videoDownloadId("https://a/book", 1)
+        val two = videoDownloadId("https://a/book", 2)
+        val otherBook = videoDownloadId("https://b/book", 1)
 
         assertTrue(one != two)
         assertTrue(one != otherBook)
+        // A quality switch or a rotated CDN token must reuse the same row.
+        assertEquals(one, videoDownloadId("https://a/book", 1))
     }
+
+    @Test
+    fun `a completed episode survives another live download`() {
+        val completed = item(7, VideoDownloadState.Completed, 1f)
+        val active = item(8, VideoDownloadState.Downloading, 0.3f)
+
+        val merged = mergeDownloadItems(stored = listOf(completed), live = listOf(active))
+
+        assertEquals(2, merged.size)
+        assertEquals(VideoDownloadState.Completed, merged.first { it.chapterIndex == 7 }.state)
+        assertEquals(VideoDownloadState.Downloading, merged.first { it.chapterIndex == 8 }.state)
+    }
+
+    @Test
+    fun `live state and progress win over the stored row`() {
+        val stored = item(8, VideoDownloadState.Queued, 0f)
+        val live = item(8, VideoDownloadState.Downloading, 0.5f)
+
+        val merged = mergeDownloadItems(listOf(stored), listOf(live))
+
+        assertEquals(1, merged.size)
+        assertEquals(VideoDownloadState.Downloading, merged.single().state)
+        assertEquals(0.5f, merged.single().progress)
+    }
+
+    @Test
+    fun `a completed row outranks a live duplicate of the same episode`() {
+        val completed = item(7, VideoDownloadState.Completed, 1f)
+        val duplicate = item(7, VideoDownloadState.Downloading, 0.1f)
+
+        val merged = mergeDownloadItems(listOf(completed), listOf(duplicate))
+
+        assertEquals(1, merged.size)
+        assertEquals(VideoDownloadState.Completed, merged.single().state)
+    }
+
+    @Test
+    fun `a changed stream url keeps the single chapter row`() {
+        val requestId = videoDownloadId("https://a/book", 7)
+        val rows = listOf(ChapterDownloadRow(requestId, Download.STATE_STOPPED))
+
+        assertFalse(hasConflictingDownload(rows, requestId))
+        assertTrue(replaceableChapterDownloadIds(rows, requestId).isEmpty())
+    }
+
+    @Test
+    fun `a stopped legacy row is replaced instead of duplicated`() {
+        val requestId = videoDownloadId("https://a/book", 7)
+        val legacyId = "https://a/book\u001Fhttps://cdn/old.m3u8"
+        val rows = listOf(ChapterDownloadRow(legacyId, Download.STATE_STOPPED))
+
+        assertFalse(hasConflictingDownload(rows, requestId))
+        assertEquals(listOf(legacyId), replaceableChapterDownloadIds(rows, requestId))
+    }
+
+    @Test
+    fun `active or finished legacy rows are never replaced`() {
+        val requestId = videoDownloadId("https://a/book", 7)
+        val legacyId = "https://a/book\u001Fhttps://cdn/old.m3u8"
+        listOf(
+            Download.STATE_QUEUED,
+            Download.STATE_DOWNLOADING,
+            Download.STATE_RESTARTING,
+            Download.STATE_COMPLETED,
+            Download.STATE_REMOVING,
+        ).forEach { state ->
+            val rows = listOf(ChapterDownloadRow(legacyId, state))
+
+            assertTrue(hasConflictingDownload(rows, requestId))
+            assertTrue(replaceableChapterDownloadIds(rows, requestId).isEmpty())
+        }
+    }
+
+    private fun item(
+        chapterIndex: Int,
+        state: VideoDownloadState,
+        progress: Float,
+    ) = VideoDownloadItem(
+        bookUrl = "https://a/book",
+        chapterIndex = chapterIndex,
+        chapterUrl = "https://cdn/$chapterIndex.m3u8",
+        state = state,
+        progress = progress,
+    )
 }

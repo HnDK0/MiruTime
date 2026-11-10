@@ -1,6 +1,7 @@
 package dev.mirutime.app.features.video.data
 
 import dev.mirutime.app.features.book.data.BookDataProvider
+import dev.mirutime.core.log.MiruLog
 import dev.mirutime.app.features.video.domain.VideoChapterSource
 import dev.mirutime.app.features.video.domain.VideoEpisode
 import dev.mirutime.app.features.video.domain.VideoLoadResult
@@ -43,7 +44,8 @@ class VideoSourceRepository(
                 provider.ensureHistoryBook(bookUrl)
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                MiruLog.w("video", "event=ensure-history-failed error=${e::class.simpleName}")
                 // playback can continue without a history row; progress then
                 // stays unsaved rather than failing the open
             }
@@ -62,7 +64,8 @@ class VideoSourceRepository(
             persistChapters(bookUrl, chapterIndex, chapters)
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            MiruLog.w("video", "event=persist-chapters-failed error=${e::class.simpleName}")
             // same: missing rows only mean progress cannot attach yet
         }
         val episodes = chapters.map { chapter ->
@@ -118,7 +121,8 @@ class VideoSourceRepository(
             repo.touchHistory(book.bookId, chapter.chapterId, chapterIndex, now())
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            MiruLog.w("video", "event=save-progress-failed error=${e::class.simpleName}")
             // keep playing
         }
     }
@@ -132,7 +136,8 @@ class VideoSourceRepository(
             videoResumePositionMs(saved.positionMs, saved.durationMs)
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            MiruLog.w("video", "event=saved-position-failed error=${e::class.simpleName}")
             0
         }
     }

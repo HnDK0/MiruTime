@@ -27,6 +27,7 @@ import androidx.media3.exoplayer.offline.Downloader
 import androidx.media3.exoplayer.offline.DownloaderFactory
 import androidx.media3.exoplayer.offline.ProgressiveDownloader
 import dev.mirutime.data.library.bookKeyUrl
+import dev.mirutime.data.library.decodeLibraryBookKey
 import dev.mirutime.app.features.video.VideoDownloadService
 import dev.mirutime.app.features.video.domain.videoMimeType
 import dev.mirutime.core.api.VideoStream
@@ -38,8 +39,10 @@ import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -97,23 +100,66 @@ class VideoDownloadManager(
     private val _pausedAll = MutableStateFlow(false)
     val pausedAll: StateFlow<Boolean> = _pausedAll.asStateFlow()
     private var refreshGeneration = 0
+    private var pollJob: Job? = null
+    private var lastSnapshotSignature: List<String> = emptyList()
 
     private val listener = object : DownloadManager.Listener {
-        override fun onInitialized(downloadManager: DownloadManager) = refresh()
+        override fun onInitialized(downloadManager: DownloadManager) {
+            MiruLog.event(
+                "video",
+                "download-init",
+                "count" to downloadManager.currentDownloads.size,
+            )
+            // media3 starts a manager that no service hosts paused, so a queue
+            // restored after process death never moves without this global
+            // resume. It must not be gated on the restored rows: the index can
+            // still be loading when the listener fires.
+            downloadManager.resumeDownloads()
+            // The queue only keeps moving while the service hosts it: media3
+            // runs downloaders in the process, and without a foreground host a
+            // restored queue stalls as soon as the app leaves the screen. The
+            // start is gated on actual work so an idle app shows no
+            // notification; a user-paused row is STOPPED and does not count.
+            if (needsForegroundHost(downloadManager.currentDownloads.map { it.state })) {
+                runCatching {
+                    VideoDownloadService.sendResumeDownloads(appContext, foreground = true)
+                }.onFailure {
+                    MiruLog.w("video", "download-resume-host-failed", it)
+                }
+            }
+            refresh()
+        }
 
         override fun onDownloadChanged(
             downloadManager: DownloadManager,
             download: Download,
             finalException: Exception?,
         ) {
+            MiruLog.event(
+                "video",
+                "download-changed",
+                "id" to MiruLog.idHash(download.request.id),
+                "state" to download.state,
+                "stop" to download.stopReason,
+                "pct" to download.percentDownloaded,
+                "bytes" to download.bytesDownloaded,
+                "failure" to (finalException?.javaClass?.simpleName ?: "-"),
+            )
             if (finalException != null) {
                 MiruLog.w("video", "download failed: ${finalException.javaClass.simpleName}", finalException)
             }
             refresh()
         }
 
-        override fun onDownloadRemoved(downloadManager: DownloadManager, download: Download) =
+        override fun onDownloadRemoved(downloadManager: DownloadManager, download: Download) {
+            MiruLog.event(
+                "video",
+                "download-removed",
+                "id" to MiruLog.idHash(download.request.id),
+                "state" to download.state,
+            )
             refresh()
+        }
     }
 
     init {
@@ -143,11 +189,15 @@ class VideoDownloadManager(
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
     /** The stream URI when this episode is fully downloaded, otherwise null. */
-    suspend fun completedVideoUri(bookUrl: String, chapterUrl: String): String? {
+    suspend fun completedVideoUri(bookUrl: String, chapterIndex: Int): String? {
         val download = withContext(Dispatchers.IO) {
-            runCatching { index.getDownload(videoDownloadId(bookUrl, chapterUrl)) }.getOrNull()
+            runCatching { index.getDownload(videoDownloadId(bookUrl, chapterIndex)) }.getOrNull()
         }
-        return chapterUrl.takeIf { download?.state == Download.STATE_COMPLETED }
+        return download
+            ?.takeIf { it.state == Download.STATE_COMPLETED }
+            ?.request
+            ?.uri
+            ?.toString()
     }
 
     /** Offline resolver input: the completed download for this episode, if any. */
@@ -155,7 +205,7 @@ class VideoDownloadManager(
         allDownloads().firstNotNullOfOrNull { download ->
             if (download.state != Download.STATE_COMPLETED) return@firstNotNullOfOrNull null
             val meta = VideoDownloadData.decode(download.request.data) ?: return@firstNotNullOfOrNull null
-            if (bookKeyUrl(meta.bookUrl) != bookKeyUrl(bookUrl) || meta.chapterIndex != chapterIndex) {
+            if (!sameBookIdentity(bookUrl, meta.bookUrl) || meta.chapterIndex != chapterIndex) {
                 return@firstNotNullOfOrNull null
             }
             VideoStream(
@@ -175,24 +225,70 @@ class VideoDownloadManager(
         headers: Map<String, String>,
     ): Boolean {
         val request = createRequest(bookUrl, chapterIndex, stream, headers)
-        val existing = withContext(Dispatchers.IO) {
-            runCatching { index.getDownload(request.id) }.getOrNull()
+        MiruLog.event(
+            "video",
+            "enqueue-start",
+            "book" to MiruLog.idHash(bookUrl),
+            "chapter" to chapterIndex,
+            "mime" to (request.mimeType ?: "-"),
+            "headers" to headers.size,
+        )
+        // One episode owns at most one row. Rows written before the
+        // chapter-keyed id scheme carry the stream URL in the id, and a quality
+        // or CDN-token change produced a second invisible row on the same
+        // episode; both are reconciled here.
+        val chapterRows = withContext(Dispatchers.IO) { chapterDownloads(bookUrl, chapterIndex) }
+        val rows = chapterRows.map { ChapterDownloadRow(it.request.id, it.state) }
+        val current = chapterRows.firstOrNull { it.request.id == request.id }
+        if (hasConflictingDownload(rows, request.id)) {
+            val blocking = chapterRows.first { it.request.id != request.id && it.state in SKIP_ENQUEUE_STATES }
+            MiruLog.event(
+                "video",
+                "enqueue-existing",
+                "chapter" to chapterIndex,
+                "state" to blocking.state,
+                "stop" to blocking.stopReason,
+                "pct" to blocking.percentDownloaded,
+            )
+            return false
         }
-        if (existing != null) {
+        if (current != null && current.state == Download.STATE_STOPPED &&
+            current.request.uri.toString() == stream.url
+        ) {
+            MiruLog.event(
+                "video",
+                "enqueue-existing",
+                "chapter" to chapterIndex,
+                "state" to current.state,
+                "stop" to current.stopReason,
+                "pct" to current.percentDownloaded,
+            )
             // A paused episode is not a duplicate: resume it, unless the user
             // explicitly paused the whole queue. Never drop the tap silently.
-            if (existing.state == Download.STATE_STOPPED) {
-                if (_pausedAll.value) return false
-                withContext(Dispatchers.Main.immediate) {
-                    downloadManager.setStopReason(request.id, Download.STOP_REASON_NONE)
-                    downloadManager.resumeDownloads()
-                }
-                return true
+            if (_pausedAll.value) return false
+            withContext(Dispatchers.Main.immediate) {
+                downloadManager.setStopReason(request.id, Download.STOP_REASON_NONE)
+                downloadManager.resumeDownloads()
             }
-            if (existing.state in SKIP_ENQUEUE_STATES) return false
+            return true
+        }
+        if (current != null && current.state in SKIP_ENQUEUE_STATES) return false
+        val obsolete = replaceableChapterDownloadIds(rows, request.id)
+        if (obsolete.isNotEmpty()) {
+            MiruLog.event(
+                "video",
+                "enqueue-replace",
+                "chapter" to chapterIndex,
+                "count" to obsolete.size,
+            )
+            withContext(Dispatchers.Main.immediate) {
+                obsolete.forEach(downloadManager::removeDownload)
+            }
         }
 
         withContext(Dispatchers.Main.immediate) {
+            // Same path as NoveLA: the service owns the add and the foreground
+            // start, so media3 always has a downloader host.
             runCatching {
                 VideoDownloadService.sendAddDownload(
                     appContext,
@@ -200,11 +296,7 @@ class VideoDownloadManager(
                     foreground = true,
                 )
             }.onFailure { error ->
-                // Background-restricted starts still download while the app
-                // is alive; the service re-arms them on its next start.
-                MiruLog.w("video", "download service start failed", error)
-                downloadManager.addDownload(request)
-                downloadManager.resumeDownloads()
+                MiruLog.w("video", "download-add-failed", error)
             }
         }
         MiruLog.event(
@@ -212,6 +304,8 @@ class VideoDownloadManager(
             "download-enqueue",
             "book" to MiruLog.idHash(bookUrl),
             "chapter" to chapterIndex,
+            "id" to MiruLog.idHash(request.id),
+            "stateBefore" to (current?.state ?: -1),
         )
         return true
     }
@@ -231,12 +325,14 @@ class VideoDownloadManager(
         _pausedAll.value = false
     }
 
-    suspend fun pause(bookUrl: String, chapterUrl: String) = withContext(Dispatchers.Main.immediate) {
-        downloadManager.setStopReason(videoDownloadId(bookUrl, chapterUrl), STOP_REASON_PAUSED)
+    suspend fun pause(bookUrl: String, chapterIndex: Int) = withContext(Dispatchers.Main.immediate) {
+        val id = downloadId(bookUrl, chapterIndex) ?: return@withContext
+        downloadManager.setStopReason(id, STOP_REASON_PAUSED)
     }
 
-    suspend fun resume(bookUrl: String, chapterUrl: String) = withContext(Dispatchers.Main.immediate) {
-        downloadManager.setStopReason(videoDownloadId(bookUrl, chapterUrl), Download.STOP_REASON_NONE)
+    suspend fun resume(bookUrl: String, chapterIndex: Int) = withContext(Dispatchers.Main.immediate) {
+        val id = downloadId(bookUrl, chapterIndex) ?: return@withContext
+        downloadManager.setStopReason(id, Download.STOP_REASON_NONE)
         downloadManager.resumeDownloads()
         _pausedAll.value = false
     }
@@ -257,8 +353,8 @@ class VideoDownloadManager(
     }
 
     /** Cancels one episode only when it is still active; completed stays. */
-    suspend fun cancel(bookUrl: String, chapterUrl: String) {
-        val id = videoDownloadId(bookUrl, chapterUrl)
+    suspend fun cancel(bookUrl: String, chapterIndex: Int) {
+        val id = downloadId(bookUrl, chapterIndex) ?: return
         val state = withContext(Dispatchers.IO) {
             runCatching { index.getDownload(id) }.getOrNull()?.state
         } ?: return
@@ -331,12 +427,30 @@ class VideoDownloadManager(
         stream: VideoStream,
         headers: Map<String, String>,
     ): DownloadRequest = DownloadRequest.Builder(
-        videoDownloadId(bookUrl, stream.url),
+        videoDownloadId(bookUrl, chapterIndex),
         Uri.parse(stream.url),
     )
         .setMimeType(videoMimeType(stream))
         .setData(VideoDownloadData.encode(bookUrl, chapterIndex, headers))
         .build()
+
+    /** Every row media3 holds for one episode, whatever id scheme wrote it. */
+    private suspend fun chapterDownloads(bookUrl: String, chapterIndex: Int): List<Download> =
+        allDownloads().filter { download ->
+            val meta = VideoDownloadData.decode(download.request.data) ?: return@filter false
+            sameBookIdentity(bookUrl, meta.bookUrl) && meta.chapterIndex == chapterIndex
+        }
+
+    /** The id of the row that currently owns this episode, if any. */
+    private suspend fun downloadId(bookUrl: String, chapterIndex: Int): String? {
+        val id = videoDownloadId(bookUrl, chapterIndex)
+        val direct = withContext(Dispatchers.IO) {
+            runCatching { index.getDownload(id) }.getOrNull()
+        }
+        if (direct != null) return id
+        // Rows written before the chapter-keyed id scheme carry the stream URL.
+        return chapterDownloads(bookUrl, chapterIndex).firstOrNull()?.request?.id
+    }
 
     private suspend fun idsForBook(bookUrl: String): List<String> =
         allDownloads()
@@ -365,16 +479,67 @@ class VideoDownloadManager(
     }
 
     private fun refresh() {
+        scope.launch { publishSnapshot() }
+    }
+
+    private suspend fun publishSnapshot() {
         // Listener callbacks can overlap; only the newest read may publish.
         val generation = ++refreshGeneration
-        scope.launch {
-            val items = allDownloads().mapNotNull(::toItem)
-            if (generation == refreshGeneration) {
-                _downloads.value = items.sortedWith(
-                    compareBy({ it.bookUrl }, { it.chapterIndex }),
-                )
+        // The index holds every row including terminal states; the live manager
+        // list carries current state/progress but drops COMPLETED and FAILED.
+        val stored = allDownloads().mapNotNull(::toItem)
+        val live = snapshotItems()
+        val items = mergeDownloadItems(stored, live)
+        if (generation != refreshGeneration) return
+        _downloads.value = items.sortedWith(
+            compareBy({ it.bookUrl }, { it.chapterIndex }),
+        )
+        val signature = items.map { "${it.chapterIndex}:${it.state}:${it.progress}" }
+        if (signature != lastSnapshotSignature) {
+            lastSnapshotSignature = signature
+            MiruLog.event(
+                "video",
+                "download-snapshot",
+                "count" to items.size,
+                "states" to items.joinToString(",") {
+                    "${it.chapterIndex}/${it.state}/${(it.progress * 100).toInt()}%"
+                },
+            )
+        }
+        if (items.any { it.state == VideoDownloadState.Downloading || it.state == VideoDownloadState.Queued }) {
+            ensurePolling()
+        } else {
+            stopPolling()
+        }
+    }
+
+    private suspend fun snapshotItems(): List<VideoDownloadItem> =
+        withContext(Dispatchers.Main.immediate) {
+            downloadManager.currentDownloads.mapNotNull(::toItem)
+        }
+
+    // media3 does not promise a callback for every progress tick; while the
+    // queue is active, re-read it once a second so the list moves.
+    private fun ensurePolling() {
+        if (pollJob?.isActive == true) return
+        pollJob = scope.launch {
+            while (isActive) {
+                delay(PROGRESS_POLL_MS)
+                publishSnapshot()
+                if (_downloads.value.none {
+                        it.state == VideoDownloadState.Downloading ||
+                            it.state == VideoDownloadState.Queued
+                    }
+                ) {
+                    break
+                }
             }
         }
+    }
+
+    private fun stopPolling() {
+        pollJob?.cancel()
+        pollJob = null
     }
 
     private fun toItem(download: Download): VideoDownloadItem? {
@@ -397,14 +562,8 @@ class VideoDownloadManager(
         private const val PLAYBACK_CACHE_BYTES = 256L * 1024 * 1024
         private const val MAX_PARALLEL_DOWNLOADS = 2
         private const val MAX_RETRIES = 3
+        private const val PROGRESS_POLL_MS = 1_000L
         private const val STOP_REASON_PAUSED = 1
-        private val SKIP_ENQUEUE_STATES = setOf(
-            Download.STATE_QUEUED,
-            Download.STATE_DOWNLOADING,
-            Download.STATE_RESTARTING,
-            Download.STATE_COMPLETED,
-            Download.STATE_REMOVING,
-        )
     }
 }
 
@@ -452,9 +611,83 @@ internal fun videoDownloadState(state: Int): VideoDownloadState = when (state) {
     else -> VideoDownloadState.Failed
 }
 
-/** Download identity: a book URL plus the episode stream URL. */
-fun videoDownloadId(bookUrl: String, chapterUrl: String): String =
-    "$bookUrl\u001F$chapterUrl"
+/** States that make an existing row win over a fresh enqueue. */
+internal val SKIP_ENQUEUE_STATES = setOf(
+    Download.STATE_QUEUED,
+    Download.STATE_DOWNLOADING,
+    Download.STATE_RESTARTING,
+    Download.STATE_COMPLETED,
+    Download.STATE_REMOVING,
+)
+
+/** Rows a fresh request replaces: they hold no usable episode data. */
+private val REPLACEABLE_DOWNLOAD_STATES = setOf(
+    Download.STATE_STOPPED,
+    Download.STATE_FAILED,
+)
+
+/** Another row already owns this episode (old id scheme or a changed stream). */
+internal fun hasConflictingDownload(rows: List<ChapterDownloadRow>, requestId: String): Boolean =
+    rows.any { it.id != requestId && it.state in SKIP_ENQUEUE_STATES }
+
+/** Ids of stale rows for the same episode that a fresh request must remove. */
+internal fun replaceableChapterDownloadIds(
+    rows: List<ChapterDownloadRow>,
+    requestId: String,
+): List<String> =
+    rows.filter { it.id != requestId && it.state in REPLACEABLE_DOWNLOAD_STATES }
+        .map { it.id }
+
+/** The row fields the enqueue decision needs, without a media3 Download. */
+internal data class ChapterDownloadRow(val id: String, val state: Int)
+
+/**
+ * True when the restored queue has work that only the foreground host keeps
+ * alive. A user pause lives in a per-row stop reason (STATE_STOPPED), so it
+ * does not start the service.
+ */
+internal fun needsForegroundHost(states: List<Int>): Boolean = states.any { state ->
+    state == Download.STATE_QUEUED ||
+        state == Download.STATE_DOWNLOADING ||
+        state == Download.STATE_RESTARTING
+}
+
+/**
+ * One row per episode. The index keeps terminal rows that currentDownloads
+ * does not report, so it is the base and live state/progress wins. A completed
+ * file outranks a stray live duplicate of the same episode.
+ */
+internal fun mergeDownloadItems(
+    stored: List<VideoDownloadItem>,
+    live: List<VideoDownloadItem>,
+): List<VideoDownloadItem> {
+    val merged = LinkedHashMap<Pair<String, Int>, VideoDownloadItem>()
+    (stored + live).forEach { item ->
+        val key = item.bookUrl to item.chapterIndex
+        if (merged[key]?.state != VideoDownloadState.Completed) merged[key] = item
+    }
+    return merged.values.toList()
+}
+
+/**
+ * Book identity across the route key and the legacy raw-URL form. A key keeps
+ * its install id, so two installs that expose the same URL stay apart; a row
+ * written before route keys stored the raw URL and compares by URL.
+ */
+internal fun sameBookIdentity(bookUrl: String, storedBookUrl: String): Boolean {
+    val wanted = decodeLibraryBookKey(bookUrl)
+    val stored = decodeLibraryBookKey(storedBookUrl)
+    return when {
+        wanted != null && stored != null -> wanted == stored
+        wanted != null -> wanted.url == storedBookUrl
+        stored != null -> stored.url == bookUrl
+        else -> bookUrl == storedBookUrl
+    }
+}
+
+/** Download identity: a book URL plus the episode index, never the stream URL. */
+fun videoDownloadId(bookUrl: String, chapterIndex: Int): String =
+    "$bookUrl\u001F$chapterIndex"
 
 enum class VideoDownloaderKind { Hls, Dash, Progressive }
 
@@ -559,6 +792,15 @@ private class VideoDownloaderFactory(
 
     override fun createDownloader(request: DownloadRequest): Downloader {
         val headers = VideoDownloadData.decode(request.data)?.headers.orEmpty()
+        val kind = videoDownloaderKind(request.mimeType, request.uri.toString())
+        MiruLog.event(
+            "video",
+            "downloader-create",
+            "id" to MiruLog.idHash(request.id),
+            "mime" to (request.mimeType ?: "-"),
+            "kind" to kind,
+            "headers" to headers.size,
+        )
         val cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(cache)
             .setUpstreamDataSourceFactory(

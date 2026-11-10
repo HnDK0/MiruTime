@@ -103,7 +103,7 @@ import dev.mirutime.app.features.video.domain.subtitleMimeType
 import dev.mirutime.app.features.video.domain.videoExternalMimeType
 import dev.mirutime.app.features.video.domain.videoMimeType
 import dev.mirutime.app.features.video.domain.videoPlaybackErrorKind
-import dev.mirutime.app.features.video.domain.videoQualityKey
+import dev.mirutime.app.features.video.domain.videoVariantKey
 import dev.mirutime.app.features.video.domain.videoRestartPositionMs
 import dev.mirutime.core.api.VideoStream
 import dev.mirutime.uikit.ChoiceOption
@@ -344,9 +344,9 @@ private fun VideoReadyContent(
             selectedStreamIndex = streamIndex,
             probeStatuses = probeStatuses,
             onSelect = { index ->
-                val quality = videoQualityKey(source.streams[index])
-                chosenQuality = quality
-                AppSettings.setVideoVariantForBook(source.bookUrl, quality)
+                val key = videoVariantKey(source.streams[index])
+                chosenQuality = key
+                AppSettings.setVideoVariantForBook(source.bookUrl, key)
                 qualityPickerOpen = false
             },
             onClose = {
@@ -745,7 +745,7 @@ private fun VideoSurface(
         val position = current?.currentPosition ?: startPositionMs
         // Persist before the player is rebuilt on the new variant.
         if (current != null) persist(position, current.duration)
-        onQualitySelected(videoQualityKey(selected), position)
+        onQualitySelected(videoVariantKey(selected), position)
     }
 
     fun chooseVideoTrack(option: VideoTrackOption) {

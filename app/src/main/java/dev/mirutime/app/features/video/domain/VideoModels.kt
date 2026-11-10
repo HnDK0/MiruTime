@@ -120,6 +120,10 @@ sealed interface VideoLoadResult {
 fun selectVideoStream(streams: List<VideoStream>, quality: String?): VideoStream? =
     pickStream(streams, quality)
 
+/** Saved per-book key: quality when known, otherwise the stable stream URL. */
+fun videoVariantKey(stream: VideoStream): String =
+    stream.quality?.trim()?.takeIf { it.isNotBlank() } ?: stream.url.trim()
+
 fun videoStreamLabel(stream: VideoStream): String =
     stream.quality?.takeIf { it.isNotBlank() }
         ?: stream.mime?.takeIf { it.isNotBlank() }
@@ -136,14 +140,14 @@ fun initialVideoStreamIndex(streams: List<VideoStream>, savedQuality: String?): 
     if (streams.isEmpty()) return 0
     val saved = savedQuality?.trim().orEmpty()
     if (saved.isBlank()) return 0
-    val index = streams.indexOfFirst { videoQualityKey(it) == saved }
+    val index = streams.indexOfFirst { videoVariantKey(it) == saved }
     return index.coerceAtLeast(0)
 }
 
 fun hasSavedVideoQuality(streams: List<VideoStream>, savedQuality: String?): Boolean {
     val saved = savedQuality?.trim().orEmpty()
     if (saved.isBlank()) return false
-    return streams.any { videoQualityKey(it) == saved }
+    return streams.any { videoVariantKey(it) == saved }
 }
 
 /**

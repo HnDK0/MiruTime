@@ -18,6 +18,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -290,6 +291,8 @@ fun VideoVariantSheet(
     probeStatuses: Map<String, VideoVariantStatus>,
     onSelect: (Int) -> Unit,
     onClose: () -> Unit,
+    deadDisabled: Boolean = false,
+    onRefresh: (() -> Unit)? = null,
 ) {
     val choices = videoVariantChoices(streams, probeStatuses)
     val quality = choices.filter { isVideoResolutionLabel(it.label) }
@@ -305,6 +308,7 @@ fun VideoVariantSheet(
                     VideoVariantRow(
                         choice = choice,
                         selected = choice.index == selectedStreamIndex,
+                        enabled = !(deadDisabled && choice.dead),
                         onSelect = { onSelect(choice.index) },
                     )
                 }
@@ -316,9 +320,15 @@ fun VideoVariantSheet(
                     VideoVariantRow(
                         choice = choice,
                         selected = choice.index == selectedStreamIndex,
+                        enabled = !(deadDisabled && choice.dead),
                         onSelect = { onSelect(choice.index) },
                     )
                 }
+            }
+        }
+        if (onRefresh != null) {
+            TextButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.video_variant_recheck))
             }
         }
     }
@@ -338,13 +348,14 @@ private fun VideoChipLabel(text: String) {
 private fun VideoVariantRow(
     choice: VideoVariantChoice,
     selected: Boolean,
+    enabled: Boolean = true,
     onSelect: () -> Unit,
 ) {
     val extra = LocalMiruExtraColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onSelect)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onSelect)
             .defaultMinSize(minHeight = MiruSize.Row)
             .padding(vertical = MiruSpace.S),
         verticalAlignment = Alignment.CenterVertically,

@@ -14,6 +14,7 @@ import dev.mirutime.app.MiruApp
 import dev.mirutime.app.R
 import dev.mirutime.app.features.video.data.VideoDownloadActionReceiver
 import dev.mirutime.app.features.video.data.VideoDownloadActions
+import dev.mirutime.core.log.MiruLog
 
 /**
  * Foreground host for the media3 download manager. Downloads run in the
@@ -29,6 +30,28 @@ class VideoDownloadService : DownloadService(
 ) {
     override fun getDownloadManager() =
         (application as MiruApp).videoDownloadManager.downloadManager
+
+    override fun onCreate() {
+        super.onCreate()
+        MiruLog.event("video", "service-create")
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        MiruLog.event(
+            "video",
+            "service-start",
+            "action" to (intent?.action ?: "-"),
+            "downloads" to (runCatching {
+                getDownloadManager().currentDownloads.size
+            }.getOrDefault(-1)),
+        )
+        return super.onStartCommand(intent, flags, startId)
+    }
+
+    override fun onDestroy() {
+        MiruLog.event("video", "service-destroy")
+        super.onDestroy()
+    }
 
     // Downloads resume when the user returns; no job-scheduler re-arm is
     // required for this pass.
@@ -110,6 +133,15 @@ class VideoDownloadService : DownloadService(
     companion object {
         private const val CHANNEL_ID = "video_downloads"
         private const val FOREGROUND_ID = 7100
+
+        /** Starts or reuses the foreground service and resumes the queue. */
+        fun sendResumeDownloads(context: Context, foreground: Boolean) {
+            DownloadService.sendResumeDownloads(
+                context,
+                VideoDownloadService::class.java,
+                foreground,
+            )
+        }
 
         /** Starts the dataSync foreground service and adds one request. */
         fun sendAddDownload(context: Context, request: DownloadRequest, foreground: Boolean) {
