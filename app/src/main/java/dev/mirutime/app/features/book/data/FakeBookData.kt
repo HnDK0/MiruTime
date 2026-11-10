@@ -22,7 +22,9 @@ class BookRuntime(
     val readOverrides: MutableMap<Int, Boolean> = mutableMapOf(),
 )
 
-class FakeBookDataProvider : BookDataProvider {
+class FakeBookDataProvider(
+    private val contentOverride: (suspend (String, Int) -> ChapterContent?)? = null,
+) : BookDataProvider {
     override suspend fun book(bookUrl: String): BookDetails? {
         // Same one-beat latency as the library/dashboard fakes.
         delay(120)
@@ -60,6 +62,7 @@ class FakeBookDataProvider : BookDataProvider {
     }
 
     override suspend fun chapterContent(bookUrl: String, chapterIndex: Int): ChapterContent? {
+        contentOverride?.let { return it(bookUrl, chapterIndex) }
         val book = book(bookUrl) ?: return null
         val chapter = book.chapters.firstOrNull { it.index == chapterIndex } ?: return null
         return ChapterContent(

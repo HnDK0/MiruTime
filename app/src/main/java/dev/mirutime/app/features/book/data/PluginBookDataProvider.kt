@@ -129,22 +129,25 @@ class PluginBookDataProvider(
             ?.takeIf { it.isNotBlank() }
             ?: fallback
     }
-    private val details = mutableMapOf<String, BookDetails>()
+    private val details = ConcurrentHashMap<String, BookDetails>()
     // Last typed plugin failure per book, read by BookScreen after a null
     // metadata result; cleared by the next successful load.
     private val pluginErrors = ConcurrentHashMap<String, PluginError>()
     // Last cover repair per bookUrl: a broken cover is re-resolved once per
     // window, never per composition/scroll of a grid of covers.
     private val coverRefreshAt = ConcurrentHashMap<String, Long>()
-    private val chapterLists = mutableMapOf<String, List<BookChapter>>()
-    private val chapterUrls = mutableMapOf<String, Map<Int, String>>()
-    private val chapterTitles = mutableMapOf<String, Map<Int, String>>()
+    private val chapterLists = ConcurrentHashMap<String, List<BookChapter>>()
+    private val chapterUrls = ConcurrentHashMap<String, Map<Int, String>>()
+    private val chapterTitles = ConcurrentHashMap<String, Map<Int, String>>()
     // Status snapshot is several queries; a chapter list page asks for it on
     // every call. Reuse it within one generation, and let a short TTL cover
     // writes made by other lanes (downloads/translation) without exposing a
     // second owner of reader state.
     private val chapterStatusSnapshots = ConcurrentHashMap<String, CachedChapterStatus>()
     private val chapterStatusGenerations = ConcurrentHashMap<String, Long>()
+    // Change-only chapter-status diagnostics: the book page polls while a
+    // queue is active, and an unchanged snapshot must not spam logcat.
+    private val lastStatusLog = ConcurrentHashMap<Long, Pair<ChapterStatusCounters, Long>>()
     // Metadata fetched for the book page before the row exists; lets an add
     // persist the row without a second network round-trip.
     private val pluginMeta = ConcurrentHashMap<String, BookMeta>()
@@ -764,6 +767,9 @@ class PluginBookDataProvider(
     }
 
     companion object {
+        private const val STATUS_LOG_LIMIT = 128
+        private const val STATUS_LOG_MIN_INTERVAL_MS = 30_000L
+
         internal fun directBookFileRow(
             meta: dev.mirutime.app.features.finder.data.LocalSafBook,
             documentUri: String,
@@ -1136,13 +1142,47 @@ class PluginBookDataProvider(
     ): List<BookChapter> {
         val snapshot = chapterStatusSnapshot(bookUrl)
         if (snapshot != null) {
-            MiruLog.d(
-                "chapter-status",
-                "bookHash=${shortHash(bookUrl)} bookId=${snapshot.bookId} " +
-                    "count=${snapshot.chapterCount} read=${snapshot.readIndexes.size} " +
-                    "downloaded=${snapshot.downloadedIndexes.size} " +
-                    "translated=${snapshot.translatedIndexes.size} last=${snapshot.lastIndex ?: 0}",
+            val counters = ChapterStatusCounters(
+                bookId = snapshot.bookId,
+                count = snapshot.chapterCount,
+                read = snapshot.readIndexes.size,
+                downloaded = snapshot.downloadedIndexes.size,
+                translated = snapshot.translatedIndexes.size,
+                last = snapshot.lastIndex,
             )
+            val timestamp = now()
+            val logStatus = synchronized(lastStatusLog) {
+                val previous = lastStatusLog[counters.bookId]
+                val shouldLog = shouldLogChapterStatus(
+                    previous = previous?.first,
+                    current = counters,
+                    now = timestamp,
+                    lastLoggedAt = previous?.second ?: 0L,
+                )
+                if (shouldLog) {
+                    if (lastStatusLog.size >= STATUS_LOG_LIMIT) {
+                        lastStatusLog.entries.removeAll {
+                            timestamp - it.value.second >= STATUS_LOG_MIN_INTERVAL_MS
+                        }
+                    }
+                    if (lastStatusLog.size >= STATUS_LOG_LIMIT) {
+                        lastStatusLog.entries.minByOrNull { it.value.second }?.let {
+                            lastStatusLog.remove(it.key)
+                        }
+                    }
+                    lastStatusLog[counters.bookId] = counters to timestamp
+                }
+                shouldLog
+            }
+            if (logStatus) {
+                MiruLog.d(
+                    "chapter-status",
+                    "bookHash=${shortHash(bookUrl)} bookId=${counters.bookId} " +
+                        "count=${counters.count} read=${counters.read} " +
+                        "downloaded=${counters.downloaded} " +
+                        "translated=${counters.translated} last=${counters.last}",
+                )
+            }
         }
         return applyChapterStatus(
             chapters = chapters,
@@ -1362,7 +1402,7 @@ class PluginBookDataProvider(
                     bookUrl = bookUrl,
                     chapterIndex = chapterIndex,
                     title = chapter.title,
-                    html = file.readText(),
+                    html = withContext(Dispatchers.IO) { file.readText() },
                     chapterUrl = chapter.url,
                     source = ChapterSource.IMPORTED_DB_BODY,
                     chapterId = chapter.chapterId,
@@ -1426,15 +1466,22 @@ class PluginBookDataProvider(
     // Download path: the same host fetch + plugin parse, but failures keep
     // their auth/CF/rate-limit type so the queue can fail fast instead of
     // retrying a blocked source forever.
-    override suspend fun downloadChapterText(bookUrl: String, chapterIndex: Int): String {
-        val sourceId = PluginBookIndex.sourceForBook(bookUrl)
-            ?: failDownload(ChapterFailureKind.SOURCE, "Unknown source", retryable = false)
-        val source = pluginSourceFor(sourceId)
+    override suspend fun downloadChapterText(
+        bookUrl: String,
+        chapterIndex: Int,
+        sourceId: String?,
+    ): String {
+        val resolvedId = resolveDownloadSource(
+            bookUrl = bookUrl,
+            persisted = sourceId,
+            indexed = { PluginBookIndex.sourceFor(bookUrl) },
+        ) ?: failDownload(ChapterFailureKind.SOURCE, "Unknown source", retryable = false)
+        val source = pluginSourceFor(resolvedId)
             ?: failDownload(ChapterFailureKind.SOURCE, "Source unavailable", retryable = false)
         val chapterUrl = downloadChapterUrl(bookUrl, chapterIndex)
             ?: failDownload(ChapterFailureKind.NOT_FOUND, "Chapter not found", retryable = false)
-        val html = fetchChapterHtml(sourceId, chapterUrl)
-        val content = parseChapterContent(source, html, chapterUrl, sourceId)
+        val html = fetchChapterHtml(resolvedId, chapterUrl)
+        val content = parseChapterContent(source, html, chapterUrl, resolvedId)
         val text = when (content) {
             is CoreChapterContent.Text -> chapterHtml(content.text)
             is CoreChapterContent.Pages ->
@@ -1448,15 +1495,22 @@ class PluginBookDataProvider(
         return text
     }
 
-    override suspend fun downloadChapterPages(bookUrl: String, chapterIndex: Int): List<String> {
-        val sourceId = PluginBookIndex.sourceForBook(bookUrl)
-            ?: failDownload(ChapterFailureKind.SOURCE, "Unknown source", retryable = false)
-        val source = pluginSourceFor(sourceId)
+    override suspend fun downloadChapterPages(
+        bookUrl: String,
+        chapterIndex: Int,
+        sourceId: String?,
+    ): List<String> {
+        val resolvedId = resolveDownloadSource(
+            bookUrl = bookUrl,
+            persisted = sourceId,
+            indexed = { PluginBookIndex.sourceFor(bookUrl) },
+        ) ?: failDownload(ChapterFailureKind.SOURCE, "Unknown source", retryable = false)
+        val source = pluginSourceFor(resolvedId)
             ?: failDownload(ChapterFailureKind.SOURCE, "Source unavailable", retryable = false)
         val chapterUrl = downloadChapterUrl(bookUrl, chapterIndex)
             ?: failDownload(ChapterFailureKind.NOT_FOUND, "Chapter not found", retryable = false)
-        val html = fetchChapterHtml(sourceId, chapterUrl)
-        val content = parseChapterContent(source, html, chapterUrl, sourceId)
+        val html = fetchChapterHtml(resolvedId, chapterUrl)
+        val content = parseChapterContent(source, html, chapterUrl, resolvedId)
         if (content !is CoreChapterContent.Pages) {
             failDownload(ChapterFailureKind.SOURCE, "Expected image chapter", retryable = false)
         }
@@ -1467,7 +1521,7 @@ class PluginBookDataProvider(
             failDownload(ChapterFailureKind.SOURCE, "Chapter pages are empty", retryable = false)
         }
         // Page CDNs often require the chapter URL as Referer.
-        graph.registerCoverReferers(sourceId, urls, chapterUrl)
+        graph.registerCoverReferers(resolvedId, urls, chapterUrl)
         return urls
     }
 

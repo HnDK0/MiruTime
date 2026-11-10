@@ -5,6 +5,7 @@ import dev.mirutime.core.reader.ChapterSource
 import dev.mirutime.data.library.ChapterDownloadState
 import dev.mirutime.data.library.ChapterStatusSnapshot
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -100,6 +101,30 @@ class ChapterStatusOverlayTest {
 
         assertEquals(500L, mapped[0].sizeBytes)
         assertEquals(0L, mapped[1].sizeBytes)
+    }
+
+    @Test
+    fun `completed download clears queued state`() {
+        val mapped = applyChapterStatus(
+            chapters = listOf(chapter(1)),
+            snapshot = snapshot(downloads = mapOf(1 to ChapterDownloadState("COMPLETED", 1.0))),
+            offline = false,
+        )
+
+        assertNull(mapped[0].downloadState)
+        assertFalse(mapped[0].downloading)
+    }
+
+    @Test
+    fun `queued download keeps queued state until completion`() {
+        val mapped = applyChapterStatus(
+            chapters = listOf(chapter(1)),
+            snapshot = snapshot(downloads = mapOf(1 to ChapterDownloadState("QUEUED", 0.0))),
+            offline = false,
+        )
+
+        assertEquals("QUEUED", mapped[0].downloadState)
+        assertTrue(mapped[0].downloading)
     }
 
     @Test

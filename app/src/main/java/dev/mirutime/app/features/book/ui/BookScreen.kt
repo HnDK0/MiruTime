@@ -161,6 +161,11 @@ import dev.mirutime.app.features.book.data.MembershipResult
 import dev.mirutime.app.features.book.data.PluginBookIndex
 import dev.mirutime.app.shell.LocalImeBottom
 import dev.mirutime.app.features.book.data.BookEpubExporter
+import dev.mirutime.app.features.book.data.BookCbzExporter
+import dev.mirutime.app.features.book.data.CbzExportResult
+import dev.mirutime.app.features.book.data.SafCbzOutput
+import dev.mirutime.app.features.finder.data.isLocalFileBook
+import dev.mirutime.app.features.library.data.LocalBookProvider
 import dev.mirutime.app.features.book.data.EpubExportResult
 import dev.mirutime.app.features.book.data.epubFileName
 import dev.mirutime.app.features.book.domain.BookActionKind
@@ -199,10 +204,18 @@ import dev.mirutime.app.features.video.data.VideoDownloadItem
 import dev.mirutime.app.features.video.data.VideoDownloadManager
 import dev.mirutime.app.features.video.data.VideoDownloadState
 import dev.mirutime.app.features.video.data.VideoSourceRepository
+import dev.mirutime.app.features.video.data.VideoVariantProbe
+import dev.mirutime.app.features.video.data.videoDownloadsForBook
 import dev.mirutime.app.features.video.data.videoDownloadActions
-import dev.mirutime.app.features.video.domain.selectVideoStream
+import dev.mirutime.app.features.video.domain.VideoDownloadDecision
+import dev.mirutime.app.features.video.domain.VideoVariantStatus
+import dev.mirutime.app.features.video.domain.initialVideoStreamIndex
+import dev.mirutime.app.features.video.domain.videoDownloadDecision
+import dev.mirutime.app.features.video.domain.videoVariantKey
+import dev.mirutime.app.features.video.ui.VideoVariantSheet
 import dev.mirutime.core.api.Outcome
 import dev.mirutime.core.api.PluginError
+import dev.mirutime.core.api.VideoStream
 import java.io.File
 import java.util.Locale
 import kotlin.coroutines.cancellation.CancellationException
@@ -267,14 +280,37 @@ private fun enqueueMessage(context: Context, result: EnqueueResult): String = wh
     result.reason == EnqueueFailure.BOOK_NOT_SAVED -> context.getString(R.string.book_dl_add_first)
     result.reason == EnqueueFailure.NOT_CONFIGURED ->
         context.getString(R.string.book_dl_engine_unavailable)
+    result.adopted > 0 -> context.getString(R.string.book_dl_adopted_fmt, result.adopted)
+    result.cached > 0 -> context.getString(R.string.book_dl_cached_fmt, result.cached)
     else -> context.getString(R.string.book_dl_nothing_new)
+}
+
+/**
+ * The download queue needs a stored book row, not library membership. Create
+ * the history row only when it is missing; a failure leaves the queue untouched.
+ */
+private suspend fun ensureDownloadBook(
+    provider: BookDataProvider,
+    engine: DownloadEngine,
+    bookUrl: String,
+): Long? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    engine.bookId(bookUrl)?.let { return@withContext it }
+    try {
+        provider.ensureHistoryBook(bookUrl)
+        engine.bookId(bookUrl)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (failure: Exception) {
+        MiruLog.w("book", "download book resolve failed ${failure.javaClass.simpleName}")
+        null
+    }
 }
 
 // Book page: header card (cover left, shelf chip, genre
 // tags), 4-cell stat strip, continue/library/download actions, about, tools
 // rows, source page, chapters (count + order toggle in one header) window.
 @Composable
-fun BookScreen(
+internal fun BookScreen(
     bookUrl: String,
     contentPadding: PaddingValues,
     // Restore-only revision: reload the row when a live restore replaced it.
@@ -283,6 +319,8 @@ fun BookScreen(
     provider: BookDataProvider,
     // Null in previews/tests: the EPUB row then reports "unavailable".
     exporter: BookEpubExporter? = null,
+    // Null in previews/tests: the CBZ row then reports "unavailable".
+    cbzExporter: BookCbzExporter? = null,
     // Real queue; null keeps previews/tests on honest "unavailable" toasts.
     downloadEngine: DownloadEngine? = null,
     // Video books use the media3 download manager, not the text engine.
@@ -365,6 +403,11 @@ fun BookScreen(
     var selectSheetOpen by rememberSaveable { mutableStateOf(false) }
     var epubIncludeTranslation by rememberSaveable { mutableStateOf(true) }
     var epubExporting by remember { mutableStateOf(false) }
+    var cbzExporting by remember { mutableStateOf(false) }
+    val mangaBook = book?.contentType == ContentType.Manga
+    val isLocalBook = remember(bookUrl) {
+        isLocalFileBook(bookUrl) || LocalBookProvider.isLocalBook(bookUrl)
+    }
     // Bulk passes: the bar/plate shows a spinner and rejects a second tap
     // until the enqueue/translate call returns.
     var bulkBusy by remember { mutableStateOf<BulkAction?>(null) }
@@ -373,6 +416,7 @@ fun BookScreen(
     // writes a toggle back to it, so the next book opens with the same choice.
     var newestFirst by remember { mutableStateOf(AppSettings.newestFirst) }
     var downloadTasks by remember(bookUrl) { mutableStateOf<List<DownloadTaskEntity>>(emptyList()) }
+    var lastDownloadTaskSignature by remember(bookUrl) { mutableStateOf<String?>(null) }
     val isVideoBook = book?.contentType == ContentType.Video
     val videoDownloadFlow = remember(videoDownloads) {
         videoDownloads?.downloads ?: MutableStateFlow(emptyList<VideoDownloadItem>())
@@ -381,9 +425,7 @@ fun BookScreen(
     // Only this book's episodes; completed counts feed the summary badges.
     val videoDownloadsByIndex = remember(videoDownloadItems, bookUrl, isVideoBook) {
         if (isVideoBook) {
-            videoDownloadItems
-                .filter { it.bookUrl == bookUrl }
-                .associateBy { it.chapterIndex }
+            videoDownloadsForBook(videoDownloadItems, bookUrl)
         } else {
             emptyMap()
         }
@@ -396,6 +438,12 @@ fun BookScreen(
         videoDownloads?.pausedAll ?: MutableStateFlow(false)
     }
     val videoPausedAll by videoPausedFlow.collectAsState()
+    var videoSourceSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var videoSourceStreams by remember(bookUrl) { mutableStateOf<List<VideoStream>>(emptyList()) }
+    var videoSourceStatuses by remember(bookUrl) {
+        mutableStateOf<Map<String, VideoVariantStatus>>(emptyMap())
+    }
+    var videoSourceRefresh by remember(bookUrl) { mutableStateOf(0) }
     // No "download + translate" switch: a download translates when the book
     // already has an active translation pair/config, otherwise it stays a
     // plain download. The choice follows `translationConfigured` below.
@@ -456,6 +504,30 @@ fun BookScreen(
     val context = LocalContext.current
     val resources = LocalResources.current
     val ioScope = rememberCoroutineScope()
+    LaunchedEffect(videoSourceSheetOpen, videoSourceRefresh) {
+        if (!videoSourceSheetOpen) return@LaunchedEffect
+        val target = book ?: return@LaunchedEffect
+        val repository = videoRepository ?: return@LaunchedEffect
+        val chapter = target.chapters.firstOrNull()
+        if (chapter == null) {
+            videoSourceSheetOpen = false
+            bookToast(context, resources.getString(R.string.book_dl_no_chapters))
+            return@LaunchedEffect
+        }
+        val streams = (provider.videoStreams(target.bookUrl, chapter.index) as? Outcome.Ok)
+            ?.value.orEmpty()
+        if (streams.isEmpty()) {
+            videoSourceSheetOpen = false
+            bookToast(context, resources.getString(R.string.book_download_unavailable))
+            return@LaunchedEffect
+        }
+        videoSourceStreams = streams
+        videoSourceStatuses = withContext(Dispatchers.IO) {
+            streams.associate { stream ->
+                stream.url to VideoVariantProbe.probe(stream.url, repository.headersFor(stream))
+            }
+        }
+    }
     // One cover-repair path: the retry tile, the error card and the automatic
     // remote failure all ask the provider for a fresh URI. The caller (this
     // screen) keeps the typed failure; BookCover carries no error type.
@@ -599,6 +671,88 @@ fun BookScreen(
                 }
             } finally {
                 epubExporting = false
+            }
+        }
+    }
+
+    // SAF destination for a CBZ export: a folder, not a file, because one
+    // chapter is one archive under a shared manga folder.
+    val cbzLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        val targetBook = book
+        val targetExporter = cbzExporter
+        if (uri == null) return@rememberLauncherForActivityResult
+        if (targetBook == null || targetExporter == null) {
+            bookToast(context, resources.getString(R.string.tool_cbz_unavailable))
+            return@rememberLauncherForActivityResult
+        }
+        ioScope.launch {
+            cbzExporting = true
+            MiruLog.event(
+                "book",
+                "cbz-start",
+                "book" to MiruLog.idHash(targetBook.bookUrl),
+                "chapters" to targetBook.chapters.count { it.downloaded },
+            )
+            bookToast(context, resources.getString(R.string.tool_cbz_started))
+            try {
+                // A SAF provider can refuse the directory or fail mid-write;
+                // that must surface as a toast, never as a silent no-op.
+                val result = try {
+                    targetExporter.export(
+                        targetBook.bookUrl,
+                        SafCbzOutput(context, uri),
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    CbzExportResult.Failure(e.message ?: "CBZ export failed")
+                }
+                when (result) {
+                    is CbzExportResult.Success -> {
+                        MiruLog.event(
+                            "book",
+                            "cbz-result",
+                            "book" to MiruLog.idHash(targetBook.bookUrl),
+                            "ok" to true,
+                            "written" to result.chaptersWritten,
+                            "skipped" to result.chaptersSkipped,
+                        )
+                        bookToast(
+                            context,
+                            resources.getString(
+                                R.string.tool_cbz_success_fmt,
+                                result.chaptersWritten,
+                            ),
+                        )
+                    }
+                    CbzExportResult.NoChapters -> {
+                        MiruLog.event(
+                            "book",
+                            "cbz-result",
+                            "book" to MiruLog.idHash(targetBook.bookUrl),
+                            "ok" to false,
+                            "reason" to "no-chapters",
+                        )
+                        bookToast(context, resources.getString(R.string.tool_cbz_no_chapters))
+                    }
+                    is CbzExportResult.Failure -> {
+                        MiruLog.event(
+                            "book",
+                            "cbz-result",
+                            "book" to MiruLog.idHash(targetBook.bookUrl),
+                            "ok" to false,
+                            "reason" to "failure",
+                        )
+                        bookToast(
+                            context,
+                            resources.getString(R.string.tool_cbz_failed_fmt, result.message),
+                        )
+                    }
+                }
+            } finally {
+                cbzExporting = false
             }
         }
     }
@@ -917,21 +1071,40 @@ fun BookScreen(
         reloadChapters()
     }
 
-    // Real queue observations: the chapter list is re-read once per second
-    // while a task is active so progress comes from Room, not an animation.
-    LaunchedEffect(bookUrl, downloadEngine, book?.inLibrary, isVideoBook) {
+    // A row may be created by the first download (history-only book), so the
+    // observer must re-key once the id exists.
+    var resolvedDownloadBookId by remember(bookUrl) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(
+        bookUrl,
+        downloadEngine,
+        book?.inLibrary,
+        isVideoBook,
+        resolvedDownloadBookId,
+    ) {
         if (isVideoBook) {
             downloadTasks = emptyList()
             return@LaunchedEffect
         }
         val engine = downloadEngine ?: return@LaunchedEffect
-        val bookId = engine.bookId(bookUrl) ?: return@LaunchedEffect
-        engine.observeBook(bookId).collect { tasks -> downloadTasks = tasks }
+        val bookId = resolvedDownloadBookId ?: engine.bookId(bookUrl) ?: return@LaunchedEffect
+        lastDownloadTaskSignature = null
+        engine.observeBook(bookId).collect { tasks ->
+            val signature = tasks.joinToString(",") { "${it.id}:${it.state}" }
+            downloadTasks = tasks
+            if (signature != lastDownloadTaskSignature) {
+                lastDownloadTaskSignature = signature
+                provider.invalidateBookCache(bookUrl)
+                reloadChapters()
+            }
+        }
     }
     LaunchedEffect(bookUrl, downloadEngine) {
         if (downloadEngine == null) return@LaunchedEffect
         while (true) {
-            delay(1_000)
+            // A blocked queue cannot progress on its own; skip the 3000-row
+            // re-read but keep a short tick so an unblock is picked up quickly.
+            delay(5_000)
+            if (downloadTasks.any { DownloadState.from(it.state)?.isBlocked == true }) continue
             val translating = book?.chapters?.any {
                 it.translationState.equals("PENDING", ignoreCase = true)
             } == true
@@ -948,7 +1121,14 @@ fun BookScreen(
             it.state == VideoDownloadState.Queued ||
                 it.state == VideoDownloadState.Downloading
         }
-        if (active && total > 0) videoCompletedCount.toFloat() / total else null
+        val activeFraction = videoDownloadsByIndex.values
+            .filter { it.state == VideoDownloadState.Downloading }
+            .sumOf { it.progress.toDouble() }
+        if (active && total > 0) {
+            ((videoCompletedCount + activeFraction) / total).toFloat()
+        } else {
+            null
+        }
     } else {
         downloadTasks
             .takeIf { tasks -> tasks.any { DownloadState.from(it.state)?.isActive == true } }
@@ -977,10 +1157,6 @@ fun BookScreen(
         DownloadState.from(it.state) == downloadQueueState
     }?.error
     val downloadBookId = downloadTasks.firstOrNull()?.bookId
-    var resolvedDownloadBookId by remember(bookUrl) { mutableStateOf<Long?>(null) }
-    LaunchedEffect(bookUrl, downloadEngine) {
-        resolvedDownloadBookId = downloadEngine?.bookId(bookUrl)
-    }
     val downloadRunState = when {
         isVideoBook -> null
         downloadTasks.any { it.state == DownloadState.RUNNING.wire } -> DownloadState.RUNNING
@@ -1010,40 +1186,100 @@ fun BookScreen(
         val manager = videoDownloads
         val repository = videoRepository
         val target = book
+        MiruLog.event(
+            "video",
+            "enqueue-ui-start",
+            "chapters" to indexes.size,
+            "manager" to (manager != null),
+            "repository" to (repository != null),
+            "book" to (target != null),
+        )
         when {
             manager == null || repository == null -> bookToast(
                 context,
                 resources.getString(R.string.book_download_unavailable),
             )
             target == null -> Unit
-            !target.inLibrary -> bookToast(
-                context,
-                resources.getString(R.string.book_download_needs_library),
-            )
             indexes.isEmpty() -> Unit
             else -> ioScope.launch {
                 try {
                     var queued = 0
+                    var needsSource = false
+                    val savedKey = AppSettings.videoVariantForBook(bookUrl)
+                    val probed = mutableMapOf<String, VideoVariantStatus>()
                     for (chapter in target.chapters.filter { it.index in indexes }) {
                         val streams = try {
                             provider.videoStreams(target.bookUrl, chapter.index)
                         } catch (e: CancellationException) {
                             throw e
-                        } catch (_: Exception) {
+                        } catch (e: Exception) {
+                            MiruLog.w("video", "enqueue-streams failed ch=${chapter.index}", e)
                             null
                         }
-                        val stream = (streams as? Outcome.Ok)?.value
-                            ?.let { selectVideoStream(it, null) }
-                            ?: continue
-                        val headers = repository.headersFor(stream)
-                        if (manager.enqueue(target.bookUrl, chapter.index, stream, headers)) {
-                            queued++
+                        val available = (streams as? Outcome.Ok)?.value.orEmpty()
+                        MiruLog.event(
+                            "video",
+                            "enqueue-streams",
+                            "chapter" to chapter.index,
+                            "count" to available.size,
+                        )
+                        if (available.isEmpty()) continue
+                        val chosen = available.firstOrNull {
+                            videoVariantKey(it) == savedKey?.trim()
+                        } ?: available.first()
+                        val status = probed[chosen.url] ?: VideoVariantProbe.probe(
+                            chosen.url,
+                            repository.headersFor(chosen),
+                        ).also { probed[chosen.url] = it }
+                        MiruLog.event(
+                            "video",
+                            "enqueue-probe",
+                            "chapter" to chapter.index,
+                            "status" to status.name,
+                            "chosen" to videoVariantKey(chosen),
+                        )
+                        when (val decision = videoDownloadDecision(
+                            available,
+                            savedKey,
+                            mapOf(chosen.url to status),
+                        )) {
+                            VideoDownloadDecision.NoStreams -> continue
+                            VideoDownloadDecision.OpenSheet -> {
+                                MiruLog.event("video", "enqueue-needs-source", "chapter" to chapter.index)
+                                needsSource = true
+                                videoSourceSheetOpen = true
+                                break
+                            }
+                            is VideoDownloadDecision.Download -> {
+                                val headers = repository.headersFor(decision.stream)
+                                val added = manager.enqueue(
+                                    target.bookUrl,
+                                    chapter.index,
+                                    decision.stream,
+                                    headers,
+                                )
+                                MiruLog.event(
+                                    "video",
+                                    "enqueue-result",
+                                    "chapter" to chapter.index,
+                                    "added" to added,
+                                )
+                                if (added) queued++
+                            }
                         }
                     }
-                    val message = if (queued == 0 && videoPausedAll) {
-                        resources.getString(R.string.book_dl_video_paused)
-                    } else {
-                        resources.getString(R.string.book_dl_queued_fmt, queued)
+                    MiruLog.event(
+                        "video",
+                        "enqueue-ui-done",
+                        "queued" to queued,
+                        "needsSource" to needsSource,
+                    )
+                    val message = when {
+                        needsSource ->
+                            resources.getString(R.string.book_dl_video_source_needed)
+                        queued == 0 && videoPausedAll ->
+                            resources.getString(R.string.book_dl_video_paused)
+                        else -> resources.getString(R.string.book_dl_queued_fmt, queued)
                     }
                     bookToast(context, message)
                 } finally {
@@ -1058,9 +1294,9 @@ fun BookScreen(
         val item = videoDownloadsByIndex[index] ?: return
         ioScope.launch {
             when (action) {
-                VideoDownloadAction.Pause -> manager.pause(item.bookUrl, item.chapterUrl)
-                VideoDownloadAction.Resume -> manager.resume(item.bookUrl, item.chapterUrl)
-                VideoDownloadAction.Cancel -> manager.cancel(item.bookUrl, item.chapterUrl)
+                VideoDownloadAction.Pause -> manager.pause(item.bookUrl, item.chapterIndex)
+                VideoDownloadAction.Resume -> manager.resume(item.bookUrl, item.chapterIndex)
+                VideoDownloadAction.Cancel -> manager.cancel(item.bookUrl, item.chapterIndex)
             }
         }
     }
@@ -1358,9 +1594,9 @@ fun BookScreen(
                     chaptersFailed = chaptersFailure != null && current.chapters.isEmpty(),
                     continueTitle = continueTitle,
                     downloadEnabled = if (isVideoBook) {
-                        videoDownloads != null && videoRepository != null && current.inLibrary
+                        videoDownloads != null && videoRepository != null
                     } else {
-                        downloadEngine != null && current.inLibrary
+                        downloadEngine != null
                     },
                     downloadRunning = downloadActive,
                     downloadQueued = downloadQueued,
@@ -1368,8 +1604,8 @@ fun BookScreen(
                     onStopDownload = { stopDownloadsConfirm = true },
                     showSource = !current.bookUrl.startsWith("local") &&
                         current.sourceUrl.isNotBlank(),
-                    toolCount = 2 +
-                        (if (exporter != null && downloadedCount > 0) 1 else 0) +
+                    // Four rendered rows: translator, export, regex, migrate.
+                    toolCount = 3 +
                         (if (migration != null && current.inLibrary &&
                             !current.bookUrl.startsWith("local")
                         ) {
@@ -1427,10 +1663,17 @@ fun BookScreen(
                         epubChapters = downloadedCount,
                         epubEnabled = exporter != null && !epubExporting && downloadedCount > 0,
                         epubBusy = epubExporting,
+                        manga = mangaBook,
+                        video = isVideoBook,
+                        cbzChapters = downloadedCount,
+                        cbzEnabled = cbzExporter != null && !cbzExporting && !isLocalBook,
+                        cbzBusy = cbzExporting,
                         migrateEnabled = migration != null && current.inLibrary &&
                             !current.bookUrl.startsWith("local"),
                         onTranslator = { translatorSheetOpen = true },
                         onEpub = { if (!epubExporting) epubSheetOpen = true },
+                        onCbz = { if (!cbzExporting) cbzLauncher.launch(null) },
+                        onVideoSource = { videoSourceSheetOpen = true },
                         onRegex = { onOpenRegex(bookUrl) },
                         onMigrate = { migrationSheetOpen = true },
                     )
@@ -1493,7 +1736,7 @@ fun BookScreen(
                             onStopDownload = { stopDownloadsConfirm = true },
                             onOpenChapter = { index ->
                                 if (current.contentType == ContentType.Video) {
-                                    onOpenVideo(current.bookUrl, index)
+                                    onOpenVideo(bookUrl, index)
                                 } else {
                                     // Opening the saved chapter resumes its saved
                                     // offset; any other row starts at the top.
@@ -1506,14 +1749,32 @@ fun BookScreen(
                             },
                             onDownloadNext100 = {
                                 if (isVideoBook) {
+                                    MiruLog.event(
+                                        "video",
+                                        "download-tap-100",
+                                        "chapters" to current.chapters.size,
+                                    )
                                     enqueueVideoChapters(
                                         current.chapters.map { it.index }.toSet(),
                                     )
                                     return@ChapterBrowser
                                 }
                                 val engine = downloadEngine
-                                if (current.inLibrary && engine != null) {
+                                if (engine == null) {
+                                    bookToast(
+                                        context,
+                                        resources.getString(R.string.book_download_unavailable),
+                                    )
+                                } else {
                                     ioScope.launch {
+                                        resolvedDownloadBookId = ensureDownloadBook(provider, engine, current.bookUrl)
+                                        if (resolvedDownloadBookId == null) {
+                                            bookToast(
+                                                context,
+                                                resources.getString(R.string.book_dl_book_unavailable),
+                                            )
+                                            return@launch
+                                        }
                                         val result = engine.enqueueNext100Now(
                                             current.bookUrl,
                                             translationConfigured,
@@ -1521,25 +1782,13 @@ fun BookScreen(
                                         bookToast(context, enqueueMessage(context, result))
                                         reloadChapters()
                                     }
-                                } else {
-                                    bookToast(
-                                        context,
-                                        resources.getString(
-                                            if (!current.inLibrary) {
-                                                R.string.book_download_needs_library
-                                            } else {
-                                                R.string.book_download_unavailable
-                                            },
-                                        ),
-                                    )
                                 }
                             },
                             onSelectChapters = { selectSheetOpen = true },
                             downloadAvailable = if (isVideoBook) {
-                                videoDownloads != null && videoRepository != null &&
-                                    current.inLibrary
+                                videoDownloads != null && videoRepository != null
                             } else {
-                                downloadEngine != null && current.inLibrary
+                                downloadEngine != null
                             },
                             translationStates = translationStates,
                             translationConfigured = translationConfigured,
@@ -1621,11 +1870,6 @@ fun BookScreen(
                                 val engine = downloadEngine
                                 if (bulkBusy != null) {
                                     // Pass already running; the bar is disabled.
-                                } else if (!current.inLibrary) {
-                                    bookToast(
-                                        context,
-                                        resources.getString(R.string.book_download_needs_library),
-                                    )
                                 } else if (engine == null) {
                                     bookToast(
                                         context,
@@ -1635,6 +1879,14 @@ fun BookScreen(
                                     bulkBusy = BulkAction.Download
                                     ioScope.launch {
                                         try {
+                                            resolvedDownloadBookId = ensureDownloadBook(provider, engine, current.bookUrl)
+                                            if (resolvedDownloadBookId == null) {
+                                                bookToast(
+                                                    context,
+                                                    resources.getString(R.string.book_dl_book_unavailable),
+                                                )
+                                                return@launch
+                                            }
                                             val result = engine.enqueueNow(
                                                 current.bookUrl,
                                                 indexes,
@@ -1688,6 +1940,20 @@ fun BookScreen(
 
     if (current != null) {
         fun launchDownload(indexes: Set<Int>?, nextCount: Int? = null) {
+            MiruLog.event(
+                "video",
+                "download-tap",
+                "video" to isVideoBook,
+                "busy" to downloadAllBusy,
+                "chapters" to (indexes?.size ?: -1),
+                "next" to (nextCount ?: -1),
+                "running" to videoDownloadsByIndex.values.count {
+                    it.state == VideoDownloadState.Downloading
+                },
+                "queued" to videoDownloadsByIndex.values.count {
+                    it.state == VideoDownloadState.Queued
+                },
+            )
             if (downloadAllBusy) return
             if (isVideoBook) {
                 val pending = current.chapters.asSequence()
@@ -1715,17 +1981,20 @@ fun BookScreen(
                 return
             }
             val engine = downloadEngine
-            if (!current.inLibrary) {
-                bookToast(
-                    context,
-                    resources.getString(R.string.book_download_needs_library),
-                )
-            } else if (engine == null) {
+            if (engine == null) {
                 bookToast(context, resources.getString(R.string.book_download_unavailable))
             } else {
                 ioScope.launch {
                     downloadAllBusy = true
                     try {
+                        resolvedDownloadBookId = ensureDownloadBook(provider, engine, current.bookUrl)
+                        if (resolvedDownloadBookId == null) {
+                            bookToast(
+                                context,
+                                resources.getString(R.string.book_dl_book_unavailable),
+                            )
+                            return@launch
+                        }
                         val result = if (nextCount != null) {
                             engine.enqueueNextNow(
                                 current.bookUrl,
@@ -1735,7 +2004,7 @@ fun BookScreen(
                         } else {
                             engine.enqueueNow(
                                 current.bookUrl,
-                                indexes.orEmpty(),
+                                indexes,
                                 translationConfigured,
                             )
                         }
@@ -1747,6 +2016,8 @@ fun BookScreen(
                             "skipped" to result.skipped,
                             "unknown" to result.unknown,
                             "translate" to result.translationRequested,
+                            "adopted" to result.adopted,
+                            "cached" to result.cached,
                         )
                         bookToast(context, enqueueMessage(context, result))
                         reloadChapters()
@@ -1808,6 +2079,28 @@ fun BookScreen(
                 bookUrl = current.bookUrl,
                 bookTitle = current.title,
                 onClose = { translatorSheetOpen = false },
+            )
+        }
+        if (videoSourceSheetOpen) {
+            VideoVariantSheet(
+                streams = videoSourceStreams,
+                selectedStreamIndex = initialVideoStreamIndex(
+                    videoSourceStreams,
+                    AppSettings.videoVariantForBook(bookUrl),
+                ),
+                probeStatuses = videoSourceStatuses,
+                deadDisabled = true,
+                onRefresh = { videoSourceRefresh++ },
+                onSelect = { index ->
+                    videoSourceStreams.getOrNull(index)?.let { stream ->
+                        AppSettings.setVideoVariantForBook(
+                            bookUrl,
+                            videoVariantKey(stream),
+                        )
+                    }
+                    videoSourceSheetOpen = false
+                },
+                onClose = { videoSourceSheetOpen = false },
             )
         }
         if (epubSheetOpen) {
@@ -1927,10 +2220,6 @@ fun BookScreen(
                                 val engine = downloadEngine
                                 when {
                                     bulkBusy != null -> Unit
-                                    !current.inLibrary -> bookToast(
-                                        context,
-                                        resources.getString(R.string.book_download_needs_library),
-                                    )
                                     engine == null -> bookToast(
                                         context,
                                         resources.getString(R.string.book_download_unavailable),
@@ -1939,6 +2228,14 @@ fun BookScreen(
                                         bulkBusy = BulkAction.Download
                                         ioScope.launch {
                                             try {
+                                                resolvedDownloadBookId = ensureDownloadBook(provider, engine, current.bookUrl)
+                                                if (resolvedDownloadBookId == null) {
+                                                    bookToast(
+                                                        context,
+                                                        resources.getString(R.string.book_dl_book_unavailable),
+                                                    )
+                                                    return@launch
+                                                }
                                                 val result = engine.enqueueNow(
                                                     current.bookUrl,
                                                     indexes,
@@ -2522,7 +2819,6 @@ private fun ActionRow(
         }
         Spacer(modifier = Modifier.height(MiruSpace.S))
         val largeText = isLargeText()
-        val downloadCaption = !book.inLibrary
         val download: @Composable (Modifier) -> Unit = { modifier ->
             if (downloadRunning) {
                 val fraction = downloadPercent?.coerceIn(0f, 1f)
@@ -2595,16 +2891,6 @@ private fun ActionRow(
                 if (showSource) source(Modifier.weight(1f))
                 options(Modifier.weight(1f))
             }
-        }
-        if (downloadCaption) {
-            Spacer(modifier = Modifier.height(MiruSpace.Xs))
-            Text(
-                text = stringResource(R.string.book_download_needs_library),
-                style = MaterialTheme.typography.bodySmall,
-                color = LocalMiruExtraColors.current.muted,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }
@@ -2870,9 +3156,16 @@ private fun ToolsSection(
     epubChapters: Int,
     epubEnabled: Boolean,
     epubBusy: Boolean,
+    manga: Boolean,
+    video: Boolean,
+    cbzChapters: Int,
+    cbzEnabled: Boolean,
+    cbzBusy: Boolean,
     migrateEnabled: Boolean,
     onTranslator: () -> Unit,
     onEpub: () -> Unit,
+    onCbz: () -> Unit,
+    onVideoSource: () -> Unit,
     onRegex: () -> Unit,
     onMigrate: () -> Unit,
 ) {
@@ -2905,6 +3198,38 @@ private fun ToolsSection(
             onClick = onEpub,
             modifier = modifier,
         )
+    }
+    val cbzTile: @Composable (Modifier) -> Unit = { modifier ->
+        MiruToolTile(
+            icon = Icons.Filled.Download,
+            title = stringResource(R.string.tool_cbz),
+            subtitle = when {
+                cbzBusy -> stringResource(R.string.loading_exporting)
+                cbzChapters == 0 -> stringResource(R.string.tool_cbz_no_chapters)
+                else -> stringResource(R.string.tool_cbz_desc)
+            },
+            badge = stringResource(R.string.book_tool_chapters_fmt, cbzChapters),
+            badgeHighlighted = cbzChapters > 0,
+            enabled = cbzEnabled && cbzChapters > 0,
+            onClick = onCbz,
+            modifier = modifier,
+        )
+    }
+    // Manga is exported as CBZ (one archive per chapter); text keeps EPUB.
+    // A video book has no export: its tool is the source picker with a probe.
+    val videoSourceTile: @Composable (Modifier) -> Unit = { modifier ->
+        MiruToolTile(
+            icon = Icons.Filled.PlayArrow,
+            title = stringResource(R.string.book_tool_video_source),
+            subtitle = stringResource(R.string.book_tool_video_source_desc),
+            onClick = onVideoSource,
+            modifier = modifier,
+        )
+    }
+    val exportTile = when {
+        video -> videoSourceTile
+        manga -> cbzTile
+        else -> epubTile
     }
     val regexTile: @Composable (Modifier) -> Unit = { modifier ->
         MiruToolTile(
@@ -2951,7 +3276,7 @@ private fun ToolsSection(
         if (largeText) {
             Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
                 translatorTile(Modifier.fillMaxWidth())
-                epubTile(Modifier.fillMaxWidth())
+                exportTile(Modifier.fillMaxWidth())
                 regexTile(Modifier.fillMaxWidth())
                 migrateTile(Modifier.fillMaxWidth())
             }
@@ -2968,7 +3293,7 @@ private fun ToolsSection(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(MiruSpace.S),
                 ) {
-                    epubTile(Modifier.fillMaxWidth())
+                    exportTile(Modifier.fillMaxWidth())
                     migrateTile(Modifier.fillMaxWidth())
                 }
             }

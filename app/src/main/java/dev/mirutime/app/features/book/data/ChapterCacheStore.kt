@@ -6,6 +6,8 @@ import dev.mirutime.data.library.ChapterBodyEntity
 import dev.mirutime.data.library.ChapterEntity
 import dev.mirutime.data.library.ChapterPageEntity
 import dev.mirutime.data.library.LibraryRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Cache-on-read writer for remote chapters. It uses the download engine's file
@@ -24,8 +26,12 @@ internal class ChapterCacheStore(
         val chapter = repository.chapter(bookUrl, chapterIndex) ?: return
         bookLocks.withLock(bookLocks.bookKey(chapter.bookId)) {
             val existing = repository.chapterBody(chapter.chapterId)
-            if (existing != null && files.textExists(existing.path)) return@withLock
-            val stored = files.writeText(chapter.bookId, chapter.chapterId, html)
+            if (existing != null && withContext(Dispatchers.IO) { files.textExists(existing.path) }) {
+                return@withLock
+            }
+            val stored = withContext(Dispatchers.IO) {
+                files.writeText(chapter.bookId, chapter.chapterId, html)
+            }
             repository.saveChapterBody(
                 ChapterBodyEntity(
                     chapterId = chapter.chapterId,
@@ -54,22 +60,33 @@ internal class ChapterCacheStore(
         if (pageUrls.isEmpty()) return false
         val chapter = repository.chapter(bookUrl, chapterIndex) ?: return false
         val cached = repository.chapterPage(chapter.chapterId)
-        if (cached != null && files.pagesExist(cached.pagePathsJson)) return true
-        // Network work stays outside the per-book write lock; only file rows
-        // and the DB commit need serialization.
-        val bytesByPage = pageUrls.map { url -> fetchPage(url) ?: return false }
-        return bookLocks.withLock(bookLocks.bookKey(chapter.bookId)) {
-            val existing = repository.chapterPage(chapter.chapterId)
-            if (existing != null && files.pagesExist(existing.pagePathsJson)) {
-                return@withLock true
-            }
-            val paths = ArrayList<String>(pageUrls.size)
-            var totalBytes = 0L
-            pageUrls.forEachIndexed { index, url ->
-                val bytes = bytesByPage[index]
-                paths += files.writePage(chapter.bookId, chapter.chapterId, index, url, bytes)
+        if (cached != null && withContext(Dispatchers.IO) { files.pagesExist(cached.pagePathsJson) }) return true
+        // Fetch one page at a time: holding a whole manga chapter in memory is
+        // an OOM. The network stays outside the per-book lock; only each file
+        // write and the final row commit are serialized.
+        val bookKey = bookLocks.bookKey(chapter.bookId)
+        val paths = ArrayList<String>(pageUrls.size)
+        var totalBytes = 0L
+        for ((index, url) in pageUrls.withIndex()) {
+            val bytes = fetchPage(url) ?: return false
+            var alreadyCached = false
+            bookLocks.withLock(bookKey) {
+                val existing = repository.chapterPage(chapter.chapterId)
+                if (existing != null && withContext(Dispatchers.IO) {
+                        files.pagesExist(existing.pagePathsJson)
+                    }
+                ) {
+                    alreadyCached = true
+                    return@withLock
+                }
+                paths += withContext(Dispatchers.IO) {
+                    files.writePage(chapter.bookId, chapter.chapterId, index, url, bytes)
+                }
                 totalBytes += bytes.size
             }
+            if (alreadyCached) return true
+        }
+        bookLocks.withLock(bookKey) {
             repository.saveChapterPage(
                 ChapterPageEntity(
                     chapterId = chapter.chapterId,
@@ -78,8 +95,8 @@ internal class ChapterCacheStore(
                     totalBytes = totalBytes,
                 ),
             )
-            true
         }
+        return true
     }
 }
 

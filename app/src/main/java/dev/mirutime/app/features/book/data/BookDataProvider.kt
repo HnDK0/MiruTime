@@ -120,8 +120,14 @@ interface BookDataProvider {
      * Download-specific payload getters. Unlike the reader calls they keep the
      * typed source failure (auth/CF/rate limit) instead of returning null, so
      * the queue can fail one chapter without burning worker retries forever.
+     * [sourceId] is the persisted `BookEntity.installId` hint; providers that
+     * resolve a plugin may use it, the default implementation ignores it.
      */
-    suspend fun downloadChapterText(bookUrl: String, chapterIndex: Int): String =
+    suspend fun downloadChapterText(
+        bookUrl: String,
+        chapterIndex: Int,
+        sourceId: String? = null,
+    ): String =
         chapterContent(bookUrl, chapterIndex)?.html
             ?: throw ChapterDownloadException(
                 ChapterFailureKind.SOURCE,
@@ -129,7 +135,11 @@ interface BookDataProvider {
                 message = "Chapter content unavailable",
             )
 
-    suspend fun downloadChapterPages(bookUrl: String, chapterIndex: Int): List<String> =
+    suspend fun downloadChapterPages(
+        bookUrl: String,
+        chapterIndex: Int,
+        sourceId: String? = null,
+    ): List<String> =
         chapterPages(bookUrl, chapterIndex).ifEmpty {
             throw ChapterDownloadException(
                 ChapterFailureKind.SOURCE,
