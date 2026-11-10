@@ -335,6 +335,10 @@ class PluginInstaller(
     private fun commit(path: String, bytes: ByteArray) {
         fileSystem.write("$path.tmp", bytes)
         fileSystem.rename("$path.tmp", path)
+        // FileSystem degrades failures to "missing"; a reported Success without
+        // the final bytes would hide ENOSPC/read-only storage, or report a new
+        // sha while the old file is still on disk.
+        check(fileSystem.read(path)?.contentEquals(bytes) == true) { "write failed for $path" }
     }
 
     private sealed interface Fetch {

@@ -27,6 +27,7 @@ class MiruFileLoggerTest {
         MiruFileLogger.install(dir)
         MiruFileLogger.write("INFO", "MiruTime.app", "started глава")
         MiruFileLogger.write("ERROR", "MiruTime.reader", "broken")
+        MiruFileLogger.flush()
 
         val lines = MiruFileLogger.logFile(dir).readLines()
         assertEquals(2, lines.size)
@@ -44,6 +45,7 @@ class MiruFileLoggerTest {
 
         MiruFileLogger.write("INFO", "t", first)
         MiruFileLogger.write("INFO", "t", second)
+        MiruFileLogger.flush()
 
         val current = MiruFileLogger.logFile(dir).readText().trimEnd()
         val rotated = MiruFileLogger.rotatedFile(dir).readText().trimEnd()
@@ -81,6 +83,7 @@ class MiruFileLoggerTest {
     fun `caps very long messages`() {
         MiruFileLogger.install(dir)
         MiruFileLogger.write("INFO", "t", "x".repeat(10_000))
+        MiruFileLogger.flush()
 
         val text = MiruFileLogger.logFile(dir).readText()
         assertTrue(text.contains("[truncated]"))

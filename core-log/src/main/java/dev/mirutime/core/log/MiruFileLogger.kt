@@ -6,6 +6,7 @@ import java.io.FileOutputStream
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.time.Instant
+import java.util.concurrent.Executors
 import java.util.Locale
 
 /**
@@ -25,6 +26,12 @@ object MiruFileLogger {
     private const val TRUNCATED = "…[truncated]"
 
     private val lock = Any()
+
+    // File writes must never block the UI thread or a coroutine caller; the
+    // single writer preserves order. ERROR/FATAL callers flush explicitly.
+    private val writer = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "miru-log-write").apply { isDaemon = true }
+    }
 
     @Volatile
     private var directory: File? = null
@@ -63,7 +70,12 @@ object MiruFileLogger {
     fun write(level: String, tag: String, message: String, throwable: Throwable? = null) {
         val dir = directory ?: return
         val line = formatLine(level, tag, message, throwable)
-        append(dir, line)
+        writer.execute { append(dir, line) }
+    }
+
+    /** Blocks until queued lines are on disk (export and crash paths only). */
+    fun flush() {
+        runCatching { writer.submit {}.get() }
     }
 
     fun formatLine(

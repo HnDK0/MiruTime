@@ -12,6 +12,7 @@ object CrashReporter {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             runCatching { MiruFileLogger.write("FATAL", "crash", summary(thread), error) }
+            runCatching { MiruFileLogger.flush() }
             if (previous != null) {
                 previous.uncaughtException(thread, error)
             } else {

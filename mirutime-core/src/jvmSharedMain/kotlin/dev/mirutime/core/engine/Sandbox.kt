@@ -20,6 +20,9 @@ internal fun createSandboxGlobals(): org.luaj.vm2.Globals {
     globals.set("require", LuaValue.NIL)
     globals.set("package", LuaValue.NIL)
     globals.set("debug", LuaValue.NIL)
+    // Remove VM introspection helpers that can leak bytecode/host details.
+    globals.set("collectgarbage", LuaValue.NIL)
+    (globals.get("string") as? LuaTable)?.set("dump", LuaValue.NIL)
     // coroutine stays: NoveLA removes only luajava/io/load*/require/package/
     // debug (LuaSourceLoader.kt:1417-1428), and no corpus plugin abuses it.
     // os: whitelist time/date plus clock/difftime (NoveLA keeps the full os

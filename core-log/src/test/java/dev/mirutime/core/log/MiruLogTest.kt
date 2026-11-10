@@ -26,6 +26,7 @@ class MiruLogTest {
     @Test
     fun `event writes stable key value line to file`() {
         MiruLog.event("library", "load", "books" to 12, "shelves" to 3)
+        MiruFileLogger.flush()
 
         val line = MiruFileLogger.logFile(dir).readLines().single()
         assertTrue(line.contains(" INFO MiruTime.library ["))
@@ -45,6 +46,7 @@ class MiruLogTest {
     @Test
     fun `event still passes through file redaction`() {
         MiruLog.event("cf", "solve", "token" to "super-secret-value", "cookies" to true)
+        MiruFileLogger.flush()
 
         val line = MiruFileLogger.logFile(dir).readText()
         assertFalse(line.contains("super-secret-value"))

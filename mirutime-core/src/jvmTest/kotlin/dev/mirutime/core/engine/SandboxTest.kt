@@ -41,6 +41,34 @@ class SandboxTest {
     }
 
     @Test
+    fun vmIntrospectionHelpersAreRemoved() {
+        // collectgarbage() and string.dump() expose VM internals (bytecode,
+        // heap control): a plugin must not reach either.
+        val session = createLuaSession(
+            "test-vm-introspection",
+            """
+            function probe()
+                return {
+                    collectgarbage_fn = collectgarbage == nil,
+                    string_dump_fn = string.dump == nil,
+                    load_fn = load == nil,
+                    io_tbl = io == nil,
+                    debug_tbl = debug == nil,
+                }
+            end
+            """.trimIndent(),
+        )
+        val result = session.call("probe", emptyList())
+        session.dispose()
+        assertEquals(null, result.error)
+        val map = assertIs<LuaData.LuaMap>(result.data)
+        assertEquals(5, map.entries.size)
+        for ((key, value) in map.entries) {
+            assertEquals(LuaData.LuaBool(true), value, "$key must be blocked")
+        }
+    }
+
+    @Test
     fun coroutineAndOsClockPresent() {
         // NoveLA keeps coroutine and the full os minus execute/exit/getenv/
         // rename/remove/tmpname (LuaSourceLoader.kt:1417-1438).
