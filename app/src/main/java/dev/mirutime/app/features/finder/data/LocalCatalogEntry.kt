@@ -13,9 +13,9 @@ import java.net.URI
 import java.util.Locale
 
 // Manga folder entries can be opened without importing one file at a time.
-// Collection is a scan classification (its children are flattened into cards),
-// the other three are real catalogue entries.
-enum class MangaFolderKind { SingleCbz, CbzSet, ImageBook, Collection }
+// The first level of a configured folder is always a book; the layout only
+// describes what its chapters are made of.
+enum class MangaFolderKind { SingleCbz, CbzSet, ImageBook, Mixed }
 
 enum class LocalCatalogEntryType { File, Folder }
 
@@ -52,9 +52,27 @@ data class LocalCatalogEntry(
     val isManga: Boolean get() = kind == "manga"
     val isFolder: Boolean get() = entryType == LocalCatalogEntryType.Folder
     val title: String
-        get() = embeddedTitle?.takeIf { it.isNotBlank() }
-            ?: if (isFolder) displayName else displayName.substringBeforeLast('.').ifBlank { displayName }
+        get() {
+            val name = if (isFolder) {
+                displayName
+            } else {
+                displayName.substringBeforeLast('.').ifBlank { displayName }
+            }
+            // Manga is named after its folder/archive, never after ComicInfo:
+            // a chapter archive usually carries the chapter title, which would
+            // name the whole book "Глава 16".
+            if (isManga) return name
+            return embeddedTitle?.takeIf { it.isNotBlank() } ?: name
+        }
 }
+
+// One local scan, joined with the imported rows it already knows about. The
+// catalogue session keeps this snapshot for one visit so paging never rescans
+// the SAF tree per page.
+data class LocalCatalogSnapshot(
+    val entries: List<LocalCatalogEntry>,
+    val imported: Map<String, ImportedLocalBook>,
+)
 
 // A pure snapshot of one folder's scan result: LocalSourceFolders turns the
 // real SAF cursors into these, tests use literals (no Android Uri needed).

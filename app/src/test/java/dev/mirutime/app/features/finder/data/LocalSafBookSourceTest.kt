@@ -4,8 +4,10 @@ import java.io.File
 import java.io.InputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.fail
@@ -26,6 +28,12 @@ class LocalSafBookSourceTest {
         override fun get(key: String): String? = registryStore[key]
         override fun put(key: String, value: String) {
             registryStore[key] = value
+        }
+
+        override fun all(): Map<String, String> = registryStore.toMap()
+
+        override fun mergeAll(values: Map<String, String>) {
+            registryStore.putAll(values)
         }
     })
 
@@ -50,13 +58,28 @@ class LocalSafBookSourceTest {
             files[documentUri]?.inputStream()
     }
 
-    private fun source(resolver: FakeResolver): LocalSafBookSource = LocalSafBookSource(
+    // The catalogue metadata cache owns the cover file; the direct reader must
+    // be able to read it back from that cache.
+    private class FakeMetadata(
+        override val root: File,
+        private val coverUrl: String?,
+    ) : LocalCatalogMetadataProvider {
+        override suspend fun enrich(
+            entries: List<LocalCatalogEntry>,
+        ): List<LocalCatalogEntry> = entries.map { it.copy(coverUrl = it.coverUrl ?: coverUrl) }
+    }
+
+    private fun source(
+        resolver: FakeResolver,
+        metadata: LocalCatalogMetadataProvider? = null,
+    ): LocalSafBookSource = LocalSafBookSource(
         resolver = resolver,
         cache = LocalSafCache(
             root = temp.newFolder("cache-${System.nanoTime()}"),
             open = { resolver.openInput(it) },
         ),
         registry = registry,
+        metadataCache = metadata,
     )
 
     private fun addFile(
@@ -227,7 +250,7 @@ class LocalSafBookSourceTest {
     }
 
     @Test
-    fun `cbz direct source is one chapter with natural ordered pages`() = runTest {
+    fun `cbz direct source is named after its file and has one chapter`() = runTest {
         val resolver = FakeResolver()
         val file = cbz(
             "comic",
@@ -239,9 +262,10 @@ class LocalSafBookSourceTest {
 
         val book = source.book(localCatalogUrl(uri))
 
-        assertEquals("CBZ Title", book.title)
+        assertEquals("comic", book.title)
         assertTrue(book.isManga)
         assertEquals(1, book.chapterCount)
+        assertEquals(listOf("comic"), source.chapters(book.bookUrl).map { it.title })
         val html = source.chapterContent(book.bookUrl, 1).html
         val first = html.indexOf("00000.png")
         val second = html.indexOf("00001.png")
@@ -314,6 +338,64 @@ class LocalSafBookSourceTest {
     }
 
     @Test
+    fun `nested volume folders are chapters of one book`() = runTest {
+        val resolver = FakeResolver()
+        val page = temp.newFile("001.png").apply { writeBytes(png) }
+        addFile(resolver, "page", "001.png", page)
+        addFolder(resolver, "chapter", "Глава 16", listOf(child("page", "001.png", page)))
+        addFolder(resolver, "volume", "Vol 1", listOf(child("chapter", "Глава 16", folder = true)))
+        val bookUri = addFolder(
+            resolver,
+            "book",
+            "Моё перерождение",
+            listOf(child("volume", "Vol 1", folder = true)),
+        )
+        val source = source(resolver)
+
+        val book = source.book(localCatalogUrl(bookUri))
+
+        assertEquals("Моё перерождение", book.title)
+        assertEquals(1, book.chapterCount)
+        assertEquals(
+            listOf("Vol 1 / Глава 16"),
+            source.chapters(book.bookUrl).map { it.title },
+        )
+    }
+
+    @Test
+    fun `a mixed book keeps archive and image chapters`() = runTest {
+        val resolver = FakeResolver()
+        val page = temp.newFile("mixed.png").apply { writeBytes(png) }
+        addFile(resolver, "mixed-page", "001.png", page)
+        addFolder(
+            resolver,
+            "mixed-bonus",
+            "bonus",
+            listOf(child("mixed-page", "001.png", page)),
+        )
+        val archive = cbz("mixed-vol", "Vol 1", listOf("001.png" to png))
+        addFile(resolver, "mixed-vol", "vol1.cbz", archive)
+        val bookUri = addFolder(
+            resolver,
+            "mixed-book",
+            "Mixed",
+            listOf(
+                child("mixed-bonus", "bonus", folder = true),
+                child("mixed-vol", "vol1.cbz", archive),
+            ),
+        )
+        val source = source(resolver)
+
+        val book = source.book(localCatalogUrl(bookUri))
+
+        assertEquals("Mixed", book.title)
+        assertEquals(2, book.chapterCount)
+        assertEquals(listOf("bonus", "vol1"), source.chapters(book.bookUrl).map { it.title })
+        assertTrue(source.chapterContent(book.bookUrl, 1).html.contains("<img"))
+        assertTrue(source.chapterContent(book.bookUrl, 2).html.contains("<img"))
+    }
+
+    @Test
     fun `revoked access is a typed failure and cache keeps one archive per identity`() = runTest {
         val resolver = FakeResolver()
         val uri = addFile(resolver, "epub", "saf-book.epub", epub())
@@ -329,6 +411,43 @@ class LocalSafBookSourceTest {
         } catch (e: LocalSafException) {
             assertEquals(SafFailure.PermissionDenied, e.failure)
         }
+    }
+
+    @Test
+    fun `a cover from the metadata cache is read back`() = runTest {
+        val resolver = FakeResolver()
+        val uri = addFile(
+            resolver,
+            "cbz",
+            "comic.cbz",
+            cbz("comic", "Comic", listOf("001.png" to png)),
+        )
+        val metadataRoot = temp.newFolder("local-catalog")
+        val cover = File(metadataRoot, "cover.png").apply { writeBytes(png) }
+        val source = source(resolver, FakeMetadata(metadataRoot, cover.toURI().toString()))
+
+        val book = source.book(localCatalogUrl(uri))
+
+        assertEquals(cover.toURI().toString(), book.coverUrl)
+        assertArrayEquals(png, source.coverBytes(book.bookUrl))
+    }
+
+    @Test
+    fun `a cover outside the app caches is not read`() = runTest {
+        val resolver = FakeResolver()
+        val uri = addFile(
+            resolver,
+            "cbz",
+            "comic.cbz",
+            cbz("comic", "Comic", listOf("001.png" to png)),
+        )
+        val metadataRoot = temp.newFolder("local-catalog")
+        val outside = temp.newFile("outside.png").apply { writeBytes(png) }
+        val source = source(resolver, FakeMetadata(metadataRoot, outside.toURI().toString()))
+
+        val book = source.book(localCatalogUrl(uri))
+
+        assertNull(source.coverBytes(book.bookUrl))
     }
 
     @Test

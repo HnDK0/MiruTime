@@ -25,83 +25,173 @@ class MangaFolderScanTest {
         children = children.toList(),
     )
 
-    @Test
-    fun `classifies image folders cbz sets collections and empty folders`() {
-        val imageBook = dir("Book", file("001.jpg"), file("002.jpg"))
-        val cbzSet = dir("Set", file("a.cbz"), file("b.cbz"))
-        val chapterBook = dir("Chapters", dir("ch1", file("001.jpg")), dir("ch2", file("1.png")))
-        val collection = dir("Library", dir("One", file("001.jpg")), dir("Two", file("001.jpg")))
-        val empty = dir("Empty")
-
-        assertEquals(MangaFolderKind.ImageBook, classifyMangaFolder(imageBook))
-        assertEquals(MangaFolderKind.CbzSet, classifyMangaFolder(cbzSet))
-        assertEquals(MangaFolderKind.ImageBook, classifyMangaFolder(chapterBook))
-        assertEquals(MangaFolderKind.Collection, classifyMangaFolder(collection))
-        assertNull(classifyMangaFolder(empty))
-        assertNull(classifyMangaFolder(file("book.epub")))
-    }
+    private fun titles(book: ScannedNode) = collectMangaChapters(book).map { it.title }
 
     @Test
-    fun `a folder with one cbz is a folder book not a flattened file`() {
-        // Root and child have the same rule: the directory is the book and
-        // each CBZ is a chapter, even when there is exactly one.
-        val root = collectMangaCatalog(dir("Single", file("book.cbz")))
-        assertTrue(root.files.isEmpty())
-        assertEquals(1, root.folders.size)
-        assertEquals(MangaFolderKind.CbzSet, root.folders.single().layout)
-        assertEquals("Single", root.folders.single().name)
-        assertEquals(1, root.folders.single().chapterCount)
-        assertEquals("content://test/document/book.cbz", root.folders.single().primaryChildUri)
-
-        val child = collectMangaCatalog(
-            dir("Library", dir("OneShot", file("only.cbz"))),
+    fun `first level is always a book, standalone cbz included`() {
+        val catalog = collectMangaCatalog(
+            dir(
+                "Library",
+                file("X.cbz", "x"),
+                dir("Title", dir("Глава 16", file("001.jpg", "p1"))),
+            ),
         )
-        assertTrue(child.files.isEmpty())
-        assertEquals("OneShot", child.folders.single().name)
-        assertEquals(MangaFolderKind.CbzSet, child.folders.single().layout)
-        assertEquals(1, child.folders.single().chapterCount)
+
+        assertEquals(1, catalog.files.size)
+        assertEquals("X.cbz", catalog.files.single().name)
+        assertEquals(MangaFolderKind.SingleCbz, catalog.files.single().mangaLayout)
+        assertEquals(1, catalog.files.single().chapterCount)
+
+        assertEquals(1, catalog.folders.size)
+        assertEquals("Title", catalog.folders.single().name)
+        assertEquals(MangaFolderKind.ImageBook, catalog.folders.single().layout)
+        assertEquals(1, catalog.folders.single().chapterCount)
     }
 
     @Test
-    fun `several cbz are one naturally ordered set`() {
-        val set = collectMangaCatalog(
-            dir("Set", file("vol10.cbz", "10"), file("vol2.cbz", "2"), file("vol1.cbz", "1")),
+    fun `a tree deeper than twelve is truncated with a warning`() {
+        var node = dir("chapter", file("001.jpg"))
+        repeat(13) { index -> node = dir("d$index", node) }
+        val warnings = mutableListOf<String>()
+
+        val chapters = collectMangaChapters(dir("Book", node), warnings)
+
+        assertTrue(chapters.isEmpty())
+        assertTrue(warnings.any { it.contains("too deep") })
+    }
+
+    @Test
+    fun `a tree within the limit is not truncated`() {
+        var node = dir("chapter", file("001.jpg"))
+        repeat(9) { index -> node = dir("d$index", node) }
+        val warnings = mutableListOf<String>()
+
+        val chapters = collectMangaChapters(dir("Book", node), warnings)
+
+        assertTrue(chapters.isNotEmpty())
+        assertTrue(warnings.none { it.contains("too deep") })
+    }
+
+    @Test
+    fun `chapter title is the path from the book root`() {
+        val book = dir("Title", dir("Vol 1", dir("Глава 16", file("001.jpg"))))
+
+        assertEquals(listOf("Vol 1 / Глава 16"), titles(book))
+    }
+
+    @Test
+    fun `every nested folder with pages is a chapter in natural order`() {
+        val book = dir(
+            "Title",
+            dir("ch2", file("001.jpg")),
+            dir("ch1", file("001.jpg")),
+            dir("Extra", file("bonus.jpg")),
         )
-        assertTrue(set.files.isEmpty())
-        assertEquals(3, set.folders.single().chapterCount)
-        assertEquals("content://test/document/1", set.folders.single().primaryChildUri)
+
+        assertEquals(listOf("Extra", "ch1", "ch2"), titles(book))
     }
 
     @Test
-    fun `image folders stay image books at root and in a collection`() {
-        val root = collectMangaCatalog(dir("OneShot", file("001.jpg"), file("002.jpg")))
-        assertTrue(root.files.isEmpty())
-        assertEquals(MangaFolderKind.ImageBook, root.folders.single().layout)
-        assertEquals(1, root.folders.single().chapterCount)
+    fun `leaf folder with pages is a chapter even when named like a volume`() {
+        val book = dir("Title", dir("Vol 1", file("001.jpg"), file("002.jpg")))
 
-        val child = collectMangaCatalog(
-            dir("Library", dir("Vol2", file("001.jpg")), dir("Vol1", file("001.jpg"))),
+        val chapter = collectMangaChapters(book).single()
+        assertEquals("Vol 1", chapter.title)
+        assertEquals(2, chapter.pages.size)
+    }
+
+    @Test
+    fun `folder with archives and image chapters is mixed`() {
+        val book = dir(
+            "Title",
+            file("vol1.cbz", "v1"),
+            dir("bonus", file("001.jpg", "p1")),
         )
-        assertEquals(listOf("Vol1", "Vol2"), child.folders.map { it.name })
-        assertTrue(child.folders.all { it.layout == MangaFolderKind.ImageBook })
+        val catalog = collectMangaCatalog(dir("Library", book))
+
+        val entry = catalog.folders.single()
+        assertEquals(MangaFolderKind.Mixed, entry.layout)
+        assertEquals(2, entry.chapterCount)
+        assertEquals(listOf("bonus", "vol1"), titles(book))
     }
 
     @Test
-    fun `image book chapters count subdirectories and fall back to one chapter`() {
-        val chaptered = collectMangaCatalog(
-            dir("Book", dir("ch2", file("001.jpg")), dir("ch1", file("001.jpg")), file("cover.jpg")),
+    fun `book root pages are a cover, not a chapter, when chapters exist`() {
+        val book = dir(
+            "Title",
+            file("cover.jpg", "cover"),
+            dir("Глава 1", file("001.jpg", "p1")),
         )
-        assertEquals(2, chaptered.folders.single().chapterCount)
 
-        val single = collectMangaCatalog(dir("OneShot", file("001.jpg"), file("002.jpg")))
-        assertEquals(1, single.folders.single().chapterCount)
+        assertEquals(listOf("Глава 1"), titles(book))
     }
 
     @Test
-    fun `empty tree yields nothing`() {
-        val catalog = collectMangaCatalog(dir("Empty", dir("Nothing")))
+    fun `book root pages are a single chapter when nothing is nested`() {
+        val book = dir("OneShot", file("001.jpg", "p1"), file("002.jpg", "p2"))
+
+        val chapter = collectMangaChapters(book).single()
+        assertEquals("OneShot", chapter.title)
+        assertEquals(2, chapter.pages.size)
+    }
+
+    @Test
+    fun `configured root pages produce no books`() {
+        val catalog = collectMangaCatalog(dir("Library", file("001.jpg", "p1")))
+
         assertTrue(catalog.files.isEmpty())
         assertTrue(catalog.folders.isEmpty())
+    }
+
+    @Test
+    fun `empty folders are skipped`() {
+        val catalog = collectMangaCatalog(
+            dir("Library", dir("Empty", dir("Nothing")), dir("EmptyTwo")),
+        )
+
+        assertTrue(catalog.folders.isEmpty())
+    }
+
+    @Test
+    fun `volume folders are naturally ordered`() {
+        val book = dir(
+            "Title",
+            dir("Vol 10", file("001.jpg")),
+            dir("Vol 2", file("001.jpg")),
+            dir("Vol 1", file("001.jpg")),
+        )
+
+        assertEquals(listOf("Vol 1", "Vol 2", "Vol 10"), titles(book))
+    }
+
+    @Test
+    fun `a tree deeper than the limit warns and stops that branch`() {
+        var node = dir("Bottom", file("001.jpg"))
+        repeat(14) { level ->
+            node = dir("Level $level", node)
+        }
+
+        val scan = collectMangaCatalog(dir("Library", node))
+        val warnings = mutableListOf<String>()
+        val chapters = collectMangaChapters(node, warnings)
+
+        assertTrue(warnings.any { it.contains("too deep") })
+        assertTrue(chapters.isEmpty())
+        assertTrue(scan.warnings.any { it.contains("too deep") })
+    }
+
+    @Test
+    fun `first comic info is found at the root or inside a chapter folder`() {
+        val atRoot = dir("Book", dir("Глава 1"), file("ComicInfo.xml", "root"))
+        assertEquals("content://test/document/root", firstComicInfoUri(atRoot))
+
+        val nested = dir(
+            "Book",
+            dir("Глава 1", file("ComicInfo.xml", "nested"), file("001.jpg")),
+        )
+        assertEquals("content://test/document/nested", firstComicInfoUri(nested))
+
+        assertNull(firstComicInfoUri(dir("Book", dir("Глава 1", file("001.jpg")))))
     }
 
     @Test

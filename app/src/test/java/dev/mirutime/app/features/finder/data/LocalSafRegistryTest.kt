@@ -15,6 +15,12 @@ class LocalSafRegistryTest {
         override fun put(key: String, value: String) {
             store[key] = value
         }
+
+        override fun all(): Map<String, String> = store.toMap()
+
+        override fun mergeAll(values: Map<String, String>) {
+            store.putAll(values)
+        }
     })
 
     private val uri = "content://com.android.externalstorage.documents/tree/primary%3ABooks/document/one.epub"

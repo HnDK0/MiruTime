@@ -5,7 +5,9 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
-import dev.mirutime.app.features.library.data.naturalCompare
+import dev.mirutime.app.features.local.data.MAX_LOCAL_SCAN_DEPTH
+import dev.mirutime.app.features.local.data.naturalCompare
+import dev.mirutime.app.features.settings.data.mergeFolders
 
 // `uri` is the concrete document URI (built with the tree URI), not only a
 // display name: the importer reads bytes from it directly. Size/mtime are
@@ -18,6 +20,45 @@ data class LocalFolderFile(
     val lastModified: Long? = null,
 )
 
+private const val LOCAL_FOLDER_PREFS = "local_source_folders"
+private const val KIND_BOOKS = "books"
+private const val KIND_MANGA = "manga"
+
+/** Durable folder list seam; tests use an in-memory implementation. */
+interface LocalFolderStore {
+    fun get(kind: String): Set<String>
+
+    /** Must commit durably; false means the platform refused the write. */
+    fun put(kind: String, values: Set<String>): Boolean
+}
+
+class SharedPrefsLocalFolderStore(context: Context) : LocalFolderStore {
+    private val prefs = context.applicationContext
+        .getSharedPreferences(LOCAL_FOLDER_PREFS, Context.MODE_PRIVATE)
+
+    override fun get(kind: String): Set<String> =
+        prefs.getStringSet(kind, emptySet()).orEmpty()
+
+    override fun put(kind: String, values: Set<String>): Boolean =
+        prefs.edit().putStringSet(kind, values).commit()
+}
+
+/** Backup/restore of the folder list; merge keeps folders added after the archive. */
+class LocalFolderBackup(private val store: LocalFolderStore) {
+    fun snapshot(): Pair<List<String>, List<String>> =
+        store.get(KIND_BOOKS).sorted() to store.get(KIND_MANGA).sorted()
+
+    fun restore(books: List<String>, manga: List<String>) {
+        restoreKind(KIND_BOOKS, books)
+        restoreKind(KIND_MANGA, manga)
+    }
+
+    private fun restoreKind(kind: String, incoming: List<String>) {
+        val merged = mergeFolders(store.get(kind), incoming)
+        if (!store.put(kind, merged)) error("Could not restore local folders")
+    }
+}
+
 // SAF folders added by the user for the two built-in local sources. URIs live
 // in SharedPreferences per kind ("books" / "manga"); the files themselves are
 // never copied, only walked with DocumentsContract on demand.
@@ -25,12 +66,18 @@ data class LocalFolderFile(
 class LocalSourceFolders(
     context: Context,
     private val registry: LocalSafRegistry,
+    private val store: LocalFolderStore = SharedPrefsLocalFolderStore(context.applicationContext),
 ) {
     private val context = context.applicationContext
-    private val prefs = this.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val folderBackup = LocalFolderBackup(store)
 
     fun uris(kind: String): List<Uri> =
-        prefs.getStringSet(kind, emptySet()).orEmpty().sorted().map(Uri::parse)
+        store.get(kind).sorted().map(Uri::parse)
+
+    fun snapshotFolders(): Pair<List<String>, List<String>> = folderBackup.snapshot()
+
+    fun restoreFolders(books: List<String>, manga: List<String>) =
+        folderBackup.restore(books, manga)
 
     // The persisted grant is the only permission that survives a restart, so a
     // denied/non-persistable grant must not leave a folder in the list.
@@ -42,12 +89,11 @@ class LocalSourceFolders(
             )
         }.isSuccess
         if (!persisted) return false
-        update(kind) { it + uri.toString() }
-        return true
+        return update(kind) { it + uri.toString() }
     }
 
     fun remove(kind: String, uri: Uri) {
-        update(kind) { it - uri.toString() }
+        if (!update(kind) { it - uri.toString() }) return
         // The same tree may be configured for both built-ins; only release the
         // persisted grant when no remaining kind still scans it.
         val otherKind = if (kind == "manga") "books" else "manga"
@@ -113,7 +159,7 @@ class LocalSourceFolders(
                 name = name,
                 files = catalog.files,
                 folders = catalog.folders,
-                warnings = warnings,
+                warnings = warnings + catalog.warnings,
             )
         } else {
             val files = mutableListOf<ScannedLocalFile>()
@@ -218,7 +264,7 @@ class LocalSourceFolders(
             name = name,
             isDirectory = true,
         )
-        if (depth >= MAX_DEPTH) {
+        if (depth > MAX_LOCAL_SCAN_DEPTH) {
             warnings += "Folder tree too deep at $name"
             return self
         }
@@ -272,14 +318,10 @@ class LocalSourceFolders(
         return self.copy(children = nodes)
     }
 
-    private fun update(kind: String, transform: (Set<String>) -> Set<String>) {
-        val current = prefs.getStringSet(kind, emptySet()).orEmpty()
-        prefs.edit().putStringSet(kind, transform(current.toSet())).apply()
-    }
+    private fun update(kind: String, transform: (Set<String>) -> Set<String>): Boolean =
+        store.put(kind, transform(store.get(kind)))
 
     private companion object {
-        const val PREFS = "local_source_folders"
         const val FALLBACK_NAME = "Folder"
-        const val MAX_DEPTH = 12
     }
 }

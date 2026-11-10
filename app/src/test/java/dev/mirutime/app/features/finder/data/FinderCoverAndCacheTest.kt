@@ -155,25 +155,6 @@ class FinderCoverAndCacheTest {
     }
 
     @Test
-    fun `catalog snapshot round trips per source and filters`() {
-        val key = CatalogCacheKey("alpha", CatalogFilters(query = "q"))
-        val snapshot = FinderSearchCache.CatalogSnapshot(
-            books = emptyList(),
-            pagesLoaded = 2,
-            hasMore = true,
-            scrollIndex = 5,
-            scrollOffset = 0,
-        )
-
-        FinderSearchCache.putCatalog(key, snapshot)
-
-        assertEquals(snapshot, FinderSearchCache.catalog(key))
-        assertNull(
-            FinderSearchCache.catalog(CatalogCacheKey("beta", CatalogFilters(query = "q"))),
-        )
-    }
-
-    @Test
     fun `mapCatalogPage scales a value per max rating`() {
         val page = CoreCatalogPage(
             items = listOf(

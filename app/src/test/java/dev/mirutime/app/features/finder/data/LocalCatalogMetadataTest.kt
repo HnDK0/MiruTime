@@ -136,7 +136,7 @@ class LocalCatalogMetadataTest {
     }
 
     @Test
-    fun `folder metadata prefers ComicInfo title author and first page cover`() {
+    fun `folder metadata keeps author summary and cover but never a title`() {
         val parsed = folderCatalogMetadata(
             comic = ComicInfoMeta(
                 title = "Folder Comic",
@@ -147,8 +147,9 @@ class LocalCatalogMetadataTest {
             coverBytes = jpeg,
         )
 
-        assertEquals("Folder Comic", parsed.metadata.title)
+        assertNull(parsed.metadata.title)
         assertEquals("Ann", parsed.metadata.author)
+        assertEquals("Summary", parsed.metadata.description)
         assertEquals(3, parsed.metadata.chapterCount)
         assertArrayEquals(jpeg, parsed.coverBytes)
     }

@@ -1,7 +1,8 @@
 package dev.mirutime.app.features.finder.data
 
-import dev.mirutime.app.features.library.data.isPageImageName
-import dev.mirutime.app.features.library.data.naturalCompare
+import dev.mirutime.app.features.local.data.MAX_LOCAL_SCAN_DEPTH
+import dev.mirutime.app.features.local.data.isPageImageName
+import dev.mirutime.app.features.local.data.naturalCompare
 
 // Pure SAF tree snapshot shared by the scanner and unit tests. `uri` is the
 // concrete document URI built with the configured tree, never a display name.
@@ -18,106 +19,141 @@ internal data class ScannedNode(
 internal data class MangaCatalogScan(
     val files: List<ScannedLocalFile> = emptyList(),
     val folders: List<ScannedLocalFolder> = emptyList(),
+    val warnings: List<String> = emptyList(),
 )
 
-private fun ScannedNode.cbzFiles(): List<ScannedNode> =
-    children.filter { !it.isDirectory && it.name.lowercase().endsWith(".cbz") }
+/**
+ * One chapter of a book. A chapter is either an archive or a folder with
+ * directly contained page images; [title] is the path from the book root
+ * (`Vol 1 / Глава 16`), so nested volumes never become separate books.
+ */
+internal data class ScannedChapterUnit(
+    val title: String,
+    val archiveUri: String? = null,
+    val pages: List<String> = emptyList(),
+)
 
-private fun ScannedNode.directImages(): List<ScannedNode> =
-    children.filter { !it.isDirectory && isPageImageName(it.name) }
+private const val MAX_CHAPTER_DEPTH = MAX_LOCAL_SCAN_DEPTH
 
-private fun ScannedNode.chapterDirs(): List<ScannedNode> =
-    children.filter { it.isDirectory && it.directImages().isNotEmpty() }
+// Thumbnail caches and hidden folders are never chapters. This is a safety
+// filter, not a marker: chapter/book boundaries never depend on the name.
+private fun isIgnoredDirectoryName(name: String): Boolean =
+    name.startsWith(".") || name.lowercase().startsWith("thumb")
 
-private fun ScannedNode.hasComicInfo(): Boolean =
-    children.any { !it.isDirectory && it.name.equals("ComicInfo.xml", ignoreCase = true) }
+private fun ScannedNode.pageUris(): List<String> =
+    children
+        .filter { !it.isDirectory && isPageImageName(it.name) }
+        .sortedWith { a, b -> naturalCompare(a.name, b.name) }
+        .map { it.uri }
 
-// "ch1", "chapter 2", "ep3", "part-4" are chapter folders. Volume-numbered
-// folders are books in a collection (`Vol1` must not collapse into one book).
-private val CHAPTER_DIR = Regex("^(chapter|ch|episode|ep|part)[\\s._-]*\\d+", RegexOption.IGNORE_CASE)
+private fun ScannedNode.sortedChildren(): List<ScannedNode> =
+    children.sortedWith { a, b -> naturalCompare(a.name, b.name) }
 
 /**
- * One folder classification, without recursion into collections:
- * - ImageBook: loose pages or chapter-named subfolders;
- * - CbzSet: directly contained .cbz archives;
- * - Collection: child folders that are themselves books;
- * - null: nothing readable.
- * A folder with both images and cbz is an ImageBook (pages win). A folder with
- * ComicInfo and image subfolders is a chaptered ImageBook; without either
- * marker, image subfolders are treated as separate books (Collection).
+ * First ComicInfo.xml in the book: the root file wins, then a depth-first
+ * search through chapter folders. Used when the book root has no metadata.
  */
-internal fun classifyMangaFolder(node: ScannedNode): MangaFolderKind? {
-    if (!node.isDirectory) return null
-    val chapterDirs = node.chapterDirs()
-    if (node.directImages().isNotEmpty()) return MangaFolderKind.ImageBook
-    if (node.cbzFiles().isNotEmpty()) return MangaFolderKind.CbzSet
-    if (chapterDirs.isNotEmpty()) {
-        val looksChaptered = node.hasComicInfo() ||
-            chapterDirs.any { CHAPTER_DIR.containsMatchIn(it.name) }
-        if (looksChaptered) return MangaFolderKind.ImageBook
-    }
-    if (node.children.any { it.isDirectory && classifyMangaFolder(it) != null }) {
-        return MangaFolderKind.Collection
+internal fun firstComicInfoUri(node: ScannedNode): String? {
+    node.sortedChildren()
+        .firstOrNull { !it.isDirectory && it.name.equals("ComicInfo.xml", ignoreCase = true) }
+        ?.let { return it.uri }
+    for (child in node.sortedChildren()) {
+        if (child.isDirectory) firstComicInfoUri(child)?.let { return it }
     }
     return null
 }
 
-// ImageBook chapter count still uses every image subfolder once a book is
-// classified, including a single "Bonus" folder beside named chapters.
-private fun ScannedNode.imageDirs(): List<ScannedNode> =
-    children.filter { it.isDirectory && it.directImages().isNotEmpty() }
+/**
+ * Chapters of ONE book: every nested folder with direct pages, and every `.cbz`
+ * at any depth, in natural order. The book root's own loose pages are a cover
+ * when chapters exist and the single chapter otherwise. A folder that is itself
+ * a chapter is not descended into. Chapter titles are the path from the book
+ * root, so `Vol 1/Глава 16` reads as `Vol 1 / Глава 16`.
+ */
+internal fun collectMangaChapters(
+    book: ScannedNode,
+    warnings: MutableList<String>? = null,
+): List<ScannedChapterUnit> {
+    val units = mutableListOf<ScannedChapterUnit>()
 
-private fun imageChapterCount(node: ScannedNode): Int {
-    val chapters = node.imageDirs()
-    return if (chapters.isNotEmpty()) chapters.size else 1
-}
+    fun walk(node: ScannedNode, prefix: List<String>, depth: Int) {
+        if (depth > MAX_CHAPTER_DEPTH) {
+            warnings?.add("Folder tree too deep at ${node.name}")
+            return
+        }
+        val pages = node.pageUris()
+        if (prefix.isNotEmpty() && pages.isNotEmpty()) {
+            units += ScannedChapterUnit(title = prefix.joinToString(" / "), pages = pages)
+            return
+        }
+        for (child in node.sortedChildren()) {
+            when {
+                child.isDirectory && !isIgnoredDirectoryName(child.name) ->
+                    walk(child, prefix + child.name, depth + 1)
+                child.name.lowercase().endsWith(".cbz") -> units += ScannedChapterUnit(
+                    title = (prefix + child.name.substringBeforeLast('.')).joinToString(" / "),
+                    archiveUri = child.uri,
+                )
+            }
+        }
+    }
 
-internal fun ScannedNode.toFolderScan(layout: MangaFolderKind): ScannedLocalFolder {
-    val firstCbz = cbzFiles().sortedWith { a, b -> naturalCompare(a.name, b.name) }.firstOrNull()
-    return ScannedLocalFolder(
-        uri = uri,
-        name = name,
-        documentId = documentId,
-        layout = layout,
-        sizeBytes = sizeBytes,
-        lastModified = lastModified,
-        chapterCount = when (layout) {
-            MangaFolderKind.CbzSet -> cbzFiles().size
-            MangaFolderKind.ImageBook -> imageChapterCount(this)
-            MangaFolderKind.SingleCbz -> 1
-            MangaFolderKind.Collection -> null
-        },
-        primaryChildUri = firstCbz?.uri,
-    )
+    walk(book, emptyList(), depth = 0)
+
+    if (units.isEmpty()) {
+        val pages = book.pageUris()
+        if (pages.isNotEmpty()) {
+            units += ScannedChapterUnit(title = book.name, pages = pages)
+        }
+    }
+    return units
 }
 
 /**
- * Turns one configured tree into manga catalogue entries. Collections are
- * flattened into their book children so every card is openable. A directory
- * with CBZ children is always one folder entry (CbzSet), even with a single
- * archive: the folder is the book, each CBZ is a chapter. NoveLA parity:
- * `AppLocalMangaSource.collectMangaBooks` groups a directory with CBZ children
- * into one book. Standalone CBZ files (direct `local-file://` URLs) still use
- * `SingleCbz` in `LocalSafBookSource.filePlan`.
+ * Catalogue entries of one configured folder: the first level is always a book.
+ * A folder becomes a book card; a standalone `.cbz` becomes its own book card.
+ * Everything below a book is a chapter (see [collectMangaChapters]).
  */
 internal fun collectMangaCatalog(root: ScannedNode): MangaCatalogScan {
     val files = mutableListOf<ScannedLocalFile>()
     val folders = mutableListOf<ScannedLocalFolder>()
+    val warnings = mutableListOf<String>()
 
-    fun visit(node: ScannedNode) {
-        when (classifyMangaFolder(node)) {
-            MangaFolderKind.Collection -> node.children
-                .filter { it.isDirectory }
-                .sortedWith { a, b -> naturalCompare(a.name, b.name) }
-                .forEach(::visit)
-
-            MangaFolderKind.CbzSet -> folders += node.toFolderScan(MangaFolderKind.CbzSet)
-            MangaFolderKind.ImageBook -> folders += node.toFolderScan(MangaFolderKind.ImageBook)
-            // classifyMangaFolder never returns these for a directory.
-            MangaFolderKind.SingleCbz, null -> Unit
+    for (child in root.sortedChildren()) {
+        if (!child.isDirectory) {
+            if (child.name.lowercase().endsWith(".cbz")) {
+                files += ScannedLocalFile(
+                    uri = child.uri,
+                    name = child.name,
+                    format = "CBZ",
+                    sizeBytes = child.sizeBytes,
+                    lastModified = child.lastModified,
+                    mangaLayout = MangaFolderKind.SingleCbz,
+                    chapterCount = 1,
+                )
+            }
+            continue
         }
+        val chapters = collectMangaChapters(child, warnings)
+        if (chapters.isEmpty()) continue
+        val layout = when {
+            chapters.all { it.archiveUri != null } -> MangaFolderKind.CbzSet
+            chapters.none { it.archiveUri != null } -> MangaFolderKind.ImageBook
+            else -> MangaFolderKind.Mixed
+        }
+        folders += ScannedLocalFolder(
+            uri = child.uri,
+            name = child.name,
+            documentId = child.documentId,
+            layout = layout,
+            sizeBytes = child.sizeBytes,
+            lastModified = child.lastModified,
+            chapterCount = chapters.size,
+            primaryChildUri = chapters.firstNotNullOfOrNull {
+                it.archiveUri ?: it.pages.firstOrNull()
+            },
+        )
     }
 
-    visit(root)
-    return MangaCatalogScan(files = files, folders = folders)
+    return MangaCatalogScan(files = files, folders = folders, warnings = warnings)
 }

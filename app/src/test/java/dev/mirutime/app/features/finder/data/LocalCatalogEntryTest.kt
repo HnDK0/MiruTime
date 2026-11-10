@@ -18,6 +18,12 @@ class LocalCatalogEntryTest {
         override fun put(key: String, value: String) {
             registryStore[key] = value
         }
+
+        override fun all(): Map<String, String> = registryStore.toMap()
+
+        override fun mergeAll(values: Map<String, String>) {
+            registryStore.putAll(values)
+        }
     })
 
     private val folderA = "content://com.android.externalstorage.documents/tree/primary%3ABooks"
@@ -110,10 +116,10 @@ class LocalCatalogEntryTest {
     }
 
     @Test
-    fun `unimported entries keep embedded title cover and chapter count`() {
+    fun `manga entry title is the folder name, ComicInfo title is ignored`() {
         val entry = LocalCatalogEntry(
             uri = "$folderB/document/folder",
-            displayName = "folder",
+            displayName = "Моё перерождение",
             format = "IMAGES",
             kind = "manga",
             folderUri = folderB,
@@ -121,7 +127,7 @@ class LocalCatalogEntryTest {
             entryType = LocalCatalogEntryType.Folder,
             mangaLayout = MangaFolderKind.ImageBook,
             documentId = "folder",
-            embeddedTitle = "Embedded Title",
+            embeddedTitle = "Глава 16",
             embeddedAuthor = "Author",
             coverUrl = "file:///cache/cover.jpg",
             chapterCount = 4,
@@ -130,11 +136,27 @@ class LocalCatalogEntryTest {
         val book = entry.toCatalogBook()
 
         assertTrue(book.notImported)
-        assertEquals("Embedded Title", book.title)
+        assertEquals("Моё перерождение", book.title)
         assertEquals("file:///cache/cover.jpg", book.coverUrl)
         assertEquals(4, book.chapters)
         assertEquals("IMAGES", book.localFormat)
         assertEquals(localCatalogUrl(entry.uri), book.bookUrl)
+    }
+
+    @Test
+    fun `manga file entry title is the file name without extension`() {
+        val entry = LocalCatalogEntry(
+            uri = "$folderB/document/vol1.cbz",
+            displayName = "Том 1.cbz",
+            format = "CBZ",
+            kind = "manga",
+            folderUri = folderB,
+            folderName = "Manga",
+            embeddedTitle = "Chapter 1",
+        )
+
+        assertEquals("Том 1", entry.title)
+        assertEquals("Том 1", entry.toCatalogBook().title)
     }
 
     @Test

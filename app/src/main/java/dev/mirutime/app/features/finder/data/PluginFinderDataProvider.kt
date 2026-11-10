@@ -291,12 +291,14 @@ class PluginFinderDataProvider(
 
     override suspend fun importLocal(files: List<PickedImportFile>): ImportSummary {
         val importer = importer ?: return ImportSummary()
-        return summarizeImports(files.map { importer.import(it.documentUri()) })
+        return withContext(Dispatchers.IO) {
+            summarizeImports(files.map { importer.import(it.documentUri()) })
+        }
     }
 
     override suspend fun importTree(uri: String): LocalImportResult? {
         val importer = importer ?: return null
-        return importer.importTree(Uri.parse(uri))
+        return withContext(Dispatchers.IO) { importer.importTree(Uri.parse(uri)) }
     }
 
     override suspend fun removeLocal(bookUrl: String) {
@@ -630,17 +632,30 @@ class PluginFinderDataProvider(
         runCatching { store.save(AppSettings.persistedSnapshot()) }
     }
 
-    private data class LocalCatalog(
-        val entries: List<LocalCatalogEntry>,
-        val imported: Map<String, ImportedLocalBook>,
-    )
+    override suspend fun localCatalogSnapshot(sourceId: String): LocalCatalogSnapshot? {
+        if (!LocalSources.isLocal(sourceId)) return null
+        val catalog = localCatalog(LocalSources.kindOf(sourceId)) ?: return null
+        return LocalCatalogSnapshot(catalog.entries, catalog.imported)
+    }
+
+    override suspend fun localCatalogPage(
+        sourceId: String,
+        snapshot: LocalCatalogSnapshot,
+        filters: CatalogFilters,
+        page: Int,
+    ): CatalogPage = localCatalogPageForEntries(
+        entries = snapshot.entries,
+        imported = snapshot.imported,
+        filters = filters,
+        page = page,
+    ).withMembership()
 
     // Scan every configured folder, then join imported rows by document URI.
     // No DB rows are synthesised for files that were never imported: those stay
     // local-file:// catalogue entries until the user opens one. Metadata and
     // covers for those entries are read into a cache so cards are useful
     // before import.
-    private suspend fun localCatalog(kind: String): LocalCatalog? {
+    private suspend fun localCatalog(kind: String): LocalCatalogSnapshot? {
         val folders = localFolders ?: return null
         var scan = withContext(Dispatchers.IO) { folders.scan(kind) }
         scan.warnings.forEach { MiruCoreLogger.w(TAG, "local scan: $it") }
@@ -692,7 +707,7 @@ class PluginFinderDataProvider(
         val imported = storedImports.mapValues { (uri, book) ->
             book.copy(coverUrl = book.coverUrl ?: byUri[uri]?.coverUrl)
         }
-        return LocalCatalog(entries, imported)
+        return LocalCatalogSnapshot(entries, imported)
     }
 
     private suspend fun localBooksFromDb(kind: String): List<LocalBook> {

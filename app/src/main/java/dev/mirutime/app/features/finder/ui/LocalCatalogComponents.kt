@@ -348,6 +348,14 @@ internal fun LocalFoldersSheet(
         description = stringResource(R.string.finder_local_folders_sheet_desc),
         onClose = onClose,
     ) {
+        if (kind == "manga") {
+            Text(
+                text = stringResource(R.string.finder_local_manga_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = extra.muted,
+                modifier = Modifier.padding(bottom = MiruSpace.S),
+            )
+        }
         val list = folders
         when {
             loadError != null -> Text(

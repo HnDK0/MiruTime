@@ -1,11 +1,8 @@
 package dev.mirutime.app.features.finder.data
 
 import dev.mirutime.app.core.AppCacheConfig
-import dev.mirutime.app.features.finder.domain.CatalogBook
-import dev.mirutime.app.features.finder.domain.CatalogFilters
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -29,23 +26,6 @@ class FinderCacheTtlTest {
         scrollOffset = 0,
         storedAt = storedAt,
     )
-
-    private fun catalogKey() = CatalogCacheKey("alpha", CatalogFilters(query = "q"))
-
-    private fun catalogSnapshot(storedAt: Long) = FinderSearchCache.CatalogSnapshot(
-        books = emptyList(),
-        pagesLoaded = 1,
-        hasMore = false,
-        scrollIndex = 0,
-        scrollOffset = 0,
-        storedAt = storedAt,
-    )
-
-    private fun catalogMapSize(): Int {
-        val field = FinderSearchCache::class.java.getDeclaredField("catalog")
-        field.isAccessible = true
-        return (field.get(FinderSearchCache) as Map<*, *>).size
-    }
 
     @Test
     fun `fresh global snapshot is returned`() {
@@ -84,67 +64,12 @@ class FinderCacheTtlTest {
     }
 
     @Test
-    fun `fresh catalog snapshot is returned`() {
-        val key = catalogKey()
-        val snapshot = catalogSnapshot(storedAt = now)
-        FinderSearchCache.putCatalog(key, snapshot)
-
-        assertEquals(snapshot, FinderSearchCache.catalog(key, now))
-    }
-
-    @Test
-    fun `expired catalog snapshot is not returned and is evicted`() {
-        val key = catalogKey()
-        FinderSearchCache.putCatalog(
-            key,
-            catalogSnapshot(storedAt = now - AppCacheConfig.CATALOG_CACHE_TTL_MS - 1),
-        )
-
-        assertNull(FinderSearchCache.catalog(key, now))
-        assertEquals(0, catalogMapSize())
-    }
-
-    @Test
-    fun `clear empties both caches`() {
+    fun `clear empties the global cache`() {
         val key = searchCacheKey("dune", null)
         FinderSearchCache.putGlobal(globalSnapshot(storedAt = now))
-        FinderSearchCache.putCatalog(catalogKey(), catalogSnapshot(storedAt = now))
 
         FinderSearchCache.clear()
 
         assertNull(FinderSearchCache.global(key, now))
-        assertNull(FinderSearchCache.catalog(catalogKey(), now))
-        assertTrue(catalogMapSize() == 0)
-    }
-
-    // A catalogue long-press writes membership and then invalidates; replaying
-    // either snapshot would show the pre-toggle inLibrary badge.
-    @Test
-    fun `membership invalidation drops snapshots carrying stale badges`() {
-        val url = "https://site/book"
-        val staleBook = CatalogBook(
-            bookUrl = url,
-            title = "Book",
-            rating = 0f,
-            chapters = 0,
-            genres = emptyList(),
-            ongoing = false,
-            inLibrary = false,
-        )
-        FinderSearchCache.putCatalog(
-            catalogKey(),
-            FinderSearchCache.CatalogSnapshot(
-                books = listOf(staleBook),
-                pagesLoaded = 1,
-                hasMore = false,
-                scrollIndex = 0,
-                scrollOffset = 0,
-                storedAt = now,
-            ),
-        )
-
-        FinderSearchCache.clear()
-
-        assertNull(FinderSearchCache.catalog(catalogKey(), now))
     }
 }

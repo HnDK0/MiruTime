@@ -48,6 +48,18 @@ interface FinderDataProvider {
     // One catalogue page (1-based) for the applied query + filters. Throws on
     // a source error; the screen shows the error state with Reload / Copy.
     suspend fun page(sourceId: String, filters: CatalogFilters, page: Int): CatalogPage
+
+    // Local sources only: one scan per catalogue visit, then in-memory paging.
+    // The default keeps every fake/preview provider working unchanged.
+    suspend fun localCatalogSnapshot(sourceId: String): LocalCatalogSnapshot? = null
+
+    suspend fun localCatalogPage(
+        sourceId: String,
+        snapshot: LocalCatalogSnapshot,
+        filters: CatalogFilters,
+        page: Int,
+    ): CatalogPage = page(sourceId, filters, page)
+
     fun genres(): List<String>
 
     // Plugin-declared `search_filters` capability and source language, both

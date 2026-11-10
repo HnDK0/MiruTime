@@ -3,9 +3,9 @@ package dev.mirutime.app.features.finder.data
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
-import dev.mirutime.app.features.library.data.PageImageExtensions
+import dev.mirutime.app.features.local.data.PageImageExtensions
 import dev.mirutime.app.features.library.data.folderAuthor
-import dev.mirutime.app.features.library.data.naturalSortKey
+import dev.mirutime.app.features.local.data.naturalSortKey
 import dev.mirutime.app.features.library.data.readLimited
 import dev.mirutime.app.features.library.data.sha256Hex
 import dev.mirutime.core.local.CbzFileReader
@@ -103,8 +103,9 @@ internal fun readCbzMetadata(file: File): ParsedCatalogMetadata =
     }
 
 // Folder metadata is pure once ComicInfo/first-page bytes are in hand; keeping
-// it separate makes the "ComicInfo title/author/cover, folder name fallback"
-// rule unit-testable without SAF.
+// it separate makes the "no title, ComicInfo author/cover" rule unit-testable
+// without SAF. A manga book is named after its folder, so ComicInfo Title is
+// deliberately dropped here.
 internal fun folderCatalogMetadata(
     comic: ComicInfoMeta?,
     chapterCount: Int?,
@@ -113,7 +114,7 @@ internal fun folderCatalogMetadata(
     val author = folderAuthor(comic).takeIf { it != "Unknown" }
     return ParsedCatalogMetadata(
         metadata = LocalCatalogMetadata(
-            title = comic?.displayTitle?.takeIf { it.isNotBlank() },
+            title = null,
             author = author,
             description = comic?.summary?.trim()?.takeIf { it.isNotBlank() },
             chapterCount = chapterCount,
@@ -128,6 +129,18 @@ private const val MAX_COMIC_INFO_BYTES = 512L * 1024
 private const val CACHE_DIR = "local-catalog"
 
 /**
+ * Catalogue metadata for SAF documents. The root is part of the contract: a
+ * cover this provider produced lives inside it, so a reader may read the cover
+ * back without opening an arbitrary path.
+ */
+interface LocalCatalogMetadataProvider {
+    /** Cache root that holds the covers this provider produced. */
+    val root: File
+
+    suspend fun enrich(entries: List<LocalCatalogEntry>): List<LocalCatalogEntry>
+}
+
+/**
  * Reads title/author/description/cover for catalogue cards. The concurrency
  * cap (4) keeps a folder of 500 EPUBs from opening 500 streams at once; the
  * size caps and magic-byte check bound what a hostile/broken provider can do.
@@ -137,12 +150,12 @@ class LocalCatalogMetadataCache(
     cacheDir: File,
     maxConcurrent: Int = 4,
     private val maxBytes: Long = MAX_METADATA_BYTES,
-) {
+) : LocalCatalogMetadataProvider {
     private val resolver = context.applicationContext.contentResolver
-    private val dir = File(cacheDir, CACHE_DIR)
+    override val root: File = File(cacheDir, CACHE_DIR)
     private val semaphore = Semaphore(maxConcurrent)
 
-    suspend fun enrich(entries: List<LocalCatalogEntry>): List<LocalCatalogEntry> =
+    override suspend fun enrich(entries: List<LocalCatalogEntry>): List<LocalCatalogEntry> =
         coroutineScope {
             entries.map { entry ->
                 async(Dispatchers.IO) {
@@ -150,7 +163,10 @@ class LocalCatalogMetadataCache(
                     semaphore.withPermit {
                         val metadata = cached(entry) ?: resolve(entry) ?: return@withPermit entry
                         entry.copy(
-                            embeddedTitle = entry.embeddedTitle ?: metadata.title,
+                            // A manga book is named after its folder/archive;
+                            // its ComicInfo Title belongs to a chapter.
+                            embeddedTitle = entry.embeddedTitle
+                                ?: metadata.title.takeUnless { entry.isManga },
                             embeddedAuthor = entry.embeddedAuthor ?: metadata.author,
                             embeddedDescription = entry.embeddedDescription ?: metadata.description,
                             coverUrl = entry.coverUrl ?: metadata.coverUrl,
@@ -162,8 +178,7 @@ class LocalCatalogMetadataCache(
         }
 
     private fun isSupported(entry: LocalCatalogEntry): Boolean = when {
-        entry.isFolder -> entry.mangaLayout == MangaFolderKind.ImageBook ||
-            entry.mangaLayout == MangaFolderKind.CbzSet
+        entry.isFolder -> entry.mangaLayout != null
         entry.kind == "manga" -> entry.format == "CBZ"
         else -> entry.format == "EPUB" || entry.format == "FB2"
     }
@@ -176,12 +191,12 @@ class LocalCatalogMetadataCache(
     // is not re-read on every catalogue page.
     private fun cached(entry: LocalCatalogEntry): LocalCatalogMetadata? {
         val key = cacheKey(entry)
-        val record = File(dir, "$key.json")
+        val record = File(root, "$key.json")
         if (!record.exists()) return null
         return runCatching {
             val json = JSONObject(record.readText())
             val cover = json.optString("cover").takeIf { it.isNotBlank() }
-                ?.let { File(dir, it) }
+                ?.let { File(root, it) }
                 ?.takeIf { it.isFile }
             LocalCatalogMetadata(
                 title = json.optString("title").takeIf { it.isNotBlank() },
@@ -194,9 +209,9 @@ class LocalCatalogMetadataCache(
     }
 
     private suspend fun resolve(entry: LocalCatalogEntry): LocalCatalogMetadata? {
-        dir.mkdirs()
+        root.mkdirs()
         val parsed = when {
-            entry.isFolder && entry.mangaLayout == MangaFolderKind.CbzSet ->
+            entry.isFolder && entry.primaryChildUri?.endsWith(".cbz", ignoreCase = true) == true ->
                 resolveCbzSet(entry)
             entry.isFolder -> resolveImageFolder(entry)
             entry.format == "EPUB" -> withCopiedFile(entry.uri) { file ->
@@ -217,8 +232,8 @@ class LocalCatalogMetadataCache(
         documentUri: String,
         read: (File) -> ParsedCatalogMetadata,
     ): ParsedCatalogMetadata? = withContext(Dispatchers.IO) {
-        dir.mkdirs()
-        val temp = File(dir, "tmp-${UUID.randomUUID()}.bin")
+        root.mkdirs()
+        val temp = File(root, "tmp-${UUID.randomUUID()}.bin")
         try {
             val stream = resolver.openInputStream(Uri.parse(documentUri))
                 ?: return@withContext null
@@ -302,11 +317,25 @@ class LocalCatalogMetadataCache(
     private fun resolveImageFolder(entry: LocalCatalogEntry): ParsedCatalogMetadata {
         val (treeUri, documentId) = rootIds(entry) ?: return ParsedCatalogMetadata()
         val children = queryChildren(treeUri, documentId) ?: return ParsedCatalogMetadata()
-        val comic = children
-            .firstOrNull { !it.isDirectory && it.name.equals("ComicInfo.xml", ignoreCase = true) }
-            ?.let { readComicInfo(it.uri) }
         val files = children.filter { !it.isDirectory }
         val dirs = children.filter { it.isDirectory }
+        // Root ComicInfo wins; many libraries keep it inside the first chapter
+        // folder, so fall back to the first one there (same rule the importer
+        // applies).
+        // shortcut: only the first chapter folder is checked, which matches a
+        // depth-first first file for the usual layouts; scan deeper when a
+        // library is reported with metadata in a later chapter.
+        val comic = files
+            .firstOrNull { it.name.equals("ComicInfo.xml", ignoreCase = true) }
+            ?.let { readComicInfo(it.uri) }
+            ?: dirs
+                .sortedWith { a, b -> naturalSortKey(a.name).compareTo(naturalSortKey(b.name)) }
+                .firstOrNull()
+                ?.let { dir -> queryChildren(treeUri, dir.documentId) }
+                ?.firstOrNull {
+                    !it.isDirectory && it.name.equals("ComicInfo.xml", ignoreCase = true)
+                }
+                ?.let { readComicInfo(it.uri) }
         val firstPage = files
             .filter { isPageName(it.name) }
             .sortedWith { a, b -> naturalSortKey(a.name).compareTo(naturalSortKey(b.name)) }
@@ -359,10 +388,10 @@ class LocalCatalogMetadataCache(
             put("cover", cover?.name.orEmpty())
         }
         runCatching {
-            dir.mkdirs()
-            val temp = File(dir, "$key.json.tmp")
+            root.mkdirs()
+            val temp = File(root, "$key.json.tmp")
             temp.writeText(record.toString())
-            if (!temp.renameTo(File(dir, "$key.json"))) temp.delete()
+            if (!temp.renameTo(File(root, "$key.json"))) temp.delete()
         }
         return parsed.metadata.copy(coverUrl = cover?.toURI()?.toString())
     }
@@ -371,7 +400,7 @@ class LocalCatalogMetadataCache(
         if (bytes.isEmpty() || bytes.size > MAX_COVER_BYTES) return null
         val extension = coverImageExtension(bytes) ?: return null
         return runCatching {
-            val file = File(dir, "$key.$extension")
+            val file = File(root, "$key.$extension")
             file.writeBytes(bytes)
             file
         }.getOrNull()

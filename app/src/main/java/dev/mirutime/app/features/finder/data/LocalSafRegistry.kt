@@ -17,10 +17,41 @@ internal fun localSafRegistryUriKey(id: String): String = "$URI_PREFIX$id"
 internal fun localSafRegistryReverseKey(documentUri: String): String =
     "$ID_PREFIX${sha256Hex(documentUri.encodeToByteArray())}"
 
+/** Keeps one id per document URI; archive values win on conflicts. */
+internal fun mergeRegistry(
+    existing: Map<String, String>,
+    incoming: Map<String, String>,
+): Map<String, String> {
+    val merged = (existing + incoming).toMutableMap()
+    val keepByDocument = mutableMapOf<String, String>()
+    merged.forEach { (key, documentUri) ->
+        if (!key.startsWith(URI_PREFIX)) return@forEach
+        val id = key.removePrefix(URI_PREFIX)
+        val current = keepByDocument[documentUri]
+        if (current == null || incoming.containsKey(key)) {
+            keepByDocument[documentUri] = id
+        }
+    }
+    merged.keys.filter { it.startsWith(URI_PREFIX) }.forEach { key ->
+        val id = key.removePrefix(URI_PREFIX)
+        val documentUri = merged[key] ?: return@forEach
+        if (keepByDocument[documentUri] != id) merged.remove(key)
+    }
+    keepByDocument.forEach { (documentUri, id) ->
+        merged[localSafRegistryReverseKey(documentUri)] = id
+    }
+    return merged
+}
+
 /** Minimal persistence seam; SharedPreferences in the app, a map in tests. */
 interface LocalSafRegistryStore {
     fun get(key: String): String?
     fun put(key: String, value: String)
+
+    fun all(): Map<String, String>
+
+    /** Merge: archive values win, ids registered after the backup survive. */
+    fun mergeAll(values: Map<String, String>)
 }
 
 private class SharedPrefsRegistryStore(context: Context) : LocalSafRegistryStore {
@@ -31,6 +62,19 @@ private class SharedPrefsRegistryStore(context: Context) : LocalSafRegistryStore
 
     override fun put(key: String, value: String) {
         prefs.edit().putString(key, value).apply()
+    }
+
+    override fun all(): Map<String, String> = prefs.all.mapNotNull { (key, value) ->
+        (value as? String)?.let { key to it }
+    }.toMap()
+
+    override fun mergeAll(values: Map<String, String>) {
+        val existing = all()
+        val merged = mergeRegistry(existing, values)
+        val editor = prefs.edit()
+        existing.keys.filter { it !in merged }.forEach { editor.remove(it) }
+        merged.forEach { (key, value) -> editor.putString(key, value) }
+        check(editor.commit()) { "Could not restore local SAF registry" }
     }
 }
 
@@ -70,6 +114,12 @@ class LocalSafRegistry internal constructor(
         val normalized = id.lowercase()
         if (!isLocalFileId(normalized)) return null
         return store.get(localSafRegistryUriKey(normalized))
+    }
+
+    fun snapshot(): Map<String, String> = store.all()
+
+    fun restore(values: Map<String, String>) {
+        store.mergeAll(mergeRegistry(store.all(), values))
     }
 
     fun idFor(documentUri: String): String? {

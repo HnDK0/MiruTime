@@ -7,19 +7,23 @@ import dev.mirutime.core.text.textToParagraphHtml
 import dev.mirutime.app.features.library.data.InlinePage
 import dev.mirutime.app.features.library.data.LocalBooksInstallId
 import dev.mirutime.app.features.library.data.LocalMangaInstallId
-import dev.mirutime.app.features.library.data.PageImageExtensions
+import dev.mirutime.app.features.local.data.MAX_LOCAL_SCAN_DEPTH
+import dev.mirutime.app.features.local.data.PageImageExtensions
 import dev.mirutime.app.features.library.data.imageExtension
 import dev.mirutime.app.features.library.data.interleaveChapterText
-import dev.mirutime.app.features.library.data.naturalCompare
-import dev.mirutime.app.features.library.data.naturalSortKey
+import dev.mirutime.app.features.local.data.naturalCompare
+import dev.mirutime.app.features.local.data.naturalSortKey
 import dev.mirutime.core.local.CbzFileReader
 import dev.mirutime.core.local.EpubFileReader
 import dev.mirutime.core.local.Fb2FileReader
+import dev.mirutime.core.log.MiruLog
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -167,7 +171,7 @@ private const val MAX_CHAPTER_HTML_CACHE = 24
  * is opened. Nothing here writes to filesDir/local_books.
  */
 class LocalSafCache(
-    private val root: File,
+    val root: File,
     private val open: suspend (String) -> InputStream?,
     private val maxArchiveBytes: Long = MAX_ARCHIVE_BYTES,
     private val maxCacheBytes: Long = MAX_SAF_CACHE_BYTES,
@@ -192,52 +196,57 @@ class LocalSafCache(
             target.setLastModified(System.currentTimeMillis())
             return target
         }
-        return locks.getOrPut(hash) { Mutex() }.withLock {
-            if (target.isFile && target.length() > 0) {
-                target.setLastModified(System.currentTimeMillis())
-                return@withLock target
-            }
-            val temp = File(dir, "$hash.tmp")
-            try {
-                val input = open(documentUri)
-                    ?: throw LocalSafException(SafFailure.NotFound, "Local file not found")
-                input.use { source ->
-                    FileOutputStream(temp).use { out ->
-                        var total = 0L
-                        val buffer = ByteArray(64 * 1024)
-                        while (true) {
-                            val read = source.read(buffer)
-                            if (read < 0) break
-                            total += read
-                            if (total > maxArchiveBytes) {
-                                throw LocalSafException(SafFailure.TooLarge, "File is too large to open")
+        return withContext(Dispatchers.IO) {
+            val cached = locks.getOrPut(hash) { Mutex() }.withLock {
+                if (target.isFile && target.length() > 0) {
+                    target.setLastModified(System.currentTimeMillis())
+                    return@withLock target
+                }
+                val temp = File(dir, "$hash.tmp")
+                try {
+                    val input = open(documentUri)
+                        ?: throw LocalSafException(SafFailure.NotFound, "Local file not found")
+                    input.use { source ->
+                        FileOutputStream(temp).use { out ->
+                            var total = 0L
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                currentCoroutineContext().ensureActive()
+                                val read = source.read(buffer)
+                                if (read < 0) break
+                                total += read
+                                if (total > maxArchiveBytes) {
+                                    throw LocalSafException(SafFailure.TooLarge, "File is too large to open")
+                                }
+                                out.write(buffer, 0, read)
                             }
-                            out.write(buffer, 0, read)
                         }
                     }
-                }
-                if (!temp.renameTo(target)) {
-                    temp.copyTo(target, overwrite = true)
+                    if (!temp.renameTo(target)) {
+                        temp.copyTo(target, overwrite = true)
+                        temp.delete()
+                    }
+                    target
+                } catch (e: LocalSafException) {
                     temp.delete()
+                    throw e
+                } catch (e: Exception) {
+                    temp.delete()
+                    throw LocalSafException(SafFailure.Damaged, e.message ?: "Cannot cache the local file")
                 }
-                target
-            } catch (e: LocalSafException) {
-                temp.delete()
-                throw e
-            } catch (e: Exception) {
-                temp.delete()
-                throw LocalSafException(SafFailure.Damaged, e.message ?: "Cannot cache the local file")
             }
-        }.also { maybeCleanup() }
+            maybeCleanup()
+            cached
+        }
     }
 
-    fun writePage(
+    suspend fun writePage(
         hash: String,
         chapterIndex: Int,
         pageIndex: Int,
         extension: String,
         bytes: ByteArray,
-    ): File {
+    ): File = withContext(Dispatchers.IO) {
         if (bytes.isEmpty()) throw LocalSafException(SafFailure.Damaged, "Empty page")
         if (bytes.size > MAX_PAGE_BYTES) {
             throw LocalSafException(SafFailure.TooLarge, "Page is too large")
@@ -246,14 +255,19 @@ class LocalSafCache(
         val file = File(dir, "${pageIndex.toString().padStart(5, '0')}.$extension")
         if (file.isFile && file.length() == bytes.size.toLong()) {
             file.setLastModified(System.currentTimeMillis())
-            return file
+            return@withContext file
         }
-        file.writeBytes(bytes)
+        val temp = File(dir, "${file.name}.part")
+        temp.writeBytes(bytes)
+        if (!temp.renameTo(file)) {
+            file.delete()
+            check(temp.renameTo(file)) { "Cannot store page" }
+        }
         maybeCleanup()
-        return file
+        file
     }
 
-    internal fun writeTextImage(
+    internal suspend fun writeTextImage(
         hash: String,
         chapterIndex: Int,
         imageIndex: Int,
@@ -261,17 +275,18 @@ class LocalSafCache(
         bytes: ByteArray,
     ): File = writePage(hash, chapterIndex, imageIndex, extension, bytes)
 
-    internal fun writeCover(hash: String, bytes: ByteArray): File? {
-        if (bytes.isEmpty() || bytes.size > 8 * 1024 * 1024) return null
-        val extension = coverImageExtension(bytes) ?: return null
-        return runCatching {
-            val dir = File(root, "covers").apply { mkdirs() }
-            val file = File(dir, "$hash.$extension")
-            if (!file.isFile) file.writeBytes(bytes)
-            file.setLastModified(System.currentTimeMillis())
-            file
-        }.getOrNull()
-    }
+    internal suspend fun writeCover(hash: String, bytes: ByteArray): File? =
+        withContext(Dispatchers.IO) {
+            if (bytes.isEmpty() || bytes.size > 8 * 1024 * 1024) return@withContext null
+            val extension = coverImageExtension(bytes) ?: return@withContext null
+            runCatching {
+                val dir = File(root, "covers").apply { mkdirs() }
+                val file = File(dir, "$hash.$extension")
+                if (!file.isFile) file.writeBytes(bytes)
+                file.setLastModified(System.currentTimeMillis())
+                file
+            }.getOrNull()
+        }
 
     internal fun cleanup(limitBytes: Long = maxCacheBytes) {
         val files = root.walkTopDown()
@@ -358,7 +373,7 @@ class LocalSafBookSource(
     private val resolver: SafResolver,
     private val cache: LocalSafCache,
     private val registry: LocalSafRegistry,
-    private val metadataCache: LocalCatalogMetadataCache? = null,
+    private val metadataCache: LocalCatalogMetadataProvider? = null,
 ) {
     private val plans = ConcurrentHashMap<String, DirectPlan>()
     // Parsed chapter HTML is derived, not persisted: re-opening the same
@@ -417,16 +432,34 @@ class LocalSafBookSource(
         return LocalSafChapterContent(title = chapter.title, html = html)
     }
 
-    suspend fun coverBytes(bookUrl: String): ByteArray? {
-        val coverUrl = plan(bookUrl).coverUrl ?: return null
-        if (!coverUrl.startsWith("file:", ignoreCase = true)) return null
+    suspend fun coverBytes(bookUrl: String): ByteArray? = withContext(Dispatchers.IO) {
+        val coverUrl = plan(bookUrl).coverUrl ?: return@withContext null
+        if (!coverUrl.startsWith("file:", ignoreCase = true)) return@withContext null
+        val file = coverFile(coverUrl) ?: return@withContext null
+        // Check the size before reading: a corrupt/huge cover must not OOM.
+        if (!file.isFile || file.length() <= 0L || file.length() > 8L * 1024 * 1024) {
+            return@withContext null
+        }
+        runCatching {
+            file.readBytes().takeIf { coverImageExtension(it) != null }
+        }.getOrNull()
+    }
+
+    // Only files inside the app's own caches may be read: a crafted cover URL
+    // must not reach arbitrary paths. The catalogue metadata cache keeps its
+    // covers in a sibling directory, so both roots are allowed.
+    private fun coverFile(coverUrl: String): File? {
         val uri = runCatching { Uri.parse(coverUrl) }.getOrNull()
         val path = uri?.path?.takeIf { it.isNotBlank() }
             ?: coverUrl.substringAfter("file:").removePrefix("//")
-        return runCatching {
-            File(path).readBytes()
-                .takeIf { it.size <= 8 * 1024 * 1024 && coverImageExtension(it) != null }
-        }.getOrNull()
+        val file = File(path)
+        val candidate = runCatching { file.canonicalFile }.getOrNull() ?: return null
+        val allowed = listOfNotNull(cache.root, metadataCache?.root).any { root ->
+            val rootPath = runCatching { root.canonicalFile }.getOrNull()?.path
+            rootPath != null &&
+                (candidate.path == rootPath || candidate.path.startsWith(rootPath + File.separator))
+        }
+        return if (allowed) file else null
     }
 
     private suspend fun plan(bookUrl: String): DirectPlan {
@@ -502,7 +535,9 @@ class LocalSafBookSource(
                 listOf(
                     LocalSafChapter(
                         index = 1,
-                        title = entry.embeddedTitle ?: parsedTitle ?: fallbackTitle,
+                        // A standalone archive is a one-chapter manga book named
+                        // after its file; ComicInfo Title is not the book name.
+                        title = fallbackTitle,
                         url = localFileChapterUrl(bookUrl, 1),
                     ),
                 )
@@ -561,7 +596,11 @@ class LocalSafBookSource(
             bookUrl = bookUrl,
             document = document,
             cacheHash = hash,
-            title = entry.embeddedTitle ?: parsedTitle ?: fallbackTitle,
+            title = if (format == "CBZ") {
+                fallbackTitle
+            } else {
+                entry.embeddedTitle ?: parsedTitle ?: fallbackTitle
+            },
             author = entry.embeddedAuthor ?: parsedAuthor ?: "Unknown",
             description = entry.embeddedDescription ?: parsedDescription.orEmpty(),
             coverUrl = coverUrl,
@@ -579,57 +618,34 @@ class LocalSafBookSource(
         hash: String,
     ): DirectPlan {
         val root = walkFolder(document)
-        val layout = classifyMangaFolder(root)
-            ?: throw LocalSafException(SafFailure.Unsupported, "Folder has no readable manga")
-        if (layout == MangaFolderKind.Collection) {
-            throw LocalSafException(
-                SafFailure.Unsupported,
-                "This folder contains several books; open one of them",
-            )
+        val units = collectMangaChapters(root)
+        if (units.isEmpty()) {
+            throw LocalSafException(SafFailure.Unsupported, "Folder has no readable manga")
         }
-        val sources = mutableListOf<ChapterSource>()
-        val titles = mutableListOf<String>()
-        when (layout) {
-            MangaFolderKind.CbzSet, MangaFolderKind.SingleCbz -> {
-                val archives = root.children
-                    .filter { !it.isDirectory && it.name.lowercase().endsWith(".cbz") }
-                    .sortedWith { a, b -> naturalCompare(a.name, b.name) }
-                archives.forEach { child ->
-                    titles += child.name.substringBeforeLast('.').ifBlank { child.name }
-                    sources += ChapterSource(
-                        archiveUri = child.uri,
-                        archiveName = child.name,
-                        archiveSize = child.sizeBytes,
-                        archiveModified = child.lastModified,
-                    )
-                }
+        val sources = units.map { unit ->
+            val archiveUri = unit.archiveUri
+            if (archiveUri != null) {
+                val child = findNode(root, archiveUri)
+                ChapterSource(
+                    archiveUri = archiveUri,
+                    archiveName = child?.name.orEmpty(),
+                    archiveSize = child?.sizeBytes,
+                    archiveModified = child?.lastModified,
+                )
+            } else {
+                ChapterSource(pages = unit.pages)
             }
-            MangaFolderKind.ImageBook -> {
-                val dirs = root.children
-                    .filter { it.isDirectory && it.directImageUris().isNotEmpty() }
-                    .sortedWith { a, b -> naturalCompare(a.name, b.name) }
-                if (dirs.isNotEmpty()) {
-                    dirs.forEach { dir ->
-                        titles += dir.name
-                        sources += ChapterSource(pages = dir.directImageUris())
-                    }
-                } else {
-                    val pages = root.directImageUris()
-                    if (pages.isNotEmpty()) {
-                        titles += document.name
-                        sources += ChapterSource(pages = pages)
-                    }
-                }
-            }
-            MangaFolderKind.Collection -> Unit
         }
-        if (sources.isEmpty()) {
-            throw LocalSafException(SafFailure.Damaged, "Folder has no readable pages")
+        val layout = when {
+            units.all { it.archiveUri != null } -> MangaFolderKind.CbzSet
+            units.none { it.archiveUri != null } -> MangaFolderKind.ImageBook
+            else -> MangaFolderKind.Mixed
         }
+        val format = if (layout == MangaFolderKind.ImageBook) "IMAGES" else "CBZ"
         val entryBase = LocalCatalogEntry(
             uri = document.uri,
             displayName = document.name,
-            format = if (layout == MangaFolderKind.ImageBook) "IMAGES" else "CBZ",
+            format = format,
             kind = "manga",
             sizeBytes = document.sizeBytes,
             lastModified = document.lastModified,
@@ -638,14 +654,14 @@ class LocalSafBookSource(
             entryType = LocalCatalogEntryType.Folder,
             mangaLayout = layout,
             documentId = document.documentId,
-            primaryChildUri = sources.firstOrNull()?.archiveUri,
+            primaryChildUri = sources.firstOrNull()?.archiveUri ?: units.firstOrNull()?.pages?.firstOrNull(),
             chapterCount = sources.size,
         )
         val entry = metadataCache?.enrich(listOf(entryBase))?.firstOrNull() ?: entryBase
-        val chapters = titles.mapIndexed { index, title ->
+        val chapters = units.mapIndexed { index, unit ->
             LocalSafChapter(
                 index = index + 1,
-                title = title.ifBlank { "Chapter ${index + 1}" },
+                title = unit.title.ifBlank { "Chapter ${index + 1}" },
                 url = localFileChapterUrl(bookUrl, index + 1),
             )
         }
@@ -653,11 +669,11 @@ class LocalSafBookSource(
             bookUrl = bookUrl,
             document = document,
             cacheHash = hash,
-            title = entry.embeddedTitle ?: document.name,
+            title = document.name,
             author = entry.embeddedAuthor ?: "Unknown",
             description = entry.embeddedDescription.orEmpty(),
             coverUrl = entry.coverUrl,
-            format = if (layout == MangaFolderKind.ImageBook) "IMAGES" else "CBZ",
+            format = format,
             isManga = true,
             layout = layout,
             chapters = chapters,
@@ -665,10 +681,21 @@ class LocalSafBookSource(
         )
     }
 
+    private fun findNode(node: ScannedNode, uri: String): ScannedNode? {
+        if (node.uri == uri) return node
+        for (child in node.children) {
+            findNode(child, uri)?.let { return it }
+        }
+        return null
+    }
+
     private suspend fun walkFolder(document: SafDocument): ScannedNode {
         suspend fun walk(node: ScannedNode, depth: Int): ScannedNode {
-            if (depth > 12) {
-                throw LocalSafException(SafFailure.Damaged, "Folder tree is too deep")
+            if (depth > MAX_LOCAL_SCAN_DEPTH) {
+                // Truncate, do not fail: the catalogue may see a deeper tree
+                // than the importer can materialize.
+                MiruLog.w("local", "direct read tree truncated at depth=$depth")
+                return node
             }
             if (!node.isDirectory) return node
             val tree = document.treeUri ?: document.uri
