@@ -1,5 +1,9 @@
 package dev.mirutime.app.features.dashboard.ui
 
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -31,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
@@ -200,6 +205,7 @@ private fun UpdatesHeader(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val settings = AppSettings
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -293,6 +299,14 @@ private fun UpdatesHeader(
                 !settings.libraryAutoUpdate -> stringResource(R.string.updates_auto_off)
                 settings.libraryIntervalHours <= 0 -> stringResource(R.string.updates_next_launch)
                 nextAt <= 0L -> stringResource(R.string.updates_next_launch)
+                showWaitingForCharging(
+                    autoUpdate = settings.libraryAutoUpdate,
+                    intervalHours = settings.libraryIntervalHours,
+                    nextAt = nextAt,
+                    now = now,
+                    requiresCharging = settings.updateWhileCharging,
+                    charging = isCharging(context),
+                ) -> stringResource(R.string.updates_next_charging)
                 nextAt <= now -> stringResource(R.string.updates_next_soon)
                 else -> stringResource(
                     R.string.updates_next_fmt,
@@ -314,6 +328,35 @@ private fun UpdatesHeader(
             onClick = onOpenSettings,
         )
     }
+}
+
+/** An overdue run that WorkManager has parked until the charger is connected. */
+internal fun showWaitingForCharging(
+    autoUpdate: Boolean,
+    intervalHours: Int,
+    nextAt: Long,
+    now: Long,
+    requiresCharging: Boolean,
+    charging: Boolean,
+): Boolean =
+    autoUpdate &&
+        intervalHours > 0 &&
+        nextAt > 0L &&
+        nextAt <= now &&
+        requiresCharging &&
+        !charging
+
+/**
+ * Match WorkManager's charging constraint: a full battery that is still
+ * plugged in counts as charging too, which BatteryManager.isCharging misses.
+ */
+private fun isCharging(context: Context): Boolean {
+    val status = context.registerReceiver(
+        null,
+        IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+    )?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+    return status == BatteryManager.BATTERY_STATUS_CHARGING ||
+        status == BatteryManager.BATTERY_STATUS_FULL
 }
 
 private fun formatRemaining(ms: Long): String {

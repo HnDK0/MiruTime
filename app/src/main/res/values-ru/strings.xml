@@ -827,6 +827,7 @@
     <string name="updates_next_fmt">Следующее: через %1$s</string>
     <string name="updates_next_launch">Следующее: при запуске приложения</string>
     <string name="updates_next_soon">Следующее: скоро</string>
+    <string name="updates_next_charging">Следующее: ждём зарядку</string>
     <string name="updates_auto_off">Автообновление выключено</string>
     <string name="updates_progress_fmt">Проверка %1$d/%2$d · %3$s</string>
     <string name="updates_check_now">Проверить новые главы</string>

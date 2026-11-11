@@ -814,6 +814,7 @@
     <string name="updates_next_fmt">Next: in %1$s</string>
     <string name="updates_next_launch">Next: on app launch</string>
     <string name="updates_next_soon">Next: soon</string>
+    <string name="updates_next_charging">Next: waiting for charging</string>
     <string name="updates_auto_off">Auto-update is off</string>
     <string name="updates_progress_fmt">Checking %1$d/%2$d · %3$s</string>
     <string name="updates_check_now">Check for new chapters</string>
