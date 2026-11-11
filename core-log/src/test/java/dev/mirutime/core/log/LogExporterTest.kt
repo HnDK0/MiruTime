@@ -3,6 +3,7 @@ package dev.mirutime.core.log
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
+import java.time.LocalDate
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -23,15 +24,21 @@ class LogExporterTest {
     }
 
     @Test
-    fun `writes current and rotated logs in order`() {
-        File(dir, MiruFileLogger.ROTATED_NAME).writeText("old\n")
-        File(dir, MiruFileLogger.LOG_NAME).writeText("new\n")
+    fun `writes archives oldest first then the active log`() {
+        val old = File(dir, "mirutime-${LocalDate.now().minusDays(2)}.log")
+        val recent = File(dir, "mirutime-${LocalDate.now().minusDays(1)}.log")
+        old.writeText("oldest\n")
+        recent.writeText("recent\n")
+        File(dir, MiruFileLogger.LOG_NAME).writeText("active\n")
         val out = ByteArrayOutputStream()
 
         val written = LogExporter.write(dir, out)
 
-        assertEquals("new\n\nold\n", out.toString(Charsets.UTF_8))
-        assertEquals("new\n\nold\n".toByteArray(Charsets.UTF_8).size.toLong(), written)
+        assertEquals("oldest\n\nrecent\n\nactive\n", out.toString(Charsets.UTF_8))
+        assertEquals(
+            "oldest\n\nrecent\n\nactive\n".toByteArray(Charsets.UTF_8).size.toLong(),
+            written,
+        )
     }
 
     @Test
