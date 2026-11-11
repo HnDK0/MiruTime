@@ -30,4 +30,16 @@ class ReaderScreenTranslationTargetsTest {
             translationEnsureTargets(1, setOf(1, 2)),
         )
     }
+
+    @Test
+    fun `a chapter loaded ahead of the active one is ensured`() {
+        assertEquals(
+            listOf(1000, 1001, 999),
+            translationEnsureTargets(
+                activeChapterIndex = 1000,
+                loadedChapterIndices = setOf(999, 1000, 1001),
+                nextChapterIndex = 1001,
+            ),
+        )
+    }
 }

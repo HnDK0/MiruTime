@@ -2,10 +2,12 @@ package dev.mirutime.feature.reader.ui
 
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.mirutime.app.features.reader.document.BlockId
 import dev.mirutime.app.features.reader.document.BlockKind
 import dev.mirutime.app.features.reader.document.DisplayGroup
@@ -258,7 +260,24 @@ private fun measureChapterHeaderHeight(
     )
     return with(density) {
         val badge = if (translationLabel != null) {
-            ChapterHeaderMetrics.badgeGap.toPx() + ChapterHeaderMetrics.badgeHeight.toPx()
+            val badgeText = textMeasurer.measure(
+                text = AnnotatedString(translationLabel),
+                style = TextStyle(
+                    fontSize = ChapterHeaderMetrics.badgeFontSizeSp.sp,
+                    lineHeight = ChapterHeaderMetrics.badgeLineHeightSp.sp,
+                ),
+                layoutDirection = layoutDirection,
+                density = density,
+                constraints = Constraints(maxWidth = contentWidth),
+                maxLines = 1,
+                softWrap = false,
+            )
+            val contentHeight = maxOf(
+                badgeText.size.height.toFloat(),
+                ChapterHeaderMetrics.badgeIconSize.toPx(),
+            ) + 2 * ChapterHeaderMetrics.badgeVerticalPadding.toPx()
+            ChapterHeaderMetrics.badgeGap.toPx() +
+                maxOf(ChapterHeaderMetrics.badgeHeight.toPx(), contentHeight)
         } else {
             0f
         }

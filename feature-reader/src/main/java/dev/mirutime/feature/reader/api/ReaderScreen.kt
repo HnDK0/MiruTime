@@ -377,12 +377,14 @@ fun ReaderScreen(
     // Chrome scrubber position and the bridge to whichever manga viewer is
     // active. Reset on chapter change so a stale counter never flashes.
     var mangaPage by remember(state.activeChapterIndex) { mutableIntStateOf(0) }
-    val nextChapterFirstPage = remember(state.activeChapterIndex, state.documents, state.chapters) {
-        // Positional neighbour: a removed chapter leaves a hole in idx, so
-        // activeChapterIndex + 1 is not necessarily the next stored chapter.
+    // Positional neighbour: a removed chapter leaves a hole in idx, so
+    // activeChapterIndex + 1 is not necessarily the next stored chapter.
+    val nextChapterIndex = remember(state.activeChapterIndex, state.chapters) {
         val position = state.chapters.indexOfFirst { it.index == state.activeChapterIndex }
-        val nextIndex = if (position < 0) null else state.chapters.getOrNull(position + 1)?.index
-        nextIndex?.let { state.documents[it] }
+        if (position < 0) null else state.chapters.getOrNull(position + 1)?.index
+    }
+    val nextChapterFirstPage = remember(nextChapterIndex, state.documents) {
+        nextChapterIndex?.let { state.documents[it] }
             ?.mangaPages()
             ?.firstOrNull()
             ?.imageRef
@@ -508,13 +510,35 @@ fun ReaderScreen(
             translations = visibleTranslations[document.chapterUrl]?.translations,
         )
 
-    // Enabling translation (or changing the pair) must translate the chapter on
-    // screen now, not on the next navigation. Submits dedupe, so the chapter
-    // load path stays the only request owner on a plain open.
-    LaunchedEffect(mode, activeDocument?.chapterUrl) {
-        val document = activeDocument ?: return@LaunchedEffect
+    // Enabling translation (or changing the pair) must translate everything the
+    // feed can show now, not on the next navigation. A chapter scrolled into
+    // view is loaded by ensureNext/ensurePrevious without becoming active, so
+    // keying on activeDocument alone leaves it untranslated until reopened.
+    // Submits dedupe, so the chapter load path stays the only request owner on
+    // a plain open.
+    LaunchedEffect(mode, bookUrl, state.documents, state.activeChapterIndex, nextChapterIndex) {
         if (mode?.hasPair != true) return@LaunchedEffect
-        graph.translation.ensureChapter(bookUrl, document.chapterIndex, document)
+        translationEnsureTargets(
+            activeChapterIndex = state.activeChapterIndex,
+            loadedChapterIndices = state.documents.keys,
+            nextChapterIndex = nextChapterIndex,
+        ).forEach { index ->
+            val document = state.documents[index] ?: return@forEach
+            val expected = expectedConfigKeys[document.chapterUrl]
+            val entry = translations[document.chapterUrl]
+            // Already requested for this exact parse: don't re-hash the whole
+            // chapter on every document-map change. Failed stays put until an
+            // explicit retranslate, and Loading is already in the queue.
+            val settled = entry != null && expected != null &&
+                entry.configKey == expected &&
+                (entry.status == ReaderTranslationStatus.Ready ||
+                    entry.status == ReaderTranslationStatus.Loading ||
+                    (entry.status == ReaderTranslationStatus.Failed &&
+                        index != state.activeChapterIndex))
+            if (!settled) {
+                graph.translation.ensureChapter(bookUrl, index, document)
+            }
+        }
     }
 
     // The player only shows text it can point at; during a chapter hand-off or

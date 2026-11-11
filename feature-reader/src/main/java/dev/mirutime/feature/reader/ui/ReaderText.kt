@@ -547,8 +547,14 @@ object ChapterHeaderMetrics {
     val topPadding = 28.dp
     val ornamentSize = 26.dp
     val ornamentGap = 12.dp
-    val badgeGap = 8.dp
-    val badgeHeight = 24.dp
+    val badgeGap = 10.dp
+    val badgeHeight = 18.dp
+    val badgeHorizontalPadding = 7.dp
+    val badgeVerticalPadding = 1.dp
+    val badgeIconSize = 12.dp
+    val badgeIconGap = 4.dp
+    const val badgeFontSizeSp = 10
+    const val badgeLineHeightSp = 12
     val bottomPadding = 12.dp
     const val titleFontSizeSp = 22
     const val titleLineHeightSp = 30
@@ -629,11 +635,16 @@ fun ReaderChapterHeader(
                 )
                 if (translationLabel != null) {
                     Spacer(Modifier.height(ChapterHeaderMetrics.badgeGap))
-                    TranslationBadge(
-                        label = translationLabel,
-                        style = style,
-                        description = stringResource(R.string.rd_translation_badge_desc),
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TranslationBadge(
+                            label = translationLabel,
+                            style = style,
+                            description = stringResource(R.string.rd_translation_badge_desc),
+                        )
+                    }
                 }
             }
         }
@@ -657,7 +668,10 @@ private fun TranslationBadge(
             .heightIn(min = ChapterHeaderMetrics.badgeHeight)
             .clip(RoundedCornerShape(percent = 50))
             .background(textColor.copy(alpha = ChapterHeaderMetrics.badgeAlpha))
-            .padding(horizontal = 9.dp, vertical = 3.dp)
+            .padding(
+                horizontal = ChapterHeaderMetrics.badgeHorizontalPadding,
+                vertical = ChapterHeaderMetrics.badgeVerticalPadding,
+            )
             .semantics(mergeDescendants = true) {
                 contentDescription = "$description: $label"
             },
@@ -667,14 +681,14 @@ private fun TranslationBadge(
             imageVector = Icons.Outlined.Translate,
             contentDescription = null,
             tint = textColor.copy(alpha = 0.7f),
-            modifier = Modifier.size(14.dp),
+            modifier = Modifier.size(ChapterHeaderMetrics.badgeIconSize),
         )
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(ChapterHeaderMetrics.badgeIconGap))
         Text(
             text = label,
             color = textColor.copy(alpha = 0.8f),
-            fontSize = 11.sp,
-            lineHeight = 14.sp,
+            fontSize = ChapterHeaderMetrics.badgeFontSizeSp.sp,
+            lineHeight = ChapterHeaderMetrics.badgeLineHeightSp.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             softWrap = false,
