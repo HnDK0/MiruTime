@@ -1635,15 +1635,10 @@ internal fun BookScreen(
                     onStopDownload = { stopDownloadsConfirm = true },
                     showSource = !current.bookUrl.startsWith("local") &&
                         current.sourceUrl.isNotBlank(),
-                    // Four rendered rows: translator, export, regex, migrate.
-                    toolCount = 3 +
-                        (if (migration != null && current.inLibrary &&
-                            !current.bookUrl.startsWith("local")
-                        ) {
-                            1
-                        } else {
-                            0
-                        }),
+                    // ToolsSection always paints Migrate, even when disabled:
+                    // text books show translator/export/regex + migrate, while
+                    // manga/video show only export/source + migrate.
+                    toolCount = if (isVideoBook || mangaBook) 2 else 4,
                     toolsExpanded = toolsExpanded,
                     onContinue = {
                         ioScope.launch {
@@ -3293,6 +3288,9 @@ private fun ToolsSection(
             modifier = modifier,
         )
     }
+    // Translation and text cleanup only exist for text books: a manga or
+    // video book has no text blocks for either tool to act on.
+    val textTools = !manga && !video
     val toolsTitle = stringResource(R.string.book_section_tools)
     MiruCard(contentPadding = PaddingValues(MiruSpace.M)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -3311,10 +3309,15 @@ private fun ToolsSection(
         Spacer(modifier = Modifier.height(MiruSpace.S))
         if (largeText) {
             Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                translatorTile(Modifier.fillMaxWidth())
+                if (textTools) translatorTile(Modifier.fillMaxWidth())
                 exportTile(Modifier.fillMaxWidth())
-                regexTile(Modifier.fillMaxWidth())
+                if (textTools) regexTile(Modifier.fillMaxWidth())
                 migrateTile(Modifier.fillMaxWidth())
+            }
+        } else if (!textTools) {
+            Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                exportTile(Modifier.weight(1f))
+                migrateTile(Modifier.weight(1f))
             }
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
