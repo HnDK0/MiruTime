@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Plugin and source issues
+    url: https://github.com/HnDK0/external-sources/issues
+    about: Bugs and requests for Lua sources belong to the external-sources repository.
+  - name: Security report
+    url: https://github.com/HnDK0/MiruTime/security/advisories/new
+    about: Report vulnerabilities privately, never in a public issue.

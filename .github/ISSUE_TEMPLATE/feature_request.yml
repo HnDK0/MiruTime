@@ -1,0 +1,63 @@
+name: Feature request
+description: Suggest a feature or an improvement for MiruTime.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas that change product behavior (screens, defaults, options, texts) are discussed before implementation. Plugin and source requests belong to [`HnDK0/external-sources`](https://github.com/HnDK0/external-sources).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is hard, missing or annoying today, and for whom?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What should the app do instead? Describe the flow, not the implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you use now, or other designs you thought of.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Library / shelves
+        - Finder / plugins
+        - Reader (novel)
+        - Reader (manga)
+        - Translation
+        - Text-to-speech
+        - Video player
+        - Downloads
+        - Migration
+        - Backup / restore
+        - Regex cleanup
+        - Updates
+        - Settings
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and found no duplicate.
+          required: true
+        - label: This is not a request for a new source or plugin.
+          required: true

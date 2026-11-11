@@ -1,0 +1,100 @@
+name: Bug report
+description: Something in MiruTime is broken or behaves unexpectedly.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please search existing issues first. For problems with a specific source, check the plugin first — the app only renders what the plugin returns.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        1. Open ...
+        2. Tap ...
+        3. See ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Minimal, repeatable steps. Mention the book, source and screen.
+    validations:
+      required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: MiruTime version
+      description: |
+        Open **Settings → About → Version** and tap the row to copy the whole line, including the commit hash — it is the only reliable way to identify your build.
+      placeholder: "0.1 · release · a1b2c3d"
+    validations:
+      required: true
+
+  - type: input
+    id: last-working
+    attributes:
+      label: Last working version (optional)
+      description: If this worked before, paste the version line of the last build without the bug.
+
+  - type: input
+    id: android
+    attributes:
+      label: Android version and device
+      placeholder: "Android 14, Pixel 7"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Library / shelves
+        - Finder / plugins
+        - Reader (novel)
+        - Reader (manga)
+        - Translation
+        - Text-to-speech
+        - Video player
+        - Downloads
+        - Migration
+        - Backup / restore
+        - Regex cleanup
+        - Updates
+        - Settings
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: source
+    attributes:
+      label: Source / plugin
+      description: Plugin name and version, or "local EPUB/FB2" / "n/a".
+      placeholder: "plugin name v1.2.3"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or error report
+      description: |
+        Attach the file from **Settings → About → Export logs**, paste an in-app plugin error report, or include a logcat excerpt. Keep only the lines around the failure. Remove API keys, cookies, tokens and private file paths before posting.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and found no duplicate.
+          required: true
+        - label: I removed secrets, cookies and tokens from logs.
+          required: true
