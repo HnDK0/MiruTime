@@ -1265,19 +1265,24 @@ interface LibraryDao {
 
     // --- local backup selection ---------------------------------------------
 
-    // Only novel installs own files the backup has to carry. Manga pages and
-    // video files are deliberately excluded: the archive keeps their metadata
-    // but not the heavy content. History-only copies and plugin books stay out.
+    // Every in-library book the archive carries files for. Plugin novel bodies
+    // are downloadable chapter text a user expects offline, so they are packed;
+    // manga pages and video files are not. History-only copies stay out, and
+    // local-manga books are pruned from the snapshot, so neither is selected.
+    // The LEFT JOIN keeps plugin books (no local file row); a local book without
+    // that row has no copy to pack and would fail the backup instead.
     @Query(
         """
         SELECT b.bookId AS bookId, b.installId AS installId, b.title AS title,
-            b.inLibrary AS inLibrary, l.copyPath AS copyPath, l.format AS format,
+            b.inLibrary AS inLibrary, l.copyPath AS copyPath,
+            COALESCE(l.format, '') AS format,
             c.localPath AS coverLocalPath
         FROM books b
-        INNER JOIN local_book_files l ON l.bookId = b.bookId
+        LEFT JOIN local_book_files l ON l.bookId = b.bookId
         LEFT JOIN book_covers c ON c.bookId = b.bookId
         WHERE b.inLibrary = 1
-            AND b.installId = 'local-books'
+            AND b.installId <> 'local-manga'
+            AND (l.bookId IS NOT NULL OR b.installId <> 'local-books')
         ORDER BY b.bookId
         """,
     )
@@ -1290,7 +1295,7 @@ interface LibraryDao {
         INNER JOIN chapters c ON c.chapterId = cb.chapterId
         INNER JOIN books b ON b.bookId = c.bookId
         WHERE b.inLibrary = 1
-            AND b.installId = 'local-books'
+            AND b.installId <> 'local-manga'
         """,
     )
     suspend fun localBackupBodyPaths(): List<LocalBackupPathRow>
@@ -1324,16 +1329,18 @@ interface LibraryDao {
     )
     suspend fun restorePageRows(): List<RestorePageRow>
 
+    // Bodies are content data: a restored row must not claim a download when
+    // the file is absent. This covers plugin books whose bodies older archives
+    // did not carry, plus same-device rows whose cache was evicted.
     @Query(
         """
         SELECT cb.chapterId AS chapterId, cb.path AS path
         FROM chapter_bodies cb
         INNER JOIN chapters c ON c.chapterId = cb.chapterId
         INNER JOIN books b ON b.bookId = c.bookId
-        WHERE b.installId = 'local-manga'
         """,
     )
-    suspend fun localMangaBodyRows(): List<LocalMangaBodyRow>
+    suspend fun restoreBodyRows(): List<RestoreBodyRow>
 
     @Query(
         """

@@ -131,9 +131,10 @@ data class LibraryStorageUsage(
     val clearableImageCount: Int get() = clearableCoverCount + sourceIconCount
 }
 
-// One library book that owns local files (EPUB/FB2/CBZ/folder). The backup
-// lane must include these even though they are not cache. Only books with
-// inLibrary = 1 and a local install id are returned.
+// One in-library book the archive carries files for. Local books contribute
+// their copy (EPUB/FB2/CBZ/folder) even though it is not cache; plugin books
+// contribute cached chapter bodies and their cover. local-manga and
+// history-only rows are not returned.
 data class LocalBackupBook(
     val bookId: Long,
     val installId: String,
@@ -158,10 +159,10 @@ data class LocalBackupBookRow(
 
 data class LocalBackupPathRow(val bookId: Long, val path: String)
 
-// Rows that point at manga content. Restore prunes only those whose files are
-// absent, so a same-device restore keeps working downloads.
+// Rows that point at downloaded content. Restore prunes only those whose files
+// are absent, so a same-device restore keeps working downloads.
 data class RestorePageRow(val chapterId: Long, val pagePathsJson: String)
-data class LocalMangaBodyRow(val chapterId: Long, val path: String)
+data class RestoreBodyRow(val chapterId: Long, val path: String)
 data class LocalMangaFileRow(val bookId: Long, val copyPath: String)
 // Every in-library cover that has a local file. Unlike LocalBackupBook this
 // deliberately includes plugin books: a user-override cover is user data, not

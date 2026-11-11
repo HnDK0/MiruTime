@@ -45,9 +45,10 @@ import kotlinx.coroutines.withContext
  * only finishes applying settings when it did. No manual restart is required in
  * the normal path.
  */
-// Manga pages, bodies and local copies are never packed. After restore, drop
-// only the rows whose files are absent, so an existing same-device download
-// survives.
+// Manga pages and local copies are never packed. After restore, drop any body
+// row whose file is absent: a restored row must not claim a download it cannot
+// serve. This covers plugin books whose bodies older archives did not carry.
+// Rows whose file exists (same-device cache) survive.
 internal suspend fun LibraryDao.pruneMissingRestoredContent(
     exists: (String) -> Boolean,
 ) {
@@ -57,7 +58,7 @@ internal suspend fun LibraryDao.pruneMissingRestoredContent(
             deleteChapterPages(listOf(row.chapterId))
         }
     }
-    localMangaBodyRows().forEach { row ->
+    restoreBodyRows().forEach { row ->
         if (!exists(row.path)) deleteChapterBody(row.chapterId)
     }
     localMangaFileRows().forEach { row ->
@@ -114,6 +115,7 @@ class BackupRestoreService(
     private val importDatabase: ImportDatabase = { _, _, _, _, _ ->
         error("Live database import is not configured")
     },
+    private val stageNovelaBackup: StageNovelaBackup? = null,
     private val journalExists: suspend (Long) -> Boolean = { false },
     private val deleteJournal: suspend (Long) -> Unit = {},
     private val deleteAllJournals: suspend () -> Unit = {},
@@ -146,6 +148,7 @@ class BackupRestoreService(
         localSourcesStore: LocalSourcesBackupStore,
         repair: suspend () -> Unit = {},
         onBookKeyRewritten: suspend (oldUrl: String, newUrl: String) -> Unit = { _, _ -> },
+        novelaStager: NovelaBackupStager? = null,
     ) : this(
         filesDir = context.applicationContext.filesDir,
         databasePath = databasePath,
@@ -166,9 +169,18 @@ class BackupRestoreService(
                     onBookKeyRewritten = onBookKeyRewritten,
                     repair = repair,
                     onCommitted = onCommitted,
+                    // Cached bodies are importable user data (plugin books keep
+                    // their downloaded chapters offline), so both MiruTime
+                    // archives and converted NoveLA archives carry them.
+                    importCachedBodies = true,
                 )
             } finally {
                 source.close()
+            }
+        },
+        stageNovelaBackup = novelaStager?.let { stager ->
+            { input, staging, onProgress, onStage ->
+                stager.stage(input, staging, onProgress, onStage)
             }
         },
         restoreBookIdMap = { staged, live -> computeRestoreBookIdMap(staged.absolutePath, live.absolutePath) },
@@ -309,7 +321,19 @@ class BackupRestoreService(
             cleanupStaleStages()
             temp.mkdirs()
             onProgress(0.01f)
-            extract(input, temp, onProgress, onStage)
+            val (firstEntry, stream) = peekZipFirstEntry(input)
+            if (firstEntry == NOVELA_DB_ENTRY) {
+                val stage = stageNovelaBackup
+                    ?: error("NoveLA backup restore is not configured")
+                stage(
+                    stream,
+                    temp,
+                    { value -> onProgress(NOVELA_PROGRESS_SHARE * value) },
+                    onStage,
+                )
+            } else {
+                extract(stream, temp, onProgress, onStage)
+            }
             if (!temp.renameTo(stagingRoot)) {
                 error("Cannot publish the staged restore")
             }
@@ -1628,6 +1652,9 @@ class BackupRestoreService(
         private const val MAX_RESTORE_TOTAL_BYTES = 8L * 1024 * 1024 * 1024
         private const val MAX_RESTORE_ENTRIES = 100_000
         private const val STAGING_PROGRESS = 0.9f
+        // A NoveLA archive is converted into this staging layout first; its
+        // progress owns the bulk of the bar, staging the rest.
+        private const val NOVELA_PROGRESS_SHARE = 0.95f
         private val PLUGIN_DIRS = listOf("lua_plugins", "lua_libs")
 
         private val SHA256_HEX = Regex("^[0-9a-f]{64}$")
@@ -1675,6 +1702,13 @@ internal typealias ImportDatabase = suspend (
     journalNow: Long,
     onCommitted: suspend (LibraryImportReport) -> Unit,
 ) -> LibraryImportReport
+
+internal typealias StageNovelaBackup = suspend (
+    input: InputStream,
+    staging: File,
+    onProgress: (Float) -> Unit,
+    onStage: ((RestoreProgress) -> Unit)?,
+) -> NovelaImportReport
 
 // Temp-file + rename so a crash never leaves a half-written marker/journal.
 internal fun writeTextAtomic(file: File, text: String) {

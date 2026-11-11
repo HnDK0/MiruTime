@@ -49,10 +49,12 @@ data class LibraryImportReport(
  * callers can copy the matching files after the transaction commits.
  * [preservedCovers] are existing user-override covers whose file must not be
  * overwritten by the backup.
+ * [importCachedBodies] also restores cached plugin bodies (pages stay local-only).
  */
 suspend fun LibraryDatabase.importLibraryBackup(
     source: LibraryDao,
     pageSize: Int = DEFAULT_IMPORT_PAGE_SIZE,
+    importCachedBodies: Boolean = false,
     coverPathFor: (oldBookId: Long, newBookId: Long, oldPath: String?) -> String? =
         { _, _, path -> path },
     journalId: Long? = null,
@@ -67,6 +69,7 @@ suspend fun LibraryDatabase.importLibraryBackup(
             source = source,
             target = libraryDao(),
             pageSize = pageSize,
+            importCachedBodies = importCachedBodies,
             coverPathFor = coverPathFor,
             journalId = journalId,
             journalNow = journalNow,
@@ -108,6 +111,7 @@ private suspend fun importLibraryBackupRows(
     source: LibraryDao,
     target: LibraryDao,
     pageSize: Int,
+    importCachedBodies: Boolean,
     coverPathFor: (Long, Long, String?) -> String?,
     journalId: Long?,
     journalNow: Long,
@@ -297,13 +301,14 @@ private suspend fun importLibraryBackupRows(
         downloadCount++
     }
 
-    // The archive only carries files for imported local books. Cached plugin
-    // bodies/pages would be dangling rows, so they are left out and can be
-    // fetched again on demand.
+    // The archive only carries files for imported local books unless
+    // importCachedBodies is set. Cached pages are always left out: they would be
+    // dangling rows, so they can be fetched again on demand. Body paths are
+    // already id-free in the snapshot, so a verbatim copy cannot collide.
     forEachPage(pageSize, ChapterBodyEntity::chapterId, source::backupChapterBodies) { body ->
         val chapterId = chapterIds[body.chapterId] ?: return@forEachPage
         val bookId = chapterBookIds[body.chapterId] ?: return@forEachPage
-        if (bookId !in localBookTargetIds) return@forEachPage
+        if (!importCachedBodies && bookId !in localBookTargetIds) return@forEachPage
         target.upsertChapterBody(body.copy(chapterId = chapterId))
     }
 

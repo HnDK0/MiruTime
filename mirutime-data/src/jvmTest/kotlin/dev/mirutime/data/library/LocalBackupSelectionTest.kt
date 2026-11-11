@@ -8,6 +8,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class LocalBackupSelectionTest {
@@ -31,7 +32,7 @@ class LocalBackupSelectionTest {
     }
 
     @Test
-    fun `only in-library novel books are selected for file backup`() = runTest {
+    fun `in-library local and plugin books are selected, manga and history are not`() = runTest {
         val novelId = localNovel()
         val mangaId = localMangaFolder()
         val outOfLibraryId = book("local://out", "local-books", inLibrary = false).let { row ->
@@ -39,20 +40,12 @@ class LocalBackupSelectionTest {
                 repository.saveLocalBookFile(localFile(id, "local_books/local-books/out.epub", "EPUB"))
             }
         }
-        val pluginId = book("https://site/book", "plugin-a", inLibrary = true).let { row ->
-            repository.saveBook(row).also { id ->
-                repository.saveLocalBookFile(localFile(id, "local_books/plugin-a/book.epub", "EPUB"))
-            }
-        }
+        val pluginId = pluginBook(inLibrary = true)
 
         val selected = repository.localBackupBooks()
 
-        assertEquals(setOf(novelId), selected.map { it.bookId }.toSet())
-        assertTrue(
-            selected.none {
-                it.bookId == mangaId || it.bookId == outOfLibraryId || it.bookId == pluginId
-            },
-        )
+        assertEquals(setOf(novelId, pluginId), selected.map { it.bookId }.toSet())
+        assertTrue(selected.none { it.bookId == mangaId || it.bookId == outOfLibraryId })
 
         val novel = selected.first { it.bookId == novelId }
         assertEquals("local_books/local-books/novel.epub", novel.copyPath)
@@ -62,10 +55,39 @@ class LocalBackupSelectionTest {
             listOf("local_books/local-books/novel/chapters/1.html"),
             novel.bodyPaths,
         )
+
+        val plugin = selected.first { it.bookId == pluginId }
+        assertEquals("chikari", plugin.installId)
+        assertNull(plugin.copyPath)
+        assertEquals("", plugin.format)
+        assertEquals(
+            listOf("mirutime_plugins/chikari/bodies/1.html"),
+            plugin.bodyPaths,
+        )
     }
 
     @Test
-    fun `restore prune queries separate pages from manga-only rows`() = runTest {
+    fun `plugin book outside the library is not selected`() = runTest {
+        pluginBook(inLibrary = false)
+
+        assertTrue(repository.localBackupBooks().isEmpty())
+    }
+
+    @Test
+    fun `local book without a local file row is not selected`() = runTest {
+        // Leftover pre-fix data: a local-books book whose copy row is gone would
+        // have no copyPath and fail the whole backup.
+        val orphanId = repository.saveBook(book("local://orphan", "local-books", inLibrary = true))
+        val pluginId = pluginBook(inLibrary = true)
+
+        val selected = repository.localBackupBooks()
+
+        assertEquals(listOf(pluginId), selected.map { it.bookId })
+        assertTrue(selected.none { it.bookId == orphanId })
+    }
+
+    @Test
+    fun `restore prune queries cover every body row and manga copies`() = runTest {
         val novelId = localNovel()
         val mangaId = localMangaFolder()
         val novelChapter = db.libraryDao().chapters(novelId).single().chapterId
@@ -84,8 +106,8 @@ class LocalBackupSelectionTest {
         val pages = db.libraryDao().restorePageRows()
         assertEquals(setOf(novelChapter, mangaChapter), pages.map { it.chapterId }.toSet())
         assertEquals(
-            listOf(mangaChapter),
-            db.libraryDao().localMangaBodyRows().map { it.chapterId },
+            setOf(novelChapter, mangaChapter),
+            db.libraryDao().restoreBodyRows().map { it.chapterId }.toSet(),
         )
         assertEquals(listOf(mangaId), db.libraryDao().localMangaFileRows().map { it.bookId })
     }
@@ -121,6 +143,26 @@ class LocalBackupSelectionTest {
                 format = "images",
                 pagePathsJson = """["local_books/local-books/novel/pages/1/00001.jpg"]""",
                 totalBytes = 10,
+            ),
+        )
+        return bookId
+    }
+
+    private suspend fun pluginBook(inLibrary: Boolean): Long {
+        val bookId = repository.saveBook(book("https://site/book", "chikari", inLibrary))
+        val chapter = repository.replaceChapters(
+            bookId,
+            listOf(ChapterSeed(1, "https://site/book#chapter=1", "One")),
+            at = 1L,
+        ).single()
+        repository.saveChapterBody(
+            ChapterBodyEntity(
+                chapterId = chapter.chapterId,
+                format = "html",
+                path = "mirutime_plugins/chikari/bodies/1.html",
+                bytes = 10,
+                sha256 = "plugin-body-sha",
+                fetchedAt = 1L,
             ),
         )
         return bookId

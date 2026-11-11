@@ -10,7 +10,9 @@ import dev.mirutime.data.library.LocalBackupCover
 import dev.mirutime.data.library.createDatabaseSnapshot
 import dev.mirutime.data.library.pruneHistoryOnlyBooks
 import dev.mirutime.data.library.pruneLocalMangaBooks
+import dev.mirutime.data.library.rewriteCachedBodyPaths
 import dev.mirutime.data.library.snapshotBookCounts
+import dev.mirutime.data.library.stableBackupBodyPath
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -68,9 +70,10 @@ data class BackupReaderAssetEntry(
 
 @Serializable
 data class BackupCounts(
+    // Books the archive selected files for: every in-library book except
+    // local-manga. Log-only (`stagingBookCount`); restore does not read it.
     val localBooks: Int,
-    // Every in-library book; localBooks only counts books that also own local
-    // files and is therefore 0 for a plugin-only library.
+    // Every in-library book in the snapshot.
     val libraryBooks: Int = 0,
     // Every book row in the DB snapshot, including history-only books.
     val totalBooks: Int = 0,
@@ -157,10 +160,11 @@ internal val BackupJson = Json {
  * Streams one backup archive into [createBackup]'s output.
  *
  * The archive carries a consistent DB snapshot (VACUUM INTO), an optional
- * settings snapshot (including API keys), every file owned by an in-library
- * local book (optionally without covers/pages), and optionally the Lua plugin
- * trees. Files never load into RAM; each entry is copied in fixed-size chunks
- * with a per-file cap, then the finished ZIP is reopened and verified.
+ * settings snapshot (including API keys), every file the in-library books need
+ * to stay readable offline (plugin chapter bodies and covers, plus local-book
+ * copies; optionally without covers), and optionally the Lua plugin trees.
+ * Files never load into RAM; each entry is copied in fixed-size chunks with a
+ * per-file cap, then the finished ZIP is reopened and verified.
  */
 class BackupService(
     private val databasePath: File,
@@ -175,7 +179,7 @@ class BackupService(
     private val localSourcesSnapshot: () -> LocalSourcesBackup,
     private val snapshotDatabase: suspend (File, Boolean) -> DatabaseSnapshot =
         { target, includeHistoryOnly ->
-            createSnapshot(databasePath, target, includeHistoryOnly)
+            createSnapshot(databasePath, target, includeHistoryOnly, filesDir)
         },
     private val clock: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = { UUID.randomUUID().toString() },
@@ -275,11 +279,11 @@ class BackupService(
             val books = localBooks().filter { it.inLibrary }
             onProgress(0.10f)
             val fileCandidates = books.flatMap(::collectBookFiles)
-            // Plugin books own no local copy/bodies, but their covers (and
-            // especially user overrides) are still user data. A user override
-            // is always packed; other covers follow includeImages. Local-manga
-            // books are pruned from the snapshot (their pages are never
-            // packed), so their covers would be dead weight in the archive.
+            // Plugin books contribute their cached bodies and covers (a user
+            // override is always user data). A user override is always packed;
+            // other covers follow includeImages. Local-manga books are pruned
+            // from the snapshot (their pages are never packed), so their covers
+            // would be dead weight in the archive.
             val coverCandidates = localCovers()
                 .filter { it.installId != LocalMangaInstallId }
                 .mapNotNull { cover ->
@@ -614,51 +618,78 @@ class BackupService(
         val isUserOverride: Boolean = false,
     )
 
-    // copyPath (file or folder), cover and every body path of one novel.
+    // copyPath (file or folder), cover and every body path of one book.
     // Directories recurse; duplicates are written once, first kind wins.
     private fun collectBookFiles(book: LocalBackupBook): List<FileCandidate> {
-        // Manga owns no files in the archive: only novels carry content.
-        if (book.installId !in LOCAL_INSTALL_IDS) return emptyList()
+        // Manga books are pruned from the snapshot and never own packed files.
+        if (book.installId == LocalMangaInstallId) return emptyList()
         val seen = LinkedHashMap<String, FileCandidate>()
-        val required = true
+        // A local book owns its copy and bodies: losing them breaks the book.
+        // Plugin bodies are a cache the reader can refill, so a missing file is
+        // skipped instead of failing the whole backup.
+        val required = book.installId in LOCAL_INSTALL_IDS
 
         fun missing(kind: String, path: String): Nothing = error(
             "Backup is missing required $kind for book ${book.bookId} " +
                 "(${book.title}): $path",
         )
 
-        fun addFile(file: File, kind: String, required: Boolean, path: String) {
+        fun addFile(
+            file: File,
+            kind: String,
+            required: Boolean,
+            path: String,
+            override: String? = null,
+        ) {
             if (!file.isFile) {
                 if (required) missing(kind, path)
                 return
             }
-            val entry = entryPath(file, book.bookId, kind)
+            val entry = override ?: entryPath(file, book.bookId, kind)
             if (seen.containsKey(entry)) return
             seen[entry] = FileCandidate(entry, book.bookId, kind, file)
         }
 
-        fun addPath(path: String?, kind: String, required: Boolean) {
+        fun addPath(
+            path: String?,
+            kind: String,
+            required: Boolean,
+            override: (File) -> String? = { null },
+        ) {
             if (path.isNullOrBlank()) {
                 if (required) missing(kind, "<empty>")
                 return
             }
             val file = resolve(path)
             when {
-                file.isFile -> addFile(file, kind, required, path)
+                file.isFile -> addFile(file, kind, required, path, override(file))
                 file.isDirectory -> {
                     val children = file.walkTopDown().filter { it.isFile }.toList()
                     if (children.isEmpty() && required) missing(kind, path)
                     children.forEach { child ->
-                        addFile(child, kind, required, child.absolutePath)
+                        addFile(child, kind, required, child.absolutePath, override(child))
                     }
                 }
                 else -> if (required) missing(kind, path)
             }
         }
 
+        // A plugin body gets an id-free path so a restore into another library
+        // cannot collide with a different book's cache file; the snapshot
+        // rewrites the same path (see rewriteCachedBodyPaths). Local books keep
+        // their meaningful slug-based paths.
+        fun bodyEntry(file: File): String? {
+            if (book.installId in LOCAL_INSTALL_IDS) return null
+            val relative = file.relativeToOrNull(filesDir)
+                ?.takeIf { !it.path.startsWith("..") }
+                ?.invariantSeparatorsPath
+                ?: return null
+            return "files/" + stableBackupBodyPath(relative) { sha256Hex(it.encodeToByteArray()) }
+        }
+
         addPath(book.copyPath, KIND_LOCAL_COPY, required)
         addPath(book.coverLocalPath, KIND_COVER, false)
-        book.bodyPaths.forEach { addPath(it, KIND_CHAPTER_BODY, required) }
+        book.bodyPaths.forEach { addPath(it, KIND_CHAPTER_BODY, required, ::bodyEntry) }
         return seen.values.toList()
     }
 
@@ -770,6 +801,7 @@ private suspend fun createSnapshot(
     databasePath: File,
     target: File,
     includeHistoryOnly: Boolean,
+    filesRoot: File,
 ): DatabaseSnapshot =
     withContext(Dispatchers.IO) {
         createDatabaseSnapshot(
@@ -782,6 +814,14 @@ private suspend fun createSnapshot(
         // Manga page files are never packed, so their DB rows would restore a
         // book with no readable content.
         pruneLocalMangaBooks(target.absolutePath)
+        // Plugin bodies are packed under id-free paths: restoring into a
+        // library that already uses the source ids must not overwrite another
+        // book's cache file. Rows follow the same paths the archive uses.
+        rewriteCachedBodyPaths(
+            snapshotPath = target.absolutePath,
+            filesRoot = filesRoot.absolutePath,
+            hash = { sha256Hex(it.encodeToByteArray()) },
+        )
         val (totalBooks, libraryBooks) = snapshotBookCounts(target.absolutePath)
         DatabaseSnapshot(
             file = target,
@@ -825,7 +865,7 @@ internal const val LOCAL_SOURCES_ENTRY = "settings/local-sources.json"
 internal const val DATABASE_ENTRY = "database/mirutime.db"
 private const val KIND_LOCAL_COPY = "local-copy"
 internal const val KIND_COVER = "cover"
-private const val KIND_CHAPTER_BODY = "chapter-body"
+internal const val KIND_CHAPTER_BODY = "chapter-body"
 private const val KIND_CHAPTER_PAGE = "chapter-page"
 private const val CHUNK_BYTES = 64 * 1024
 

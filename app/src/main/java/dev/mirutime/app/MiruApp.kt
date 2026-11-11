@@ -60,8 +60,10 @@ import dev.mirutime.app.features.migration.data.MigrationSourceGate
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.settings.data.BackupRestoreService
 import dev.mirutime.app.features.settings.data.BackupService
+import dev.mirutime.app.features.settings.data.InstalledPluginRef
 import dev.mirutime.app.features.settings.data.LocalSourcesBackup
 import dev.mirutime.app.features.settings.data.LocalSourcesBackupStore
+import dev.mirutime.app.features.settings.data.NovelaBackupStager
 import dev.mirutime.app.features.settings.data.PrefsReaderBackupStore
 import dev.mirutime.app.features.settings.data.SettingsStore
 import dev.mirutime.app.features.settings.data.SharedPreferencesKeyValueStore
@@ -441,6 +443,19 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
                 )
             },
             onBookKeyRewritten = copyNovelSettingsForRepair,
+            novelaStager = NovelaBackupStager(
+                context = this,
+                filesDir = filesDir,
+                appVersion = runCatching {
+                    packageManager.getPackageInfo(packageName, 0).versionName
+                }.getOrNull() ?: "0.1",
+                installedPlugins = {
+                    pluginGraph.installed.value.map {
+                        InstalledPluginRef(it.id, it.version, it.baseUrl)
+                    }
+                },
+                existingInstallIdForUrl = { url -> libraryRepository.book(url)?.installId },
+            ),
         )
     }
     // Settings -> Data reads the same files the app actually writes. Video

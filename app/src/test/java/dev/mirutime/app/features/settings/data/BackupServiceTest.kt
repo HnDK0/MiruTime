@@ -701,6 +701,65 @@ class BackupServiceTest {
     }
 
     @Test
+    fun `plugin book cached bodies are packed`() = runBlocking {
+        val root = tempDir()
+        val filesDir = File(root, "files").apply { mkdirs() }
+        val cacheDir = File(root, "cache").apply { mkdirs() }
+        val body = write(filesDir, "downloads/text/1/2.html", "<p>body</p>")
+        val book = LocalBackupBook(
+            bookId = 45,
+            installId = "chikari",
+            title = "Plugin book",
+            inLibrary = true,
+            copyPath = null,
+            format = "",
+            coverLocalPath = null,
+            bodyPaths = listOf(body.absolutePath),
+        )
+        val service = requiredService(root, filesDir, cacheDir, listOf(book))
+        val output = ByteArrayOutputStream()
+
+        val result = service.createBackup(output)
+
+        assertTrue(result.error, result.success)
+        assertEquals(1, result.localFileCount)
+        val entries = readZip(output.toByteArray())
+        val hash = sha256Hex("downloads/text/1/2.html".encodeToByteArray())
+        val entry = "files/downloads/bodies/$hash.html"
+        assertEquals("<p>body</p>", entries.getValue(entry).decodeToString())
+        assertTrue(Regex("^[0-9a-f]{64}$").matches(hash))
+        // The id-based cache path would collide with another book's file after
+        // restoring into a different library, so it must not be packed as is.
+        assertTrue(entries.keys.none { it.startsWith("files/downloads/text/") })
+        assertTrue(entries.keys.none { it.startsWith("files/local_books") })
+    }
+
+    @Test
+    fun `plugin book with a missing cached body still backs up`() = runBlocking {
+        val root = tempDir()
+        val filesDir = File(root, "files").apply { mkdirs() }
+        val cacheDir = File(root, "cache").apply { mkdirs() }
+        val book = LocalBackupBook(
+            bookId = 46,
+            installId = "chikari",
+            title = "Plugin book",
+            inLibrary = true,
+            copyPath = null,
+            format = "",
+            coverLocalPath = null,
+            bodyPaths = listOf("mirutime_plugins/chikari/bodies/missing.html"),
+        )
+        val service = requiredService(root, filesDir, cacheDir, listOf(book))
+        val output = ByteArrayOutputStream()
+
+        val result = service.createBackup(output)
+
+        assertTrue(result.error, result.success)
+        assertEquals(0, result.localFileCount)
+        assertTrue(readZip(output.toByteArray()).keys.none { it.contains("mirutime_plugins") })
+    }
+
+    @Test
     fun `local manga content is never packed`() = runBlocking {
         val root = tempDir()
         val filesDir = File(root, "files").apply { mkdirs() }

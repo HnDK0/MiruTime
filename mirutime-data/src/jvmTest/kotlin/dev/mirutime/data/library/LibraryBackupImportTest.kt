@@ -9,6 +9,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class LibraryBackupImportTest {
@@ -565,6 +566,69 @@ class LibraryBackupImportTest {
         )
         assertTrue(
             target.libraryDao().chapters(importedLocal.bookId).single().downloaded,
+        )
+    }
+
+    @Test
+    fun `restore skips plugin chapter bodies by default`() = runTest {
+        val source = openRoom()
+        val sourceBook = LibraryRepository(source.libraryDao()).saveBook(
+            book("https://s/plugin").copy(installId = "plugin-x"),
+        )
+        seedPluginCache(source, sourceBook)
+
+        val target = openRoom()
+        target.importLibraryBackup(source.libraryDao())
+
+        val imported = assertNotNull(
+            target.libraryDao().bookByInstallAndUrl("plugin-x", "https://s/plugin"),
+        )
+        val chapterId = target.libraryDao().chapters(imported.bookId).single().chapterId
+        assertNull(target.libraryDao().chapterBody(chapterId))
+    }
+
+    @Test
+    fun `restore with cached bodies imports plugin bodies but not pages`() = runTest {
+        val source = openRoom()
+        val sourceBook = LibraryRepository(source.libraryDao()).saveBook(
+            book("https://s/plugin").copy(installId = "plugin-x"),
+        )
+        seedPluginCache(source, sourceBook)
+
+        val target = openRoom()
+        target.importLibraryBackup(source.libraryDao(), importCachedBodies = true)
+
+        val imported = assertNotNull(
+            target.libraryDao().bookByInstallAndUrl("plugin-x", "https://s/plugin"),
+        )
+        val chapterId = target.libraryDao().chapters(imported.bookId).single().chapterId
+        assertEquals("chapter_bodies/plugin.html", target.libraryDao().chapterBody(chapterId)?.path)
+        assertNull(target.libraryDao().chapterPage(chapterId))
+    }
+
+    private suspend fun seedPluginCache(source: LibraryDatabase, bookId: Long) {
+        val repository = LibraryRepository(source.libraryDao())
+        val chapter = repository.replaceChapters(
+            bookId,
+            listOf(ChapterSeed(1, "https://s/plugin/1", "One")),
+            at = 1L,
+        ).single()
+        repository.saveChapterBody(
+            ChapterBodyEntity(
+                chapterId = chapter.chapterId,
+                format = "html",
+                path = "chapter_bodies/plugin.html",
+                bytes = 3,
+                sha256 = "e".repeat(64),
+                fetchedAt = 1L,
+            ),
+        )
+        repository.saveChapterPage(
+            ChapterPageEntity(
+                chapterId = chapter.chapterId,
+                format = "images",
+                pagePathsJson = """["pages/plugin.jpg"]""",
+            ),
         )
     }
 

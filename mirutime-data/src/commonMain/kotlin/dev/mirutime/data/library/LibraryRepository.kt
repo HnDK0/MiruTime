@@ -1134,10 +1134,10 @@ class LibraryRepository(
     }
 
     /**
-     * Every in-library local book with the paths of the files that must go
-     * into a backup (copy, cover, chapter bodies, manga pages). The archive
-     * re-checks inLibrary before packing, so a book toggled out mid-run is
-     * never written.
+     * Every in-library book the archive carries files for; plugin books
+     * contribute their cached chapter bodies and cover, local books also their
+     * copy. The archive re-checks inLibrary before packing, so a book toggled
+     * out mid-run is never written.
      */
     suspend fun localBackupBooks(): List<LocalBackupBook> {
         val rows = dao.localBackupBooks()
