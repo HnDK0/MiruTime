@@ -11,13 +11,14 @@ import androidx.compose.runtime.setValue
 import dev.mirutime.app.features.finder.domain.FilterPreset
 import dev.mirutime.app.features.library.domain.CardStyle
 import dev.mirutime.core.text.RegexRule
+import dev.mirutime.core.text.RegexRuleScope
 import dev.mirutime.core.text.RegexRuleTarget
-import dev.mirutime.core.text.appliesTo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.serialization.Serializable
+import kotlin.jvm.JvmName
 
 // TRANSLATION_NOVEL_PROMPTS entry. `append` = add to the global prompt,
 // otherwise it replaces it for this novel.
@@ -240,6 +241,11 @@ object AppSettings {
     // --- Regex cleanup (USER_REGEX_CLEANUP_RULES[_PER_NOVEL]) ---
     val globalRegexRules = mutableStateListOf<RegexRule>()
     val novelRegexRules = mutableStateMapOf<String, List<RegexRule>>()
+    // Apply-to is a property of the whole list in the compact editor, not of a
+    // single row. The stored rule scope is projected from it when rules run.
+    var globalRegexApplyTo by mutableStateOf(RegexRuleScope.Both)
+        private set
+    val novelRegexApplyTo = mutableStateMapOf<String, RegexRuleScope>()
     private var nextRuleId = 100L
     fun newRuleId(): Long = nextRuleId++
 
@@ -267,9 +273,49 @@ object AppSettings {
     var autoBackupLastTimestamp by mutableLongStateOf(0L)
     var exportDirectory by mutableStateOf("")
 
-    // Effective regex rules of a novel: global + its own.
+    // Effective regex rules of a novel: global + its own, each list projected
+    // with its own list-level apply-to target.
     fun effectiveRules(novelUrl: String?): List<RegexRule> =
-        globalRegexRules + (novelUrl?.let { novelRegexRules[it] }.orEmpty())
+        project(globalRegexRules, globalRegexApplyTo) +
+            project(
+                novelUrl?.let { novelRegexRules[it] }.orEmpty(),
+                novelUrl?.let { novelRegexApplyTo[it] ?: globalRegexApplyTo }
+                    ?: globalRegexApplyTo,
+            )
+
+    fun regexApplyTo(novelUrl: String?): RegexRuleScope =
+        novelUrl?.let { novelRegexApplyTo[it] } ?: globalRegexApplyTo
+
+    @JvmName("updateGlobalRegexApplyTo")
+    fun setGlobalRegexApplyTo(target: RegexRuleScope) {
+        if (globalRegexApplyTo == target) return
+        val before = originalProjection(globalRegexRules, globalRegexApplyTo)
+        globalRegexApplyTo = target
+        _regexRulesRevision.update { it + 1 }
+        if (before != originalProjection(globalRegexRules, target)) {
+            _regexRulesOriginalRevision.update { it + 1 }
+        }
+    }
+
+    fun setNovelRegexApplyTo(url: String, target: RegexRuleScope) {
+        val previous = novelRegexApplyTo[url] ?: globalRegexApplyTo
+        if (previous == target) return
+        val rules = novelRegexRules[url].orEmpty()
+        val before = originalProjection(rules, previous)
+        novelRegexApplyTo[url] = target
+        _regexRulesRevision.update { it + 1 }
+        if (before != originalProjection(rules, target)) {
+            _regexRulesOriginalRevision.update { it + 1 }
+        }
+    }
+
+    private fun bumpRegexRevisions() {
+        _regexRulesRevision.update { it + 1 }
+        _regexRulesOriginalRevision.update { it + 1 }
+    }
+
+    private fun project(rules: List<RegexRule>, scope: RegexRuleScope): List<RegexRule> =
+        rules.map { it.copy(scope = scope) }
 
     // Bumped on every real rule edit: the reader's translation port recomputes
     // its cleaned map from it.
@@ -291,6 +337,7 @@ object AppSettings {
         val nextNovel = novelRegexRules.toMap().let { current ->
             if (rules.isNullOrEmpty()) current - url else current + (url to rules)
         }
+        if (rules.isNullOrEmpty()) novelRegexApplyTo.remove(url)
         applyRuleLists(globalRegexRules.toList(), nextNovel)
     }
 
@@ -304,7 +351,8 @@ object AppSettings {
         val previousNovel = novelRegexRules.toMap()
         if (previousGlobal == nextGlobal && previousNovel == nextNovel) return
         val originalChanged =
-            originalProjection(previousGlobal) != originalProjection(nextGlobal) ||
+            originalProjection(previousGlobal, globalRegexApplyTo) !=
+                originalProjection(nextGlobal, globalRegexApplyTo) ||
                 novelOriginalProjection(previousNovel) != novelOriginalProjection(nextNovel)
         globalRegexRules.clear()
         globalRegexRules.addAll(nextGlobal)
@@ -314,12 +362,26 @@ object AppSettings {
         if (originalChanged) _regexRulesOriginalRevision.update { it + 1 }
     }
 
-    private fun originalProjection(rules: List<RegexRule>): List<RegexRule> =
-        rules.filter { it.appliesTo(RegexRuleTarget.Original) }
+    private fun originalProjection(
+        rules: List<RegexRule>,
+        scope: RegexRuleScope,
+    ): List<RegexRule> =
+        if (scope == RegexRuleScope.Translation) {
+            emptyList()
+        } else {
+            rules.filter { it.enabled && it.pattern.isNotBlank() }
+        }
 
     private fun novelOriginalProjection(
         map: Map<String, List<RegexRule>>,
-    ): Map<String, List<RegexRule>> = map.mapValues { (_, rules) -> originalProjection(rules) }
+    ): Map<String, List<RegexRule>> = map.mapValues { (url, rules) ->
+        originalProjection(rules, novelRegexApplyTo[url] ?: globalRegexApplyTo)
+    }
+
+    private fun deriveApplyTo(rules: List<RegexRule>): RegexRuleScope {
+        val scopes = rules.map { it.scope }.distinct()
+        return scopes.singleOrNull() ?: RegexRuleScope.Both
+    }
 
     // Persisted fields only. Used by MiruApp's snapshotFlow writer and by tests;
     // Compose-only state (selection sheets, scroll, ...) never enters the store.
@@ -388,6 +450,8 @@ object AppSettings {
         translationRecentPairs = translationRecentPairs.toList(),
         globalRegexRules = globalRegexRules.toList(),
         novelRegexRules = novelRegexRules.toMap(),
+        globalRegexApplyTo = globalRegexApplyTo,
+        novelRegexApplyTo = novelRegexApplyTo.toMap(),
         nextRuleId = nextRuleId,
         userAgent = userAgent,
         cloudflareBypass = cloudflareBypass,
@@ -484,7 +548,21 @@ object AppSettings {
         translationRecentPairs.addAll(settings.translationRecentPairs)
         // A restore can land while the reader is open: one write updates the
         // port and — only when the original changes — the open chapter.
+        val previousGlobalApplyTo = globalRegexApplyTo
+        val previousNovelApplyTo = novelRegexApplyTo.toMap()
+        globalRegexApplyTo = settings.globalRegexApplyTo
+            ?: deriveApplyTo(settings.globalRegexRules)
+        novelRegexApplyTo.clear()
+        novelRegexApplyTo.putAll(settings.novelRegexApplyTo)
+        settings.novelRegexRules.forEach { (url, rules) ->
+            if (url !in novelRegexApplyTo) novelRegexApplyTo[url] = deriveApplyTo(rules)
+        }
         applyRuleLists(settings.globalRegexRules, settings.novelRegexRules)
+        if (previousGlobalApplyTo != globalRegexApplyTo ||
+            previousNovelApplyTo != novelRegexApplyTo.toMap()
+        ) {
+            bumpRegexRevisions()
+        }
         nextRuleId = settings.nextRuleId
         userAgent = settings.userAgent
         cloudflareBypass = settings.cloudflareBypass

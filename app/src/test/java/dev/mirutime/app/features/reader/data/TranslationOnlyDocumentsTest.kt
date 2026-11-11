@@ -55,7 +55,7 @@ class TranslationOnlyDocumentsTest {
 
     @Test
     fun `cached blocks apply translation rules only`() = runTest {
-        withRules(rule(RegexRuleScope.Translation, "AD"), rule(RegexRuleScope.Original, "TITLE")) {
+        withRules(rule(RegexRuleScope.Translation, "AD"), applyTo = RegexRuleScope.Translation) {
             val cleaned = cleanTranslationOnlyBlocks("book", listOf(block(0, "AD TITLE")))
             assertEquals(" TITLE", cleaned.single().translatedText)
         }
@@ -63,7 +63,10 @@ class TranslationOnlyDocumentsTest {
 
     @Test
     fun `load normalizes the query, cleans blocks, titles and revisions the document`() = runTest {
-        withRules(rule(RegexRuleScope.Translation, "AD"), rule(RegexRuleScope.Original, "TITLE")) {
+        withRules(rule(RegexRuleScope.Original, "TITLE"), applyTo = RegexRuleScope.Original) {
+            AppSettings.setNovelRegexApplyTo("book", RegexRuleScope.Translation)
+            AppSettings.novelRegexRules["book"] = listOf(rule(RegexRuleScope.Translation, "AD"))
+            try {
             var seenSource: String? = null
             var seenTarget: String? = null
             val documents = TranslationOnlyDocuments(
@@ -97,6 +100,10 @@ class TranslationOnlyDocumentsTest {
             assertEquals(" title", document?.title)
             assertEquals(" TITLE", document?.blocks?.single()?.original)
             assertEquals(42L, document?.revision)
+            } finally {
+                AppSettings.novelRegexRules.remove("book")
+                AppSettings.novelRegexApplyTo.remove("book")
+            }
         }
     }
 
@@ -176,13 +183,20 @@ class TranslationOnlyDocumentsTest {
         updatedAt = 1L,
     )
 
-    private suspend fun withRules(vararg rules: RegexRule, block: suspend () -> Unit) {
+    private suspend fun withRules(
+        vararg rules: RegexRule,
+        applyTo: RegexRuleScope = RegexRuleScope.Both,
+        block: suspend () -> Unit,
+    ) {
         val previous = AppSettings.globalRegexRules.toList()
+        val previousApplyTo = AppSettings.globalRegexApplyTo
         try {
+            AppSettings.setGlobalRegexApplyTo(applyTo)
             AppSettings.replaceGlobalRules(rules.toList())
             block()
         } finally {
             AppSettings.replaceGlobalRules(previous)
+            AppSettings.setGlobalRegexApplyTo(previousApplyTo)
         }
     }
 

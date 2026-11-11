@@ -32,7 +32,9 @@ class AppSettingsRulesTest {
     @Test
     fun `translation-only edit does not bump the original revision`() {
         val previous = AppSettings.globalRegexRules.toList()
+        val previousApplyTo = AppSettings.globalRegexApplyTo
         try {
+            AppSettings.setGlobalRegexApplyTo(RegexRuleScope.Translation)
             AppSettings.replaceGlobalRules(emptyList())
             val before = AppSettings.regexRulesOriginalRevision.value
 
@@ -41,13 +43,16 @@ class AppSettingsRulesTest {
             assertEquals(before, AppSettings.regexRulesOriginalRevision.value)
         } finally {
             AppSettings.replaceGlobalRules(previous)
+            AppSettings.setGlobalRegexApplyTo(previousApplyTo)
         }
     }
 
     @Test
     fun `original edit bumps the original revision`() {
         val previous = AppSettings.globalRegexRules.toList()
+        val previousApplyTo = AppSettings.globalRegexApplyTo
         try {
+            AppSettings.setGlobalRegexApplyTo(RegexRuleScope.Original)
             AppSettings.replaceGlobalRules(emptyList())
             val before = AppSettings.regexRulesOriginalRevision.value
 
@@ -56,6 +61,7 @@ class AppSettingsRulesTest {
             assertEquals(before + 1, AppSettings.regexRulesOriginalRevision.value)
         } finally {
             AppSettings.replaceGlobalRules(previous)
+            AppSettings.setGlobalRegexApplyTo(previousApplyTo)
         }
     }
 

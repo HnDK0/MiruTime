@@ -20,29 +20,36 @@ class ReaderPortAdaptersTest {
         scope = scope,
     )
 
-    private fun withRules(vararg rules: RegexRule, block: () -> Unit) {
+    private fun withRules(
+        vararg rules: RegexRule,
+        applyTo: RegexRuleScope = RegexRuleScope.Both,
+        block: () -> Unit,
+    ) {
         val previousGlobal = AppSettings.globalRegexRules.toList()
         val previousNovel = AppSettings.novelRegexRules.toMap()
+        val previousApplyTo = AppSettings.globalRegexApplyTo
         try {
+            AppSettings.setGlobalRegexApplyTo(applyTo)
             AppSettings.replaceGlobalRules(rules.toList())
             AppSettings.novelRegexRules.clear()
             block()
         } finally {
             AppSettings.replaceGlobalRules(previousGlobal)
+            AppSettings.setGlobalRegexApplyTo(previousApplyTo)
             AppSettings.novelRegexRules.clear()
             AppSettings.novelRegexRules.putAll(previousNovel)
         }
     }
 
     @Test
-    fun `translation rules clean only translated text`() = withRules(rule(RegexRuleScope.Translation)) {
+    fun `translation rules clean only translated text`() = withRules(rule(RegexRuleScope.Translation), applyTo = RegexRuleScope.Translation) {
         val cleaned = cleanTranslatedBlocks("book", mapOf(0 to "AD text"))
 
         assertEquals(" text", cleaned[0])
     }
 
     @Test
-    fun `original rules do not touch translated text`() = withRules(rule(RegexRuleScope.Original)) {
+    fun `original rules do not touch translated text`() = withRules(rule(RegexRuleScope.Original), applyTo = RegexRuleScope.Original) {
         val cleaned = cleanTranslatedBlocks("book", mapOf(0 to "AD text"))
 
         assertEquals("AD text", cleaned[0])
@@ -57,7 +64,10 @@ class ReaderPortAdaptersTest {
 
     @Test
     fun `per-novel rules win for their book`() {
-        withRules(rule(RegexRuleScope.Translation, pattern = "GLOBAL")) {
+        withRules(
+            rule(RegexRuleScope.Translation, pattern = "GLOBAL"),
+            applyTo = RegexRuleScope.Translation,
+        ) {
             AppSettings.replaceNovelRules(
                 "my-book",
                 listOf(rule(RegexRuleScope.Translation, pattern = "NOVEL")),
@@ -75,6 +85,7 @@ class ReaderPortAdaptersTest {
     @Test
     fun `unknown book falls back to global rules`() = withRules(
         rule(RegexRuleScope.Translation),
+        applyTo = RegexRuleScope.Translation,
     ) {
         val cleaned = cleanTranslatedBlocks("", mapOf(0 to "AD text"))
 
@@ -98,7 +109,7 @@ class ReaderPortAdaptersTest {
     }
 
     @Test
-    fun `empty translations stay empty`() = withRules(rule(RegexRuleScope.Translation)) {
+    fun `empty translations stay empty`() = withRules(rule(RegexRuleScope.Translation), applyTo = RegexRuleScope.Translation) {
         assertEquals(emptyMap<Int, String>(), cleanTranslatedBlocks("book", emptyMap()))
     }
 }

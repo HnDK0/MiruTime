@@ -68,13 +68,11 @@ internal fun TranslationConfigContent(
         SheetSection(title = stringResource(R.string.st_pt_scope)) {
             SettingsRadioRow(
                 title = stringResource(R.string.st_pt_scope_standard),
-                subtitle = stringResource(R.string.st_pt_scope_standard_desc),
                 selected = !config.full,
                 onClick = { onChange(config.copy(full = false)) },
             )
             SettingsRadioRow(
                 title = stringResource(R.string.st_pt_scope_full),
-                subtitle = stringResource(R.string.st_pt_scope_full_desc),
                 selected = config.full,
                 onClick = { onChange(config.copy(full = true)) },
             )

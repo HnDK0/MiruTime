@@ -100,6 +100,11 @@ class AppSettingsMigrationSettings(
         AppSettings.novelRegexRules[oldBookUrl]?.let { rules ->
             if (newBookUrl !in AppSettings.novelRegexRules) {
                 AppSettings.replaceNovelRules(newBookUrl, rules)
+                AppSettings.novelRegexApplyTo[oldBookUrl]?.let { target ->
+                    if (newBookUrl !in AppSettings.novelRegexApplyTo) {
+                        AppSettings.setNovelRegexApplyTo(newBookUrl, target)
+                    }
+                }
                 changed = true
             }
         }

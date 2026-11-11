@@ -187,6 +187,8 @@ class SettingsStoreTest {
                     RegexRule(8, "\\s{2,}", " ", "Collapse", enabled = false, wholeWords = true),
                 ),
             ),
+            globalRegexApplyTo = RegexRuleScope.Translation,
+            novelRegexApplyTo = mapOf("https://example.com/novel" to RegexRuleScope.Original),
             nextRuleId = 200L,
             userAgent = "MiruTest/1.0",
             cloudflareBypass = false,
@@ -222,6 +224,11 @@ class SettingsStoreTest {
         assertEquals(listOf("Dragon", "cultivation"), loaded.searchHistory["local-books"])
         assertEquals(listOf("Solo Leveling"), loaded.searchHistory["__global__"])
         assertEquals(7L, loaded.globalRegexRules.single().id)
+        assertEquals(RegexRuleScope.Translation, loaded.globalRegexApplyTo)
+        assertEquals(
+            RegexRuleScope.Original,
+            loaded.novelRegexApplyTo.getValue("https://example.com/novel"),
+        )
         assertEquals(200L, loaded.nextRuleId)
         assertFalse(loaded.toString().contains("fake://"))
     }
@@ -407,6 +414,8 @@ class SettingsStoreTest {
             novelRegexRules = mapOf(
                 "url" to listOf(RegexRule(12, "c", "d", "Novel rule", enabled = false, wholeWords = false)),
             ),
+            globalRegexApplyTo = RegexRuleScope.Both,
+            novelRegexApplyTo = mapOf("url" to RegexRuleScope.Both),
             nextRuleId = 300L,
             userAgent = "agent",
             wtrMode = "manual",

@@ -92,6 +92,10 @@ data class PersistedSettings(
     val translationRecentPairs: List<TranslationPair> = emptyList(),
     val globalRegexRules: List<RegexRule> = emptyList(),
     val novelRegexRules: Map<String, List<RegexRule>> = emptyMap(),
+    // Null means "written by a build without list-level apply-to": derive from
+    // the stored per-rule scopes instead of resetting every rule to Both.
+    val globalRegexApplyTo: RegexRuleScope? = null,
+    val novelRegexApplyTo: Map<String, RegexRuleScope> = emptyMap(),
     val nextRuleId: Long = 100L,
     val userAgent: String = "",
     val cloudflareBypass: Boolean = true,
@@ -328,6 +332,12 @@ class SettingsStore(private val values: KeyValueStore) {
             novelRegexRules = values.getString(KEY_NOVEL_REGEX_RULES)
                 ?.let(::decodeNovelRules)
                 ?: defaults.novelRegexRules,
+            globalRegexApplyTo = values.getString(KEY_GLOBAL_REGEX_APPLY_TO)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { runCatching { RegexRuleScope.valueOf(it) }.getOrNull() },
+            novelRegexApplyTo = values.getString(KEY_NOVEL_REGEX_APPLY_TO)
+                ?.let(::decodeRegexApplyTo)
+                ?: defaults.novelRegexApplyTo,
             nextRuleId = values.getLong(KEY_NEXT_RULE_ID) ?: defaults.nextRuleId,
             userAgent = values.getString(KEY_USER_AGENT) ?: defaults.userAgent,
             cloudflareBypass = values.getBoolean(KEY_CLOUDFLARE_BYPASS)
@@ -429,6 +439,8 @@ class SettingsStore(private val values: KeyValueStore) {
                 KEY_TRANSLATION_RECENT_PAIRS to encodePairs(settings.translationRecentPairs),
                 KEY_GLOBAL_REGEX_RULES to encodeRules(settings.globalRegexRules),
                 KEY_NOVEL_REGEX_RULES to encodeNovelRules(settings.novelRegexRules),
+                KEY_GLOBAL_REGEX_APPLY_TO to (settings.globalRegexApplyTo?.name ?: ""),
+                KEY_NOVEL_REGEX_APPLY_TO to encodeRegexApplyTo(settings.novelRegexApplyTo),
                 KEY_NEXT_RULE_ID to settings.nextRuleId,
                 KEY_USER_AGENT to settings.userAgent,
                 KEY_CLOUDFLARE_BYPASS to settings.cloudflareBypass,
@@ -520,6 +532,8 @@ class SettingsStore(private val values: KeyValueStore) {
         private const val KEY_TRANSLATION_RECENT_PAIRS = "TRANSLATION_RECENT_PAIRS"
         private const val KEY_GLOBAL_REGEX_RULES = "USER_REGEX_CLEANUP_RULES"
         private const val KEY_NOVEL_REGEX_RULES = "USER_REGEX_CLEANUP_RULES_PER_NOVEL"
+        private const val KEY_GLOBAL_REGEX_APPLY_TO = "USER_REGEX_CLEANUP_APPLY_TO"
+        private const val KEY_NOVEL_REGEX_APPLY_TO = "USER_REGEX_CLEANUP_APPLY_TO_PER_NOVEL"
         private const val KEY_NEXT_RULE_ID = "USER_REGEX_CLEANUP_NEXT_ID"
         private const val KEY_USER_AGENT = "SCRAPER_USER_AGENT"
         private const val KEY_CLOUDFLARE_BYPASS = "CLOUDFLARE_BYPASS_ENABLED"
@@ -637,6 +651,20 @@ class SettingsStore(private val values: KeyValueStore) {
             encodeRecords(
                 map.flatMap { (key, rules) -> rules.map { listOf(key) + ruleFields(it) } },
             )
+
+        internal fun encodeRegexApplyTo(map: Map<String, RegexRuleScope>): String =
+            encodeRecords(map.map { (key, target) -> listOf(key, target.name) })
+
+        internal fun decodeRegexApplyTo(raw: String): Map<String, RegexRuleScope> {
+            val result = linkedMapOf<String, RegexRuleScope>()
+            decodeRecords(raw).forEach { fields ->
+                if (fields.size < 2) return@forEach
+                val target = runCatching { RegexRuleScope.valueOf(fields[1]) }.getOrNull()
+                    ?: return@forEach
+                result[fields[0]] = target
+            }
+            return result
+        }
 
         internal fun encodeFilterPresets(map: Map<String, List<FilterPreset>>): String =
             encodeRecords(

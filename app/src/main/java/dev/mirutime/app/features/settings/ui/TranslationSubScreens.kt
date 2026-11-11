@@ -5,7 +5,6 @@ package dev.mirutime.app.features.settings.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -443,9 +442,7 @@ internal fun TranslationPairControls(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = MiruSpace.S),
+            modifier = Modifier.fillMaxWidth(),
         ) {
             PairButton(
                 caption = stringResource(R.string.st_tr_source),
@@ -666,7 +663,7 @@ private fun RecentPairRow(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp)
+            .heightIn(min = MiruSize.Row)
             .clip(RoundedCornerShape(MiruRadius.Chip))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .clickable(role = Role.Button, onClick = onApply)
@@ -692,19 +689,13 @@ private fun RecentPairRow(
             color = extra.accent,
             modifier = Modifier.padding(start = MiruSpace.S),
         )
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clickable(role = Role.Button, onClick = onRemove),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Delete,
-                contentDescription = stringResource(R.string.st_delete),
-                tint = extra.muted,
-                modifier = Modifier.size(20.dp),
-            )
-        }
+        MiruIconButton(
+            icon = Icons.Outlined.Delete,
+            contentDescription = stringResource(R.string.st_delete),
+            onClick = onRemove,
+            tint = extra.muted,
+            iconSize = MiruSize.IconSlot,
+        )
     }
 }
 

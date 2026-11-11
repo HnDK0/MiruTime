@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun SettingsPage(
     contentPadding: PaddingValues,
+    bottomInset: Dp = 0.dp,
     content: LazyListScope.() -> Unit,
 ) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
@@ -62,7 +63,7 @@ fun SettingsPage(
                 start = MiruSize.ScreenPad,
                 end = MiruSize.ScreenPad,
                 top = contentPadding.calculateTopPadding() + MiruSpace.Xs,
-                bottom = contentPadding.calculateBottomPadding() + MiruSize.Touch,
+                bottom = contentPadding.calculateBottomPadding() + MiruSize.Touch + bottomInset,
             ),
             content = content,
         )

@@ -214,7 +214,9 @@ class ChapterTranslationPlannerTest {
             html = "<p>foo bar</p>",
             config = config,
         )
+        val previousApplyTo = AppSettings.novelRegexApplyTo[bookUrl]
         try {
+            AppSettings.setNovelRegexApplyTo(bookUrl, RegexRuleScope.Translation)
             AppSettings.novelRegexRules[bookUrl] = listOf(
                 RegexRule(
                     id = 1,
@@ -235,6 +237,7 @@ class ChapterTranslationPlannerTest {
             assertEquals(listOf("foo bar"), translationOnly?.units?.map { it.text })
             assertEquals(baseline?.revision?.sourceHash, translationOnly?.revision?.sourceHash)
 
+            AppSettings.setNovelRegexApplyTo(bookUrl, RegexRuleScope.Original)
             AppSettings.novelRegexRules[bookUrl] = listOf(
                 RegexRule(
                     id = 1,
@@ -256,6 +259,11 @@ class ChapterTranslationPlannerTest {
             assertNotEquals(baseline?.revision?.sourceHash, original?.revision?.sourceHash)
         } finally {
             AppSettings.novelRegexRules.remove(bookUrl)
+            if (previousApplyTo == null) {
+                AppSettings.novelRegexApplyTo.remove(bookUrl)
+            } else {
+                AppSettings.setNovelRegexApplyTo(bookUrl, previousApplyTo)
+            }
         }
     }
 }
