@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -73,6 +74,11 @@ import dev.mirutime.app.features.finder.domain.dedupeCatalogBooks
 import dev.mirutime.app.features.finder.domain.SearchHistoryRules
 import dev.mirutime.app.features.finder.domain.setMembership
 import dev.mirutime.app.features.settings.data.AppSettings
+import dev.mirutime.app.features.translation.data.MetadataTranslationController
+import dev.mirutime.app.features.translation.data.TitleSurface
+import dev.mirutime.app.features.translation.data.TitleTranslationJob
+import dev.mirutime.app.features.translation.data.metadataConfigFor
+import dev.mirutime.app.features.translation.data.translationPresentationFor
 import dev.mirutime.app.features.library.domain.ContentType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
@@ -88,6 +94,9 @@ import kotlinx.coroutines.launch
 fun GlobalSearchScreen(
     contentPadding: PaddingValues,
     provider: FinderDataProvider,
+    // Same metadata cache as the library/catalogue: search results show the
+    // translated title instead of the source-language one.
+    metadataTranslations: MetadataTranslationController,
     onBookOpen: (String) -> Unit = {},
     onOpenCatalogue: (sourceId: String, query: String) -> Unit = { _, _ -> },
     // Fired once per committed membership write so the shell can drop cached
@@ -238,6 +247,46 @@ fun GlobalSearchScreen(
     val failedNames = ordered
         .filter { it.failed && it.source.id !in typedIds }
         .map { it.source.name }
+
+    // Translated titles: search is where a book is first seen, so it warms the
+    // same metadata cache as the library and the catalogue (one batch per
+    // config). A hidden Search surface keeps the source-language title.
+    val allBooks = withBooks.flatMap { it.books }
+    val metadata by metadataTranslations.state.collectAsState()
+    val metadataJobs = remember(
+        allBooks,
+        AppSettings.novelTranslation.toMap(),
+        AppSettings.pluginTranslation.toMap(),
+        AppSettings.translationGlobalMode,
+        AppSettings.globalSource,
+        AppSettings.globalTarget,
+        AppSettings.provider,
+        AppSettings.activePrompt,
+    ) {
+        allBooks.mapNotNull { book ->
+            if (!translationPresentationFor(book.bookUrl).showsTitle(TitleSurface.Search)) {
+                return@mapNotNull null
+            }
+            metadataConfigFor(book.bookUrl)?.let { config ->
+                TitleTranslationJob(book.bookUrl, book.title, config)
+            }
+        }
+    }
+    LaunchedEffect(metadataJobs) {
+        metadataTranslations.hydrateTitles(metadataJobs)
+        metadataTranslations.submitTitles(metadataJobs)
+    }
+    val metadataConfigs = remember(metadataJobs) {
+        metadataJobs.associate { it.bookUrl to it.config }
+    }
+    val translatedTitles = remember(allBooks, metadata, metadataConfigs) {
+        allBooks.mapNotNull { book ->
+            metadata[book.bookUrl]
+                ?.takeIf { it.config == metadataConfigs[book.bookUrl] }
+                ?.title
+                ?.let { book.bookUrl to it }
+        }.toMap()
+    }
 
     // Retry one failed source in place instead of re-running the whole fan-out.
     fun retrySource(source: CatalogSource, query: String) {
@@ -428,6 +477,7 @@ fun GlobalSearchScreen(
                                     inLibrary = book.inLibrary,
                                     plain = true,
                                     membership = book.badge?.toMiruBadge(),
+                                    translatedTitle = translatedTitles[book.bookUrl],
                                     onClick = { onBookOpen(book.bookKey) },
                                     onLongClick = { toggleMembership(book) },
                                 )

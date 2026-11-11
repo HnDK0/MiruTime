@@ -12,6 +12,7 @@ import dev.mirutime.app.features.library.data.resolveStoredCover
 import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.app.features.translation.data.MetadataTranslationStore
 import dev.mirutime.app.features.translation.data.RoomMetadataTranslationStore
+import dev.mirutime.app.features.translation.data.TitleSurface
 import dev.mirutime.data.library.BookCoverEntity
 import dev.mirutime.data.library.BookEntity
 import dev.mirutime.data.library.BookReadStats
@@ -68,7 +69,7 @@ class RoomDashboardDataProvider(
     override suspend fun continueReading(): DashboardBook? {
         val timestamp = now()
         val row = library.history(1).firstOrNull() ?: return null
-        val batch = batch(listOf(row))
+        val batch = batch(listOf(row), TitleSurface.Library)
         return row.toDashboardBook(timestamp, batch)
     }
 
@@ -78,7 +79,7 @@ class RoomDashboardDataProvider(
         // supply the exact counters for those rows.
         val rows = library.unfinishedLibraryBooks(4)
         if (rows.isEmpty()) return emptyList()
-        val batch = batch(rows)
+        val batch = batch(rows, TitleSurface.Library)
         return rows.map { it.toDashboardBook(timestamp, batch) }
             .distinctBy { it.bookKey }
     }
@@ -87,7 +88,7 @@ class RoomDashboardDataProvider(
         val timestamp = now()
         val rows = library.booksWithUpdates()
         if (rows.isEmpty()) return emptyList()
-        val batch = batch(rows)
+        val batch = batch(rows, TitleSurface.Library)
         return rows.map { row ->
             UpdateItem(
                 book = row.toDashboardBook(timestamp, batch),
@@ -100,7 +101,7 @@ class RoomDashboardDataProvider(
         val timestamp = now()
         val rows = library.history(limit)
         if (rows.isEmpty()) return emptyList()
-        val batch = batch(rows)
+        val batch = batch(rows, TitleSurface.History)
         return rows.map { it.toHistoryEntry(timestamp, batch) }
     }
 
@@ -110,7 +111,7 @@ class RoomDashboardDataProvider(
         // with the library. 500 covers any practical history.
         val rows = library.history(MaxHistoryRows)
         if (rows.isEmpty()) return emptyList()
-        val batch = batch(rows)
+        val batch = batch(rows, TitleSurface.History)
         return rows.map { it.toHistoryEntry(timestamp, batch) }
     }
 
@@ -128,12 +129,12 @@ class RoomDashboardDataProvider(
         val translatedTitles: Map<Long, String>,
     )
 
-    private suspend fun batch(rows: List<BookEntity>): DashboardBatch = DashboardBatch(
+    private suspend fun batch(rows: List<BookEntity>, surface: TitleSurface): DashboardBatch = DashboardBatch(
         // Only the visible/history rows need counters; never scan every
         // chapter on the dashboard. The repository chunks ids below 999.
         stats = library.readChapterStatsFor(rows.map { it.bookId }),
         covers = library.bookCoversFor(rows.map { it.bookId }),
-        translatedTitles = loadTranslatedTitles(rows, translations),
+        translatedTitles = loadTranslatedTitles(rows, translations, surface),
     )
 
     private fun BookEntity.toDashboardBook(

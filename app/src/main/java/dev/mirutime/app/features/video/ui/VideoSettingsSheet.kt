@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -293,6 +294,7 @@ fun VideoVariantSheet(
     onClose: () -> Unit,
     deadDisabled: Boolean = false,
     onRefresh: (() -> Unit)? = null,
+    checking: Boolean = false,
 ) {
     val choices = videoVariantChoices(streams, probeStatuses)
     val quality = choices.filter { isVideoResolutionLabel(it.label) }
@@ -327,8 +329,23 @@ fun VideoVariantSheet(
             }
         }
         if (onRefresh != null) {
+            // The spinner sits in the button's own row so the panel height
+            // holds steady while a recheck runs.
             TextButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.video_variant_recheck))
+                if (checking) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .padding(end = MiruSpace.S)
+                            .size(MiruSize.Indicator),
+                        strokeWidth = MiruSize.StrokeFocus,
+                    )
+                }
+                Text(
+                    stringResource(
+                        if (checking) R.string.video_variant_checking
+                        else R.string.video_variant_recheck,
+                    ),
+                )
             }
         }
     }

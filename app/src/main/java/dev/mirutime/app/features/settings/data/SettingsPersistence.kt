@@ -778,6 +778,7 @@ class SettingsStore(private val values: KeyValueStore) {
             config.hideHistory.toString(),
             config.hideCatalog.toString(),
             config.hideSearch.toString(),
+            config.chapterTitles.toString(),
         )
 
         private fun translationFromFields(fields: List<String>): TranslationConfig =
@@ -792,6 +793,8 @@ class SettingsStore(private val values: KeyValueStore) {
                 hideHistory = fields[7].toBooleanStrictOrNull() ?: false,
                 hideCatalog = fields[8].toBooleanStrictOrNull() ?: false,
                 hideSearch = fields[9].toBooleanStrictOrNull() ?: false,
+                // Older records have no chapter-titles field: translate as before.
+                chapterTitles = fields.getOrNull(10)?.toBooleanStrictOrNull() ?: true,
             )
 
         // Format: <records>;<fields>;<len>:<value>... Values may contain any

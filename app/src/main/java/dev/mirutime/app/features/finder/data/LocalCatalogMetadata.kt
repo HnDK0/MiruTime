@@ -259,14 +259,25 @@ class LocalCatalogMetadataCache(
     }
 
     private suspend fun resolveCbzSet(entry: LocalCatalogEntry): ParsedCatalogMetadata? {
-        val first = entry.primaryChildUri ?: return null
+        // A root ComicInfo (an exported folder has one) is authoritative and
+        // skips opening the first chapter, which can be large.
+        val root = resolveImageFolder(entry)
+        val rootHasMetadata = root.metadata.title != null ||
+            root.metadata.author != null ||
+            root.metadata.description != null
+        if (rootHasMetadata) return root
+
+        val first = entry.primaryChildUri ?: return root.takeIf { it.coverBytes != null }
         val parsed = withCopiedFile(first) { file ->
             runCatching { readCbzMetadata(file) }.getOrElse { ParsedCatalogMetadata() }
-        } ?: return null
+        } ?: return root.takeIf { it.coverBytes != null }
+        // The book-root cover still wins over the chapter archive's own cover,
+        // while missing author/description keep coming from the first chapter.
         return parsed.copy(
             metadata = parsed.metadata.copy(
                 chapterCount = entry.chapterCount ?: parsed.metadata.chapterCount,
             ),
+            coverBytes = root.coverBytes ?: parsed.coverBytes,
         )
     }
 

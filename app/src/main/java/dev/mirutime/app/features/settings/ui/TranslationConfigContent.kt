@@ -1,15 +1,9 @@
-@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-
 package dev.mirutime.app.features.settings.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
-import dev.mirutime.uikit.MiruSpace
-import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.SettingsRadioRow
 import dev.mirutime.uikit.SettingsSwitchRow
 import dev.mirutime.uikit.SettingsTextField
@@ -20,7 +14,7 @@ import dev.mirutime.app.features.settings.data.TranslationConfig
 // The one translation editor shared by the per-plugin sheet, the per-novel
 // sheet and the book page's translator tool:
 // enabled switch, service (inheriting the global one, named outright),
-// language pair, scope, hidden-title chips (FULL only) and the LLM prompt.
+// language pair, scope, FULL-only title switches and the LLM prompt.
 @Composable
 internal fun TranslationConfigContent(
     config: TranslationConfig,
@@ -86,29 +80,44 @@ internal fun TranslationConfigContent(
             )
         }
         if (config.full) {
-            SheetSection(title = stringResource(R.string.st_pt_hide)) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                    MiruFilterChip(
-                        selected = config.hideLibrary,
-                        onClick = { onChange(config.copy(hideLibrary = !config.hideLibrary)) },
-                        label = stringResource(R.string.st_pt_hide_library),
-                    )
-                    MiruFilterChip(
-                        selected = config.hideHistory,
-                        onClick = { onChange(config.copy(hideHistory = !config.hideHistory)) },
-                        label = stringResource(R.string.st_pt_hide_history),
-                    )
-                    MiruFilterChip(
-                        selected = config.hideCatalog,
-                        onClick = { onChange(config.copy(hideCatalog = !config.hideCatalog)) },
-                        label = stringResource(R.string.st_pt_hide_catalog),
-                    )
-                    MiruFilterChip(
-                        selected = config.hideSearch,
-                        onClick = { onChange(config.copy(hideSearch = !config.hideSearch)) },
-                        label = stringResource(R.string.st_pt_hide_search),
-                    )
-                }
+            // Full scope also covers chapter lists, so translating those titles
+            // and choosing where they show belong to one section.
+            SheetSection(title = stringResource(R.string.st_pt_titles)) {
+                SettingsSwitchRow(
+                    title = stringResource(R.string.st_pt_chapter_titles),
+                    subtitle = stringResource(R.string.st_pt_chapter_titles_desc),
+                    checked = config.chapterTitles,
+                    onChange = { onChange(config.copy(chapterTitles = it)) },
+                    horizontalPadding = 0.dp,
+                )
+                SettingsSwitchRow(
+                    title = stringResource(R.string.st_pt_titles_library),
+                    subtitle = stringResource(R.string.st_pt_titles_library_desc),
+                    checked = !config.hideLibrary,
+                    onChange = { onChange(config.copy(hideLibrary = !it)) },
+                    horizontalPadding = 0.dp,
+                )
+                SettingsSwitchRow(
+                    title = stringResource(R.string.st_pt_titles_history),
+                    subtitle = stringResource(R.string.st_pt_titles_history_desc),
+                    checked = !config.hideHistory,
+                    onChange = { onChange(config.copy(hideHistory = !it)) },
+                    horizontalPadding = 0.dp,
+                )
+                SettingsSwitchRow(
+                    title = stringResource(R.string.st_pt_titles_catalog),
+                    subtitle = stringResource(R.string.st_pt_titles_catalog_desc),
+                    checked = !config.hideCatalog,
+                    onChange = { onChange(config.copy(hideCatalog = !it)) },
+                    horizontalPadding = 0.dp,
+                )
+                SettingsSwitchRow(
+                    title = stringResource(R.string.st_pt_titles_search),
+                    subtitle = stringResource(R.string.st_pt_titles_search_desc),
+                    checked = !config.hideSearch,
+                    onChange = { onChange(config.copy(hideSearch = !it)) },
+                    horizontalPadding = 0.dp,
+                )
             }
         }
     }

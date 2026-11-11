@@ -156,6 +156,7 @@ class SettingsStoreTest {
                     hideHistory = false,
                     hideCatalog = true,
                     hideSearch = false,
+                    chapterTitles = false,
                 ),
             ),
             novelTranslation = mapOf(
@@ -214,6 +215,7 @@ class SettingsStoreTest {
         assertEquals("https://example.com/book;with:punctuation", loaded.novelPrompts.single().bookUrl)
         assertEquals("Keep \"Archive\"\nand: punctuation; intact", loaded.novelPrompts.single().prompt)
         assertEquals("a;b:c", loaded.pluginTranslation.getValue("plugin:one").prompt)
+        assertFalse(loaded.pluginTranslation.getValue("plugin:one").chapterTitles)
         assertEquals(listOf("local-books", "wtr-lab"), loaded.pinnedSources)
         assertEquals("Fantasy; with: punctuation", loaded.filterPresets.getValue("wtr-lab").single().name)
         assertEquals(setOf("Fantasy", "Action"), loaded.filterPresets.getValue("wtr-lab").single().filters.genres)

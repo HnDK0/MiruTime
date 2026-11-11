@@ -112,7 +112,9 @@ import dev.mirutime.app.features.library.domain.LibraryBook
 import dev.mirutime.app.features.library.domain.LibrarySort
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.translation.data.TitleTranslationJob
+import dev.mirutime.app.features.translation.data.TitleSurface
 import dev.mirutime.app.features.translation.data.metadataConfigFor
+import dev.mirutime.app.features.translation.data.translationPresentationFor
 import dev.mirutime.app.features.library.domain.Shelf
 import dev.mirutime.app.features.library.domain.SortDirection
 import kotlin.math.roundToInt
@@ -438,6 +440,9 @@ fun LibraryScreen(
         AppSettings.activePrompt,
     ) {
         pager.books.mapNotNull { book ->
+            if (!translationPresentationFor(book.bookKey).showsTitle(TitleSurface.Library)) {
+                return@mapNotNull null
+            }
             metadataConfigFor(book.bookKey)?.let { config ->
                 TitleTranslationJob(book.bookKey, book.title, config)
             }

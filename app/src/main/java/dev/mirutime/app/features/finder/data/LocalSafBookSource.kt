@@ -462,14 +462,14 @@ class LocalSafBookSource(
         return if (allowed) file else null
     }
 
-    private suspend fun plan(bookUrl: String): DirectPlan {
+    private suspend fun plan(bookUrl: String): DirectPlan = withContext(Dispatchers.IO) {
         val cleanUrl = bookUrl.substringBefore('#')
         val docUri = localFileDocumentUri(cleanUrl, registry)
             ?: throw LocalSafException(SafFailure.Invalid, "Invalid local file address")
         val document = resolver.document(docUri)
         val hash = catalogMetadataCacheKey(document.uri, document.lastModified, document.sizeBytes)
-        plans[cleanUrl]?.takeIf { it.cacheHash == hash }?.let { return it }
-        return planLock.withLock {
+        plans[cleanUrl]?.takeIf { it.cacheHash == hash }?.let { return@withContext it }
+        planLock.withLock {
             plans[cleanUrl]?.takeIf { it.cacheHash == hash }?.let { return@withLock it }
             // A changed file invalidates every derived chapter body.
             chapterHtml.clear()

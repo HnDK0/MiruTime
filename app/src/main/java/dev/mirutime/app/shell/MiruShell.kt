@@ -700,6 +700,7 @@ fun MiruShell(
                 GlobalSearchScreen(
                     contentPadding = padding,
                     provider = pluginProvider,
+                    metadataTranslations = readerGraph.metadataTranslations,
                     initialQuery = entry.arguments?.getString("q")?.let(Uri::decode).orEmpty(),
                     onBookOpen = { bookUrl ->
                         navController.navigate("book/${Uri.encode(bookUrl)}")

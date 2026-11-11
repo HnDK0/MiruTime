@@ -1116,11 +1116,17 @@
     <string name="st_pt_scope_full">Full</string>
     <string name="st_pt_scope_standard_desc">Translate chapter text only</string>
     <string name="st_pt_scope_full_desc">Also translate book titles and descriptions</string>
-    <string name="st_pt_hide">Hide translated titles in</string>
-    <string name="st_pt_hide_library">Library</string>
-    <string name="st_pt_hide_history">History</string>
-    <string name="st_pt_hide_catalog">Catalogue</string>
-    <string name="st_pt_hide_search">Search</string>
+    <string name="st_pt_chapter_titles">Translate chapter titles</string>
+    <string name="st_pt_chapter_titles_desc">Chapter lists and the reader</string>
+    <string name="st_pt_titles">Translated titles</string>
+    <string name="st_pt_titles_library">Translated titles in Library</string>
+    <string name="st_pt_titles_library_desc">Book cards and Continue reading</string>
+    <string name="st_pt_titles_history">Translated titles in History</string>
+    <string name="st_pt_titles_history_desc">Reading history entries</string>
+    <string name="st_pt_titles_catalog">Translated titles in Catalogue</string>
+    <string name="st_pt_titles_catalog_desc">Source catalogue cards</string>
+    <string name="st_pt_titles_search">Translated titles in Search</string>
+    <string name="st_pt_titles_search_desc">Global search results</string>
     <string name="st_pt_prompt_tip">Empty = the global prompt.</string>
     <string name="st_pt_recents">Recent pairs</string>
     <string name="st_pt_recents_empty">No recent pairs yet</string>
@@ -1645,6 +1651,7 @@
     <string name="video_variant">Variant</string>
     <string name="video_variant_title">Select variant</string>
     <string name="video_variant_recheck">Check again</string>
+    <string name="video_variant_checking">Checking…</string>
     <string name="video_variant_fallback">Variant %1$d</string>
     <string name="video_subtitle_track">Subtitle track</string>
     <string name="video_episodes">Episodes</string>

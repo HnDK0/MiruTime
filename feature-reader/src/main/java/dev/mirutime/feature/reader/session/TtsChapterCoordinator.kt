@@ -312,8 +312,11 @@ class TtsChapterCoordinator(
             PlaybackKey(
                 status = ttsState.status,
                 bookTitle = metadata[book.bookUrl]?.title ?: book.title,
-                chapterTitle = metadata[book.bookUrl]?.chapterTitles?.get(chapter.index)
-                    ?: chapter.title,
+                chapterTitle = if (translation.activeMode(book.bookUrl)?.chapterTitles == false) {
+                    chapter.title
+                } else {
+                    metadata[book.bookUrl]?.chapterTitles?.get(chapter.index) ?: chapter.title
+                },
                 coverUrl = book.coverUrl,
                 chapterIndex = chapter.index,
                 chapterCount = sessionState.chapters.size,
@@ -372,10 +375,14 @@ class TtsChapterCoordinator(
             PlaybackKey(
                 status = tts.state.value.status,
                 bookTitle = translation.metadata.value[book.bookUrl]?.title ?: book.title,
-                chapterTitle = translation.metadata.value[book.bookUrl]
-                    ?.chapterTitles
-                    ?.get(chapter.index)
-                    ?: chapter.title,
+                chapterTitle = if (translation.activeMode(book.bookUrl)?.chapterTitles == false) {
+                    chapter.title
+                } else {
+                    translation.metadata.value[book.bookUrl]
+                        ?.chapterTitles
+                        ?.get(chapter.index)
+                        ?: chapter.title
+                },
                 coverUrl = book.coverUrl,
                 chapterIndex = chapter.index,
                 chapterCount = state.chapters.size,

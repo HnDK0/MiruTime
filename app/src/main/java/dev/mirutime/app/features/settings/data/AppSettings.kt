@@ -44,6 +44,8 @@ data class TranslationConfig(
     val hideHistory: Boolean = false,
     val hideCatalog: Boolean = false,
     val hideSearch: Boolean = false,
+    // Full scope only: chapter titles are metadata, not chapter text.
+    val chapterTitles: Boolean = true,
 )
 
 typealias PluginTranslation = TranslationConfig

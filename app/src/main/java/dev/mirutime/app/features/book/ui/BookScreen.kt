@@ -199,6 +199,7 @@ import dev.mirutime.app.features.translation.data.ChapterTranslationStatus
 import dev.mirutime.app.features.translation.data.activeTranslationMode
 import dev.mirutime.data.library.DownloadTaskEntity
 import dev.mirutime.app.features.translation.data.metadataConfigFor
+import dev.mirutime.app.features.translation.data.translationPresentationFor
 import dev.mirutime.app.features.video.data.VideoDownloadAction
 import dev.mirutime.app.features.video.data.VideoDownloadItem
 import dev.mirutime.app.features.video.data.VideoDownloadManager
@@ -210,6 +211,7 @@ import dev.mirutime.app.features.video.data.videoDownloadActions
 import dev.mirutime.app.features.video.domain.VideoDownloadDecision
 import dev.mirutime.app.features.video.domain.VideoVariantStatus
 import dev.mirutime.app.features.video.domain.initialVideoStreamIndex
+import dev.mirutime.app.features.video.domain.pendingVariantProbes
 import dev.mirutime.app.features.video.domain.videoDownloadDecision
 import dev.mirutime.app.features.video.domain.videoVariantKey
 import dev.mirutime.app.features.video.ui.VideoVariantSheet
@@ -443,6 +445,8 @@ internal fun BookScreen(
     var videoSourceStatuses by remember(bookUrl) {
         mutableStateOf<Map<String, VideoVariantStatus>>(emptyMap())
     }
+    var videoSourceProbing by remember(bookUrl) { mutableIntStateOf(0) }
+    var videoSourceHandledRefresh by remember(bookUrl) { mutableIntStateOf(0) }
     var videoSourceRefresh by remember(bookUrl) { mutableStateOf(0) }
     // No "download + translate" switch: a download translates when the book
     // already has an active translation pair/config, otherwise it stays a
@@ -522,9 +526,30 @@ internal fun BookScreen(
             return@LaunchedEffect
         }
         videoSourceStreams = streams
-        videoSourceStatuses = withContext(Dispatchers.IO) {
-            streams.associate { stream ->
-                stream.url to VideoVariantProbe.probe(stream.url, repository.headersFor(stream))
+        // "Check again" is an explicit user request: re-probe every stream, not
+        // only the ones missing a status. The first open warms pending URLs.
+        val forceProbe = videoSourceRefresh != videoSourceHandledRefresh
+        videoSourceHandledRefresh = videoSourceRefresh
+        val toProbe = if (forceProbe) {
+            streams.distinctBy { it.url }
+        } else {
+            pendingVariantProbes(streams, videoSourceStatuses, includeDead = false)
+        }
+        // One probe per stream, each row flips as soon as its own probe answers.
+        toProbe.forEach { stream ->
+            launch {
+                // Count only a coroutine that actually starts, so a cancelled
+                // effect cannot leave the spinner stuck on.
+                videoSourceProbing++
+                try {
+                    val status = VideoVariantProbe.probe(stream.url, repository.headersFor(stream))
+                    // A late UNKNOWN must not overwrite an earlier DEAD.
+                    if (status != VideoVariantStatus.UNKNOWN || videoSourceStatuses[stream.url] == null) {
+                        videoSourceStatuses = videoSourceStatuses + (stream.url to status)
+                    }
+                } finally {
+                    videoSourceProbing = (videoSourceProbing - 1).coerceAtLeast(0)
+                }
             }
         }
     }
@@ -552,6 +577,7 @@ internal fun BookScreen(
     }
     val translationStates by readerGraph.translations.state.collectAsState()
     val translationMode = activeTranslationMode(bookUrl)
+    val translationPresentation = translationPresentationFor(bookUrl)
     val translationConfigured = ChapterTranslationPlanner.config(bookUrl, translationMode) != null
     val bulkTranslator = remember(provider, readerGraph) {
         ChapterBulkTranslator(
@@ -1463,7 +1489,7 @@ internal fun BookScreen(
     val metadataConfig = metadataConfigFor(bookUrl)
     // Wait for the chapter list: submitting an empty list here would stick
     // until an unrelated metadata change, so chapter titles stay untranslated.
-    LaunchedEffect(current, metadataConfig, chaptersLoading) {
+    LaunchedEffect(current, metadataConfig, chaptersLoading, translationPresentation.chapterTitles) {
         if (chaptersLoading) return@LaunchedEffect
         val loaded = current ?: return@LaunchedEffect
         val config = metadataConfig ?: return@LaunchedEffect
@@ -1475,6 +1501,7 @@ internal fun BookScreen(
                 description = loaded.description,
                 chapters = loaded.chapters.map { it.index to it.title },
                 config = config,
+                includeChapterTitles = translationPresentation.chapterTitles,
             ),
         )
     }
@@ -1581,7 +1608,11 @@ internal fun BookScreen(
                     savedIndex = savedIndex,
                     continueChapter = continueChapter,
                     chapters = current.chapters,
-                    translatedTitles = metadataEntry?.chapterTitles.orEmpty(),
+                    translatedTitles = if (translationPresentation.chapterTitles) {
+                        metadataEntry?.chapterTitles.orEmpty()
+                    } else {
+                        emptyMap()
+                    },
                 )
                 ActionRow(
                     book = current,
@@ -1724,7 +1755,11 @@ internal fun BookScreen(
                             listState = chapterListState,
                             searchFocused = searchFocused,
                             onSearchFocusChanged = { searchFocused = it },
-                            translatedTitles = metadataEntry?.chapterTitles.orEmpty(),
+                            translatedTitles = if (translationPresentation.chapterTitles) {
+                                metadataEntry?.chapterTitles.orEmpty()
+                            } else {
+                                emptyMap()
+                            },
                             newestFirst = newestFirst,
                             bulkBusy = bulkBusy,
                             isVideoBook = isVideoBook,
@@ -2089,6 +2124,7 @@ internal fun BookScreen(
                     AppSettings.videoVariantForBook(bookUrl),
                 ),
                 probeStatuses = videoSourceStatuses,
+                checking = videoSourceProbing > 0,
                 deadDisabled = true,
                 onRefresh = { videoSourceRefresh++ },
                 onSelect = { index ->

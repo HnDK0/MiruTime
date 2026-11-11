@@ -95,7 +95,9 @@ import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.app.features.library.domain.LibraryBook
 import dev.mirutime.app.features.library.ui.LibraryCard
 import dev.mirutime.app.features.translation.data.TitleTranslationJob
+import dev.mirutime.app.features.translation.data.TitleSurface
 import dev.mirutime.app.features.translation.data.metadataConfigFor
+import dev.mirutime.app.features.translation.data.translationPresentationFor
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.core.api.MiruError
 import dev.mirutime.core.api.Outcome
@@ -419,6 +421,9 @@ internal fun SourceCatalogScreen(
         AppSettings.activePrompt,
     ) {
         books.mapNotNull { book ->
+            if (!translationPresentationFor(book.bookUrl).showsTitle(TitleSurface.Catalog)) {
+                return@mapNotNull null
+            }
             metadataConfigFor(book.bookUrl)?.let { config ->
                 TitleTranslationJob(book.bookUrl, book.title, config)
             }

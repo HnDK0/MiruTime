@@ -74,6 +74,59 @@ class MetadataTranslationControllerTest {
     }
 
     @Test
+    fun `chapter titles can be switched off while details still translate`() = runTest {
+        val engine = FakeEngine(::echo)
+        val controller = MetadataTranslationController(engine, this)
+        val config = config()
+
+        controller.submitBook(
+            BookMetadataJob(
+                bookUrl = "fake://a/one",
+                title = "One",
+                description = "Synopsis",
+                chapters = listOf(1 to "First", 2 to "Second"),
+                config = config,
+                includeChapterTitles = false,
+            ),
+        )
+        advanceUntilIdle()
+
+        val request = engine.requests.single()
+        assertEquals(2, request.units.size)
+        assertEquals(setOf("0", "1"), request.units.map { it.id }.toSet())
+        val entry = controller.state.value["fake://a/one"]
+        assertEquals("translated:One", entry?.title)
+        assertEquals("translated:Synopsis", entry?.description)
+        assertTrue(entry?.chapterTitles?.isEmpty() != false)
+    }
+
+    @Test
+    fun `turning chapter titles on after a details-only run requests them`() = runTest {
+        val engine = FakeEngine(::echo)
+        val controller = MetadataTranslationController(engine, this)
+        val config = config()
+        val job = BookMetadataJob(
+            bookUrl = "fake://a/one",
+            title = "One",
+            description = "Synopsis",
+            chapters = listOf(1 to "First", 2 to "Second"),
+            config = config,
+        )
+
+        controller.submitBook(job.copy(includeChapterTitles = false))
+        advanceUntilIdle()
+        controller.submitBook(job.copy(includeChapterTitles = true))
+        advanceUntilIdle()
+
+        assertEquals(2, engine.requests.size)
+        assertEquals(4, engine.requests.last().units.size)
+        assertEquals(
+            mapOf(1 to "translated:First", 2 to "translated:Second"),
+            controller.state.value["fake://a/one"]?.chapterTitles,
+        )
+    }
+
+    @Test
     fun `cached book is not translated again with the same config`() = runTest {
         val engine = FakeEngine(::echo)
         val controller = MetadataTranslationController(engine, this)

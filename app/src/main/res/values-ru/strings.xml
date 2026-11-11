@@ -1129,11 +1129,17 @@
     <string name="st_pt_scope_full">Полный</string>
     <string name="st_pt_scope_standard_desc">Переводить только текст глав</string>
     <string name="st_pt_scope_full_desc">Переводить ещё названия и описания</string>
-    <string name="st_pt_hide">Скрывать переведённые названия в</string>
-    <string name="st_pt_hide_library">Библиотеке</string>
-    <string name="st_pt_hide_history">Истории</string>
-    <string name="st_pt_hide_catalog">Каталоге</string>
-    <string name="st_pt_hide_search">Поиске</string>
+    <string name="st_pt_chapter_titles">Переводить названия глав</string>
+    <string name="st_pt_chapter_titles_desc">Списки глав и ридер</string>
+    <string name="st_pt_titles">Переведённые названия</string>
+    <string name="st_pt_titles_library">Переведённые названия в библиотеке</string>
+    <string name="st_pt_titles_library_desc">Карточки книг и продолжение чтения</string>
+    <string name="st_pt_titles_history">Переведённые названия в истории</string>
+    <string name="st_pt_titles_history_desc">Записи истории чтения</string>
+    <string name="st_pt_titles_catalog">Переведённые названия в каталоге</string>
+    <string name="st_pt_titles_catalog_desc">Карточки каталога источника</string>
+    <string name="st_pt_titles_search">Переведённые названия в поиске</string>
+    <string name="st_pt_titles_search_desc">Результаты глобального поиска</string>
     <string name="st_pt_prompt_tip">Пусто = глобальный промпт.</string>
     <string name="st_pt_recents">Последние пары</string>
     <string name="st_pt_recents_empty">Последних пар пока нет</string>
@@ -1666,6 +1672,7 @@
     <string name="video_variant">Вариант</string>
     <string name="video_variant_title">Выбор варианта</string>
     <string name="video_variant_recheck">Проверить снова</string>
+    <string name="video_variant_checking">Проверяем…</string>
     <string name="video_variant_fallback">Вариант %1$d</string>
     <string name="video_subtitle_track">Дорожка субтитров</string>
     <string name="video_episodes">Эпизоды</string>

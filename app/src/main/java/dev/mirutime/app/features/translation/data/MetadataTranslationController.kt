@@ -42,6 +42,8 @@ data class BookMetadataJob(
     val description: String,
     val chapters: List<Pair<Int, String>>,
     val config: MetadataConfig,
+    // Full scope can switch chapter titles off while keeping title/description.
+    val includeChapterTitles: Boolean = true,
 )
 
 /**
@@ -54,6 +56,7 @@ data class ReaderChaptersJob(
     val title: String,
     val chapters: List<Pair<Int, String>>,
     val config: MetadataConfig,
+    val includeChapterTitles: Boolean = true,
 )
 
 data class BookMetadataTranslation(
@@ -128,13 +131,26 @@ class MetadataTranslationController(
     }
 
     fun submitBook(job: BookMetadataJob) {
-        if (hasDetails(job.bookUrl, job.config)) return
+        // Toggling chapter titles on after a details-only run must request them.
+        val loadedChapterTitles = _state.value[job.bookUrl]
+            ?.takeIf { it.config == job.config }
+            ?.chapterTitles
+            .orEmpty()
+        val neededChapterTitles = job.chapters.filter { it.second.isNotBlank() }.map { it.first }
+        val chapterTitlesLoaded = neededChapterTitles.all { it in loadedChapterTitles }
+        if (hasDetails(job.bookUrl, job.config) &&
+            (!job.includeChapterTitles || chapterTitlesLoaded)
+        ) {
+            return
+        }
         val units = buildList {
             job.title.takeIf { it.isNotBlank() }?.let { add(TranslationUnit("0", it)) }
             job.description.takeIf { it.isNotBlank() }?.let { add(TranslationUnit("1", it)) }
-            job.chapters.forEach { (index, title) ->
-                if (title.isNotBlank()) {
-                    add(TranslationUnit((index + FIRST_CHAPTER_ID).toString(), title))
+            if (job.includeChapterTitles) {
+                job.chapters.forEach { (index, title) ->
+                    if (title.isNotBlank()) {
+                        add(TranslationUnit((index + FIRST_CHAPTER_ID).toString(), title))
+                    }
                 }
             }
         }
@@ -162,12 +178,17 @@ class MetadataTranslationController(
     }
 
     fun submitChapters(job: ReaderChaptersJob) {
+        // With chapter titles switched off, the title alone is the whole job:
+        // once it is cached there is nothing left to ask for.
+        if (!job.includeChapterTitles && hasTitle(job.bookUrl, job.config)) return
         if (hasChapters(job.bookUrl, job.config)) return
         val units = buildList {
             job.title.takeIf { it.isNotBlank() }?.let { add(TranslationUnit("0", it)) }
-            job.chapters.forEach { (index, title) ->
-                if (title.isNotBlank()) {
-                    add(TranslationUnit((index + FIRST_CHAPTER_ID).toString(), title))
+            if (job.includeChapterTitles) {
+                job.chapters.forEach { (index, title) ->
+                    if (title.isNotBlank()) {
+                        add(TranslationUnit((index + FIRST_CHAPTER_ID).toString(), title))
+                    }
                 }
             }
         }

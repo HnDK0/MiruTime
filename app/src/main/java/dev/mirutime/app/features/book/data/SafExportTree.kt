@@ -43,12 +43,32 @@ internal class SafCbzOutput(
                 ?: error("Cannot write ComicInfo.xml")
         }
 
+    override suspend fun writeCover(
+        folderHandle: String,
+        fileName: String,
+        mimeType: String,
+        bytes: ByteArray,
+    ): Unit = withContext(Dispatchers.IO) {
+        val folder = Uri.parse(folderHandle)
+        val name = uniqueChildName(folder, fileName)
+        val document = DocumentsContract.createDocument(resolver, folder, mimeType, name)
+            ?: error("Cannot create $name")
+        resolver.openOutputStream(document)?.use { it.write(bytes) }
+            ?: error("Cannot write $name")
+    }
+
     override suspend fun writeChapter(folderHandle: String, fileName: String, file: File): Unit =
         withContext(Dispatchers.IO) {
             val folder = Uri.parse(folderHandle)
             val name = uniqueChildName(folder, fileName)
-            val document = DocumentsContract.createDocument(resolver, folder, "application/zip", name)
-                ?: error("Cannot create $name")
+            // AOSP appends ".zip" to the display name for any zip MIME type, but
+            // the default type keeps the ".cbz" extension the reader expects.
+            val document = DocumentsContract.createDocument(
+                resolver,
+                folder,
+                OCTET_STREAM,
+                name,
+            ) ?: error("Cannot create $name")
             resolver.openOutputStream(document)?.use { output ->
                 file.inputStream().use { it.copyTo(output) }
             } ?: error("Cannot write $name")
@@ -89,3 +109,7 @@ internal class SafCbzOutput(
         }.getOrNull().orEmpty()
     }
 }
+
+// AOSP's FileUtils.splitFileName special-cases this type and keeps the name as
+// is; "application/zip" would get ".zip" appended.
+private const val OCTET_STREAM = "application/octet-stream"

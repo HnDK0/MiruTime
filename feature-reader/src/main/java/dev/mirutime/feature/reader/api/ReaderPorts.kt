@@ -91,6 +91,7 @@ data class ReaderTranslationMode(
     val target: String,
     val provider: String,
     val full: Boolean = false,
+    val chapterTitles: Boolean = true,
 ) {
     val hasPair: Boolean get() = source.isNotBlank() && target.isNotBlank() && source != target
 }

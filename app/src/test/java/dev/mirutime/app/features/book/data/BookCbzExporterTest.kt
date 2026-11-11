@@ -5,8 +5,10 @@ import dev.mirutime.core.local.CbzFileReader
 import dev.mirutime.core.log.MiruFileLogger
 import java.io.File
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -22,6 +24,9 @@ class BookCbzExporterTest {
     private class FakeTarget : CbzExportTarget {
         var folder: String? = null
         var metadata: ByteArray? = null
+        var coverName: String? = null
+        var coverMime: String? = null
+        var coverBytes: ByteArray? = null
         val chapters = linkedMapOf<String, ByteArray>()
 
         override suspend fun beginFolder(suggestedName: String): String {
@@ -31,6 +36,17 @@ class BookCbzExporterTest {
 
         override suspend fun writeMetadata(folderName: String, xml: ByteArray) {
             metadata = xml
+        }
+
+        override suspend fun writeCover(
+            folderName: String,
+            fileName: String,
+            mimeType: String,
+            bytes: ByteArray,
+        ) {
+            coverName = fileName
+            coverMime = mimeType
+            coverBytes = bytes
         }
 
         override suspend fun writeChapter(folderName: String, fileName: String, file: File) {
@@ -57,12 +73,14 @@ class BookCbzExporterTest {
         chapters: List<BookChapter>,
         pages: Map<Int, List<String>>,
         local: Boolean = false,
+        cover: (suspend (String) -> ByteArray?)? = null,
     ) = BookCbzExporter(
         isLocalBook = { local },
         bookInfo = { CbzBookInfo(title = "Моё перерождение", author = "Ann", genres = listOf("Action")) },
         chapters = { chapters },
         pagePaths = { _, index -> pages[index].orEmpty() },
         tempDir = temp.root,
+        cover = cover ?: { null },
     )
 
     @Test
@@ -94,6 +112,79 @@ class BookCbzExporterTest {
         val metadata = requireNotNull(target.metadata).decodeToString()
         assertTrue(metadata.contains("<Series>Моё перерождение</Series>"))
         assertTrue(metadata.contains("<Genre>Action</Genre>"))
+    }
+
+    @Test
+    fun `a cached jpeg cover is written at the book root`() = runTest {
+        val target = FakeTarget()
+        val result = exporter(
+            chapters = listOf(chapter(1, "Глава 1")),
+            pages = mapOf(1 to listOf(page("1-1.jpg"))),
+            cover = { jpeg },
+        ).export("book", target)
+
+        assertEquals(CbzExportResult.Success(1, 0), result)
+        assertEquals("cover.jpg", target.coverName)
+        assertEquals("image/jpeg", target.coverMime)
+        assertArrayEquals(jpeg, target.coverBytes)
+        assertEquals(listOf("001 - Глава 1.cbz"), target.chapters.keys.toList())
+    }
+
+    @Test
+    fun `without a cover loader no cover file is written`() = runTest {
+        val target = FakeTarget()
+        val result = exporter(
+            chapters = listOf(chapter(1, "Глава 1")),
+            pages = mapOf(1 to listOf(page("1.jpg"))),
+            cover = { null },
+        ).export("book", target)
+
+        assertEquals(CbzExportResult.Success(1, 0), result)
+        assertNull(target.coverName)
+        assertNull(target.coverBytes)
+    }
+
+    @Test
+    fun `invalid cover bytes are skipped`() = runTest {
+        val target = FakeTarget()
+        val result = exporter(
+            chapters = listOf(chapter(1, "Глава 1")),
+            pages = mapOf(1 to listOf(page("1.jpg"))),
+            cover = { byteArrayOf(1, 2, 3) },
+        ).export("book", target)
+
+        assertEquals(CbzExportResult.Success(1, 0), result)
+        assertNull(target.coverName)
+    }
+
+    @Test
+    fun `a refused cover does not fail the export`() = runTest {
+        val target = object : CbzExportTarget {
+            val chapters = linkedMapOf<String, ByteArray>()
+
+            override suspend fun beginFolder(suggestedName: String) = suggestedName
+            override suspend fun writeMetadata(folderName: String, xml: ByteArray) = Unit
+            override suspend fun writeCover(
+                folderName: String,
+                fileName: String,
+                mimeType: String,
+                bytes: ByteArray,
+            ) {
+                error("SAF refused the cover")
+            }
+            override suspend fun writeChapter(folderName: String, fileName: String, file: File) {
+                chapters[fileName] = file.readBytes()
+            }
+        }
+
+        val result = exporter(
+            chapters = listOf(chapter(1, "Глава 1")),
+            pages = mapOf(1 to listOf(page("1.jpg"))),
+            cover = { jpeg },
+        ).export("book", target)
+
+        assertEquals(CbzExportResult.Success(1, 0), result)
+        assertEquals(listOf("001 - Глава 1.cbz"), target.chapters.keys.toList())
     }
 
     @Test

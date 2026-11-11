@@ -49,10 +49,10 @@ fun metadataConfigFor(bookUrl: String): MetadataConfig? {
         globalTarget = AppSettings.globalTarget,
         globalProvider = AppSettings.provider,
     ) ?: return null
-    // Titles/description translate whenever translation is ON with a complete
-    // pair, including the standard/global scope — not only a book/plugin FULL
-    // override (FR-112).
-    if (!mode.hasPair) return null
+    // Metadata (book title, description, chapter titles) belongs to the FULL
+    // scope only: "Главы" translates chapter text alone. A row cached by an
+    // earlier FULL run must not leak back after the switch to standard.
+    if (!mode.full || !mode.hasPair) return null
 
     val target = runCatching { LanguageCode.parse(mode.target) }.getOrNull() ?: return null
     val source = runCatching { LanguageCode.parse(mode.source) }.getOrNull()

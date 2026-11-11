@@ -516,6 +516,10 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
                 }.getOrDefault(emptyList()).filter { it.isNotBlank() }
             },
             tempDir = cacheDir,
+            // Local cached cover only: an export must work offline.
+            cover = { url ->
+                libraryRepository.book(url)?.bookId?.let { coverStore.localCoverBytes(it) }
+            },
         )
     }
     // EPUB export: provider + local-cover-only + cached translations. Remote

@@ -43,6 +43,9 @@ fun CatalogTile(
     showInitial: Boolean = true,
     placeholderIcon: ImageVector? = null,
     membership: MiruMembershipBadge? = null,
+    // Search/catalogue cards show the translated title when the surface and
+    // scope allow it; a blank value keeps the source-language one.
+    translatedTitle: String? = null,
 ) {
     val badge = membership
         ?: if (inLibrary) MiruMembershipBadge(sameSource = true, sourceCount = 1) else null
@@ -68,7 +71,7 @@ fun CatalogTile(
     val longClick: () -> Unit = if (interactive) onLongClick else ({})
     MiruBookCard(
         preset = if (plain) MiruCardPreset.Share else MiruCardPreset.Mat,
-        title = book.title,
+        title = translatedTitle?.takeIf { it.isNotBlank() } ?: book.title,
         modifier = modifier,
         source = caption,
         rating = ratingText(book.rating),

@@ -12,6 +12,7 @@ import dev.mirutime.app.features.translation.data.activeTranslationMode
 import dev.mirutime.app.features.translation.data.cacheKey
 import dev.mirutime.app.features.translation.data.metadataConfigFor
 import dev.mirutime.app.features.translation.data.translationConfigKey
+import dev.mirutime.app.features.translation.data.translationPresentationFor
 import dev.mirutime.core.text.RegexRule
 import dev.mirutime.core.text.RegexRuleTarget
 import dev.mirutime.core.text.applyRulesFor
@@ -127,6 +128,7 @@ internal class AppReaderTranslationPort(
                 target = it.target,
                 provider = it.provider,
                 full = it.full,
+                chapterTitles = translationPresentationFor(bookUrl).chapterTitles,
             )
         }
 
@@ -190,6 +192,7 @@ internal class AppReaderTranslationPort(
                 title = title,
                 chapters = chapters,
                 config = config,
+                includeChapterTitles = translationPresentationFor(bookUrl).chapterTitles,
             ),
         )
     }

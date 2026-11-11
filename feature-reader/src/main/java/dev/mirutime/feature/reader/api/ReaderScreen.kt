@@ -452,10 +452,17 @@ fun ReaderScreen(
     val chapterUrl = activeDocument?.chapterUrl
         ?: state.chapters.firstOrNull { it.index == state.activeChapterIndex }?.chapterUrl.orEmpty()
     val metadataConfig = graph.translation.metadataConfigKey(bookUrl)
+    val mode = graph.translation.activeMode(bookUrl)
     // In FULL mode the reader warms the book's chapter titles itself, so the
     // chrome and the in-content header read translated even when the reader was
     // entered straight from "continue reading" without visiting the book page.
-    LaunchedEffect(bookUrl, metadataConfig, state.book?.title, state.chapters.size) {
+    LaunchedEffect(
+        bookUrl,
+        metadataConfig,
+        state.book?.title,
+        state.chapters.size,
+        mode?.chapterTitles,
+    ) {
         if (metadataConfig == null) return@LaunchedEffect
         val title = state.book?.title.orEmpty()
         if (title.isBlank()) return@LaunchedEffect
@@ -467,10 +474,12 @@ fun ReaderScreen(
         )
     }
     val metadataEntry = metadata[bookUrl]?.takeIf { it.configKey == metadataConfig }
-    val chapterTitle = metadataEntry?.chapterTitles?.get(state.activeChapterIndex)
+    // Full scope can switch chapter titles off while keeping the book metadata.
+    val chapterTitle = metadataEntry?.chapterTitles
+        ?.takeIf { mode?.chapterTitles != false }
+        ?.get(state.activeChapterIndex)
         ?: activeDocument?.title
         ?: state.chapters.firstOrNull { it.index == state.activeChapterIndex }?.title.orEmpty()
-    val mode = graph.translation.activeMode(bookUrl)
     val promptKey = graph.translation.promptKey(bookUrl)
     // Hash keys are O(chapter text); memoize per chapter so a new load re-hashes
     // only the document that changed, not every loaded chapter.
@@ -1031,7 +1040,11 @@ fun ReaderScreen(
                     contentPadding = contentPadding,
                     translationLabelFor = labelFor,
                     translations = visibleTranslations,
-                    chapterTitles = metadataEntry?.chapterTitles.orEmpty(),
+                    chapterTitles = if (mode?.chapterTitles == false) {
+                        emptyMap()
+                    } else {
+                        metadataEntry?.chapterTitles.orEmpty()
+                    },
                     parallel = graph.settings.parallelEnabled,
                     translationFirst = graph.settings.parallelOrder == "TRANSLATION_FIRST",
                     ttsHighlight = ttsHighlight,
