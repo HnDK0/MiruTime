@@ -327,7 +327,10 @@ class PluginFinderDataProvider(
         if (!added) {
             // No persistable read grant means the folder cannot be rescanned
             // after a restart; keep it out of the list instead of failing later.
-            MiruCoreLogger.w(TAG, "local folder grant not persistable: $uri")
+            MiruCoreLogger.w(
+                TAG,
+                "local folder grant not persistable: uriHash=${dev.mirutime.core.log.MiruLog.idHash(uri)}",
+            )
         }
     }
 

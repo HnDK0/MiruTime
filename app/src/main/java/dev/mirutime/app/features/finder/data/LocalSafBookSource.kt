@@ -197,7 +197,7 @@ class LocalSafCache(
             return target
         }
         return withContext(Dispatchers.IO) {
-            val cached = locks.getOrPut(hash) { Mutex() }.withLock {
+            val cached = locks.computeIfAbsent(hash) { Mutex() }.withLock {
                 if (target.isFile && target.length() > 0) {
                     target.setLastModified(System.currentTimeMillis())
                     return@withLock target
