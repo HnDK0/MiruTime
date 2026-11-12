@@ -37,6 +37,8 @@ import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.CardProgressBar
 import dev.mirutime.app.design.components.BookTileWidth
 import dev.mirutime.app.design.components.ReplayIcon
+import dev.mirutime.uikit.MiruButton
+import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruCard
 import dev.mirutime.uikit.SectionHeader
 import dev.mirutime.uikit.MiruSpace
@@ -52,7 +54,9 @@ import dev.mirutime.app.features.library.domain.CardStyle
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.library.domain.LibraryBook
 import dev.mirutime.app.features.library.ui.LibraryCard
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.supervisorScope
 
 // Dashboard books are library books without the shelf/ranking metadata; the
 // shared library card consumes this mapped shape.
@@ -83,6 +87,7 @@ private data class DashboardState(
     val stats: ReadingStats? = null,
     val updates: List<UpdateItem> = emptyList(),
     val history: List<HistoryEntry> = emptyList(),
+    val failed: Boolean = false,
 )
 
 // The floating MiruShell tab panel (photo themes) overlays the scroll —
@@ -101,18 +106,57 @@ fun DashboardScreen(
     onHistoryOpen: () -> Unit = {},
 ) {
     var state by remember { mutableStateOf(DashboardState()) }
+    var retryTick by remember { mutableStateOf(0) }
 
-    LaunchedEffect(provider, refreshKey) {
+    LaunchedEffect(provider, refreshKey, retryTick) {
         state = DashboardState()
-        // Concurrent, one commit: sequential loads popped the screen in parts.
-        val statsDeferred = async { provider.readingStats() }
-        val updatesDeferred = async { provider.updates() }
-        val historyDeferred = async { provider.history(6) }
-        state = DashboardState(
-            statsDeferred.await(),
-            updatesDeferred.await(),
-            historyDeferred.await(),
-        )
+        try {
+            // Concurrent, one commit: sequential loads popped the screen in parts.
+            supervisorScope {
+                val statsDeferred = async { provider.readingStats() }
+                val updatesDeferred = async { provider.updates() }
+                val historyDeferred = async { provider.history(6) }
+                state = DashboardState(
+                    statsDeferred.await(),
+                    updatesDeferred.await(),
+                    historyDeferred.await(),
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            state = DashboardState(failed = true)
+        }
+    }
+
+    if (state.failed) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = MiruSize.ScreenPad,
+                end = MiruSize.ScreenPad,
+                top = contentPadding.calculateTopPadding(),
+                bottom = contentPadding.calculateBottomPadding() + BottomFloatClearance,
+            ),
+        ) {
+            item {
+                MiruCard(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = stringResource(R.string.dash_load_error),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(modifier = Modifier.height(MiruSpace.M))
+                    MiruButton(
+                        onClick = { retryTick++ },
+                        style = MiruButtonStyle.Primary,
+                    ) {
+                        Text(text = stringResource(R.string.dash_retry))
+                    }
+                }
+            }
+        }
+        return
     }
 
     if (state.stats == null) {

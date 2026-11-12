@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -237,38 +238,35 @@ fun GlobalSearchScreen(
         dedupeSourceResults(results)
             .sortedBy { result -> targets.indexOfFirst { it.id == result.source.id } }
     }
-    val withBooks = ordered.filter { it.books.isNotEmpty() }
-    val failureReports = ordered.mapNotNull { result ->
-        failures[result.source.id]?.let { report -> result.source to report }
+    val withBooks = remember(ordered) { ordered.filter { it.books.isNotEmpty() } }
+    val failureReports = remember(ordered, failures) {
+        ordered.mapNotNull { result ->
+            failures[result.source.id]?.let { report -> result.source to report }
+        }
     }
     // Typed failures already render a full card; only untyped ones keep the
     // one-line summary.
-    val typedIds = failureReports.mapTo(HashSet()) { it.first.id }
-    val failedNames = ordered
-        .filter { it.failed && it.source.id !in typedIds }
-        .map { it.source.name }
+    val failedNames = remember(ordered, failureReports) {
+        val typedIds = failureReports.mapTo(HashSet()) { it.first.id }
+        ordered
+            .filter { it.failed && it.source.id !in typedIds }
+            .map { it.source.name }
+    }
 
     // Translated titles: search is where a book is first seen, so it warms the
     // same metadata cache as the library and the catalogue (one batch per
     // config). A hidden Search surface keeps the source-language title.
-    val allBooks = withBooks.flatMap { it.books }
+    val allBooks = remember(withBooks) { withBooks.flatMap { it.books } }
     val metadata by metadataTranslations.state.collectAsState()
-    val metadataJobs = remember(
-        allBooks,
-        AppSettings.novelTranslation.toMap(),
-        AppSettings.pluginTranslation.toMap(),
-        AppSettings.translationGlobalMode,
-        AppSettings.globalSource,
-        AppSettings.globalTarget,
-        AppSettings.provider,
-        AppSettings.activePrompt,
-    ) {
-        allBooks.mapNotNull { book ->
-            if (!translationPresentationFor(book.bookUrl).showsTitle(TitleSurface.Search)) {
-                return@mapNotNull null
-            }
-            metadataConfigFor(book.bookUrl)?.let { config ->
-                TitleTranslationJob(book.bookUrl, book.title, config)
+    val metadataJobs by remember(allBooks) {
+        derivedStateOf {
+            allBooks.mapNotNull { book ->
+                if (!translationPresentationFor(book.bookUrl).showsTitle(TitleSurface.Search)) {
+                    return@mapNotNull null
+                }
+                metadataConfigFor(book.bookUrl)?.let { config ->
+                    TitleTranslationJob(book.bookUrl, book.title, config)
+                }
             }
         }
     }
@@ -466,9 +464,10 @@ fun GlobalSearchScreen(
                     onAction = { onOpenCatalogue(result.source.id, query) },
                     contentPadding = PaddingValues(MiruSpace.S),
                 ) {
+                    val dedupedBooks = remember(result.books) { dedupeCatalogBooks(result.books) }
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.CardGap)) {
                         items(
-                            dedupeCatalogBooks(result.books),
+                            dedupedBooks,
                             key = { globalBookKey(it.bookUrl) },
                         ) { book ->
                             Box(modifier = Modifier.width(MiruSize.Tile)) {

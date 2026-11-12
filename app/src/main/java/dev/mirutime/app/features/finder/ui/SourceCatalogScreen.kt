@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -410,22 +411,15 @@ internal fun SourceCatalogScreen(
     // warms the same metadata cache as the library instead of leaving every
     // card in the source language. Same batch-per-config contract.
     val metadata by readerGraph.metadataTranslations.state.collectAsState()
-    val metadataJobs = remember(
-        books,
-        AppSettings.novelTranslation.toMap(),
-        AppSettings.pluginTranslation.toMap(),
-        AppSettings.translationGlobalMode,
-        AppSettings.globalSource,
-        AppSettings.globalTarget,
-        AppSettings.provider,
-        AppSettings.activePrompt,
-    ) {
-        books.mapNotNull { book ->
-            if (!translationPresentationFor(book.bookUrl).showsTitle(TitleSurface.Catalog)) {
-                return@mapNotNull null
-            }
-            metadataConfigFor(book.bookUrl)?.let { config ->
-                TitleTranslationJob(book.bookUrl, book.title, config)
+    val metadataJobs by remember(books) {
+        derivedStateOf {
+            books.mapNotNull { book ->
+                if (!translationPresentationFor(book.bookUrl).showsTitle(TitleSurface.Catalog)) {
+                    return@mapNotNull null
+                }
+                metadataConfigFor(book.bookUrl)?.let { config ->
+                    TitleTranslationJob(book.bookUrl, book.title, config)
+                }
             }
         }
     }
@@ -761,7 +755,7 @@ private fun EmptyState(canReset: Boolean, onReset: () -> Unit) {
             Spacer(modifier = Modifier.height(MiruSpace.M))
             Button(
                 onClick = onReset,
-                modifier = Modifier.height(MiruSize.Button),
+                modifier = Modifier.heightIn(min = MiruSize.Button),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.onBackground,
                     contentColor = MaterialTheme.colorScheme.background,
@@ -800,7 +794,7 @@ private fun ErrorCard(message: String, onReload: () -> Unit, onCopy: () -> Unit)
                 colors = colors,
                 modifier = Modifier
                     .weight(1f)
-                    .height(MiruSize.Button),
+                    .heightIn(min = MiruSize.Button),
             ) {
                 Text(text = stringResource(R.string.finder_error_reload), maxLines = 1)
             }
@@ -809,7 +803,7 @@ private fun ErrorCard(message: String, onReload: () -> Unit, onCopy: () -> Unit)
                 colors = colors,
                 modifier = Modifier
                     .weight(1f)
-                    .height(MiruSize.Button),
+                    .heightIn(min = MiruSize.Button),
             ) {
                 Text(text = stringResource(R.string.finder_error_copy), maxLines = 1)
             }

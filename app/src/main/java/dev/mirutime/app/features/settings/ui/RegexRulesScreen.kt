@@ -168,14 +168,16 @@ fun RegexRulesScreen(
                     it.replacement.contains(trimmedQuery, ignoreCase = true)
             }
         }
-    val shown = visibleOrder(rules)
-    val duplicatePatterns = rules
-        .filter { it.pattern.isNotBlank() }
-        .groupingBy { it.pattern }
-        .eachCount()
-        .filterValues { it > 1 }
-        .keys
-    val enabledCount = rules.count { it.enabled }
+    val shown = remember(rules, trimmedQuery) { visibleOrder(rules) }
+    val duplicatePatterns = remember(rules) {
+        rules
+            .filter { it.pattern.isNotBlank() }
+            .groupingBy { it.pattern }
+            .eachCount()
+            .filterValues { it > 1 }
+            .keys
+    }
+    val enabledCount = remember(rules) { rules.count { it.enabled } }
     val scopeLabel = stringResource(if (scopedNovel == null) R.string.st_rx_global else R.string.st_rx_book)
     val applyLabel = applyToLabel(applyTo)
 

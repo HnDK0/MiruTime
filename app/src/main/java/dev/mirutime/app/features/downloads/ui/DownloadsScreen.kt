@@ -193,11 +193,15 @@ fun DownloadsScreen(
         }
     }
 
-    val activeRows = rows.filter {
-        it.isActive || it.isPaused || it.isFailed || it.isBlocked
+    val activeRows = remember(rows) {
+        rows.filter {
+            it.isActive || it.isPaused || it.isFailed || it.isBlocked
+        }
     }
-    val historyRows = rows.filter { row ->
-        row.state == DownloadState.COMPLETED || row.downloaded > 0
+    val historyRows = remember(rows) {
+        rows.filter { row ->
+            row.state == DownloadState.COMPLETED || row.downloaded > 0
+        }
     }
     val shown = if (tab == DlTab.Downloaded) historyRows else activeRows
 

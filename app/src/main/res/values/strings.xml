@@ -1734,4 +1734,10 @@
     <string name="book_tool_source">Source</string>
     <string name="book_tools_scope">This title only</string>
     <string name="book_tool_epub_no_chapters">No downloaded chapters</string>
+    <string name="rd_book_not_found">Book not found</string>
+    <string name="rd_no_chapters">No chapters</string>
+    <string name="updates_remaining_hm_fmt">%1$dh %2$dm</string>
+    <string name="updates_remaining_m_fmt">%1$dm</string>
+    <string name="dash_load_error">Couldn\'t load dashboard data</string>
+    <string name="dash_retry">Retry</string>
 </resources>

@@ -1755,4 +1755,10 @@
     <string name="book_tool_source">Источник</string>
     <string name="book_tools_scope">Только для этого тайтла</string>
     <string name="book_tool_epub_no_chapters">Нет скачанных глав</string>
+    <string name="rd_book_not_found">Книга не найдена</string>
+    <string name="rd_no_chapters">Нет глав</string>
+    <string name="updates_remaining_hm_fmt">%1$d ч %2$d мин</string>
+    <string name="updates_remaining_m_fmt">%1$d мин</string>
+    <string name="dash_load_error">Не удалось загрузить данные главной</string>
+    <string name="dash_retry">Повторить</string>
 </resources>

@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -429,22 +430,15 @@ fun LibraryScreen(
     // FULL-mode titles: one batch per identical config, warmed before a card
     // leaves the original title. The state map is shared with the book page.
     val metadata by readerGraph.metadataTranslations.state.collectAsState()
-    val metadataJobs = remember(
-        pager.books,
-        AppSettings.novelTranslation.toMap(),
-        AppSettings.pluginTranslation.toMap(),
-        AppSettings.translationGlobalMode,
-        AppSettings.globalSource,
-        AppSettings.globalTarget,
-        AppSettings.provider,
-        AppSettings.activePrompt,
-    ) {
-        pager.books.mapNotNull { book ->
-            if (!translationPresentationFor(book.bookKey).showsTitle(TitleSurface.Library)) {
-                return@mapNotNull null
-            }
-            metadataConfigFor(book.bookKey)?.let { config ->
-                TitleTranslationJob(book.bookKey, book.title, config)
+    val metadataJobs by remember(pager.books) {
+        derivedStateOf {
+            pager.books.mapNotNull { book ->
+                if (!translationPresentationFor(book.bookKey).showsTitle(TitleSurface.Library)) {
+                    return@mapNotNull null
+                }
+                metadataConfigFor(book.bookKey)?.let { config ->
+                    TitleTranslationJob(book.bookKey, book.title, config)
+                }
             }
         }
     }
@@ -579,6 +573,8 @@ fun LibraryScreen(
             ).show()
         }
     }
+
+    val gridRows = remember(shown, columns) { shown.chunked(columns) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
@@ -797,7 +793,7 @@ fun LibraryScreen(
                             // the text, not on the photo-only frost padding — that
                             // skip was the actual-size collapse source (16–20dp).
                             modifier = Modifier
-                                .height(32.dp)
+                                .heightIn(min = MiruSize.RowCompact)
                                 .wrapContentHeight(Alignment.CenterVertically)
                                 .padding(horizontal = MiruSpace.M),
                         )
@@ -878,8 +874,7 @@ fun LibraryScreen(
                         }
                     }
                 } else if (layout == LayoutMode.Grid && cardStyle != CardStyle.Horizontal) {
-                    val rows = shown.chunked(columns)
-                    rows.forEach { row ->
+                    gridRows.forEach { row ->
                         item(key = libraryRowKey(row.first().bookKey)) {
                             Row(
                                 modifier = Modifier
@@ -1472,7 +1467,7 @@ private fun MiniFilters(
     // already puts chips on the same left grid line as the cards/resume bar,
     // giving a symmetric start→end rhythm. Side inset follows the same rule.
     ChipRail {
-        items(minis) { (label, action) ->
+        items(minis, key = { it.first }) { (label, action) ->
             MiruFilterChip(
                 selected = false,
                 onClick = action,
