@@ -686,11 +686,11 @@ class PluginGraph(
     // entries that are not installed are never downloaded.
     internal suspend fun syncLibrariesForInstalled(
         libraries: List<IndexEntry>,
-    ): List<Pair<String, String>> {
+    ): List<Pair<String, String>> = withContext(Dispatchers.IO) {
         val scripts = fileSystem.list(INSTALL_DIR)
             .filter { it.endsWith(".lua") }
             .mapNotNull { fileSystem.read(it)?.decodeToString() }
-        return syncInstalledLibraryClosure(scripts, libraries, ::fetchBytes, ::syncLibraries)
+        syncInstalledLibraryClosure(scripts, libraries, ::fetchBytes, ::syncLibraries)
     }
 
     private suspend fun installEntries(
@@ -948,7 +948,7 @@ class PluginGraph(
         scan()
     }
 
-    suspend fun uninstall(id: String) {
+    suspend fun uninstall(id: String) = withContext(Dispatchers.IO) {
         handlesMutex.withLock { handles.remove(id)?.dispose() }
         runtimeErrors.remove(id)
         fileSystem.delete("$INSTALL_DIR/$id.lua")

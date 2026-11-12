@@ -170,8 +170,8 @@ class LocalBookProvider(
      * Removes an imported book from the app: DB row cascade + copied file +
      * local cover. The user's original SAF document is never touched.
      */
-    suspend fun remove(bookUrl: String): Boolean {
-        val row = library.book(bookUrl) ?: return false
+    suspend fun remove(bookUrl: String): Boolean = withContext(Dispatchers.IO) {
+        val row = library.book(bookUrl) ?: return@withContext false
         val file = library.localBookFile(row.bookId)
         val copyPath = file?.copyPath
         val coverPath = library.bookCover(row.bookId)?.localPath
@@ -207,7 +207,7 @@ class LocalBookProvider(
                 "paths" to leftovers.size,
             )
         }
-        return true
+        true
     }
 
     private fun deleteTree(path: String): Boolean {

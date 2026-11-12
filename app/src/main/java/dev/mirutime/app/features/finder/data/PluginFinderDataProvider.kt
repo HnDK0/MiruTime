@@ -616,23 +616,15 @@ class PluginFinderDataProvider(
         }
     }
 
+    // Synchronous by interface contract, so the debounced writer in MiruApp
+    // persists these edits off the main thread.
     override fun savePreset(sourceId: String, preset: FilterPreset) {
         AppSettings.filterPresets[sourceId] = mergePresets(presets(sourceId), preset)
-        persistSettingsNow()
     }
 
     override fun deletePreset(sourceId: String, name: String) {
         AppSettings.filterPresets[sourceId] =
             presets(sourceId).filterNot { it.name.equals(name, ignoreCase = true) }
-        persistSettingsNow()
-    }
-
-    // Saves are rare, user-triggered actions; the interface is synchronous, so
-    // write the snapshot inline (the app's debounced writer will just rewrite
-    // the same values).
-    private fun persistSettingsNow() {
-        val store = settingsStore ?: return
-        runCatching { store.save(AppSettings.persistedSnapshot()) }
     }
 
     override suspend fun localCatalogSnapshot(sourceId: String): LocalCatalogSnapshot? {
