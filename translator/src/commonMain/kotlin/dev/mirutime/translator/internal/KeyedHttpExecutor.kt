@@ -120,15 +120,20 @@ internal class KeyedHttpExecutor(
                         ?.toLongOrNull()
                         ?.seconds
                     lastError = TranslationError.RateLimited(provider, retryAfter, body)
-                    if (retryAfter != null && keyCooldown) {
+                    if (keyCooldown) {
                         // Rotate to a healthy key immediately; only wait when this is the
                         // last usable key. Never keep it cooling longer than the capped wait.
                         val hasAnotherKey = keys.availableCount() > 1
-                        keys.coolDown(
-                            key,
-                            if (hasAnotherKey) retryAfter else retryAfter.coerceAtMost(MAX_RETRY_DELAY),
-                        )
-                        retryImmediately = hasAnotherKey
+                        if (retryAfter != null) {
+                            keys.coolDown(
+                                key,
+                                if (hasAnotherKey) retryAfter else retryAfter.coerceAtMost(MAX_RETRY_DELAY),
+                            )
+                            retryImmediately = hasAnotherKey
+                        } else if (hasAnotherKey) {
+                            keys.coolDown(key, backoff(attempt + 1))
+                            retryImmediately = true
+                        }
                     }
                 }
 

@@ -118,6 +118,37 @@ class TranslationManagerTest {
     }
 
     @Test
+    fun managerDetectsSourceSkipsPunctuationFirstUnit() = networkTest {
+        var detectedQuery: String? = null
+        val engine = MockEngine { request ->
+            val isDetection = request.url.parameters["tl"] == "en"
+            if (isDetection) {
+                detectedQuery = request.url.parameters["q"]
+            }
+            respond(
+                content = if (isDetection) {
+                    """[null, null, "en"]"""
+                } else {
+                    """[[["***\n", "***\n", null, null],["Hola", "Hello", null, null]], null, "en"]"""
+                },
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val manager = TranslationManagerImpl(
+            client = HttpClient(engine),
+            configs = listOf(config(ProviderId.GOOGLE_FREE, "https://test/free")),
+        )
+
+        val result = manager.translateBatch(
+            request(ProviderId.GOOGLE_FREE, "***", "Hello", source = null),
+        ).requireOk()
+
+        assertEquals("Hello", detectedQuery)
+        assertEquals(LanguageCode.parse("en"), result.detectedSource)
+    }
+
+    @Test
     fun rateLimitedIsTyped() = networkTest {
         val engine = MockEngine {
             respond(

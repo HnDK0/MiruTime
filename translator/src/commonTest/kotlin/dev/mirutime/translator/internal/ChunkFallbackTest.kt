@@ -158,4 +158,28 @@ class ChunkFallbackTest {
         // through the same lambda) cannot bypass it.
         assertEquals(listOf(0L, 1_000L, 2_000L), sentAt)
     }
+
+    @Test
+    fun `unit with internal newline recovers when bisected to single unit`() = runTest {
+        val multiLineUnits = listOf(
+            TranslationUnit("a", "line one\nline two"),
+            TranslationUnit("b", "line three"),
+        )
+        val multiLineChunk = TextChunk(listOf(0, 1), "line one\nline two\nline three")
+        val result = applyChunkWithFallback(
+            chunk = multiLineChunk,
+            units = multiLineUnits,
+            provider = provider,
+            separatorRegex = newline,
+            translateChunk = { req -> req.text.uppercase() },
+        )
+
+        assertEquals(
+            mapOf(
+                "a" to "LINE ONE\nLINE TWO",
+                "b" to "LINE THREE",
+            ),
+            result,
+        )
+    }
 }

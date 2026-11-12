@@ -333,6 +333,7 @@ internal fun validateChunkLines(
     separatorRegex: Regex,
 ) {
     val actual = raw.split(separatorRegex).count { it.isNotBlank() }
+    if (chunk.indices.size == 1 && actual >= 1) return
     if (actual != chunk.indices.size) {
         throw TranslationFailure(
             TranslationError.Truncated(provider, chunk.indices.size, actual),
@@ -373,6 +374,9 @@ internal suspend fun applyChunkWithFallback(
         return chunk.indices.mapIndexed { index, unitIndex ->
             units[unitIndex].id to lines[index]
         }.toMap()
+    }
+    if (chunk.indices.size == 1 && lines.isNotEmpty()) {
+        return mapOf(units[chunk.indices[0]].id to lines.joinToString("\n"))
     }
     return bisectChunk(
         chunk, units, provider, separatorRegex, transformLine, translateChunk,

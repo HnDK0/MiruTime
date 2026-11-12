@@ -123,7 +123,9 @@ class TranslationManagerImpl(
         var resolvedSource = source
         var detected: LanguageCode? = null
         if (toTranslate.isNotEmpty() && resolvedSource == null) {
-            when (val result = detectLanguage(toTranslate.first().text)) {
+            val detectSample = toTranslate.firstOrNull { unit -> unit.text.any(Char::isLetter) }
+                ?: toTranslate.first()
+            when (val result = detectLanguage(detectSample.text)) {
                 is Outcome.Ok -> {
                     resolvedSource = result.value
                     detected = result.value
