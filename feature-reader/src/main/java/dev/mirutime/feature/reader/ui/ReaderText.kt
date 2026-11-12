@@ -25,10 +25,13 @@ import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -643,6 +646,7 @@ fun ReaderChapterHeader(
                             label = translationLabel,
                             style = style,
                             description = stringResource(R.string.rd_translation_badge_desc),
+                            resetKey = title,
                         )
                     }
                 }
@@ -660,8 +664,27 @@ private fun TranslationBadge(
     label: String,
     style: ReaderStyle,
     description: String,
+    // A new chapter restarts the elapsed counter even if both are loading.
+    resetKey: Any?,
 ) {
     val textColor = Color(style.effectiveTextColor())
+    val loadingSuffix = stringResource(R.string.rd_translation_loading)
+    val isLoading = label.contains(loadingSuffix)
+    var elapsedSec by remember(resetKey, isLoading) { mutableIntStateOf(0) }
+    LaunchedEffect(resetKey, isLoading) {
+        elapsedSec = 0
+        if (!isLoading) return@LaunchedEffect
+        while (true) {
+            delay(1_000)
+            elapsedSec++
+        }
+    }
+    val displayLabel = if (isLoading && elapsedSec > 0) {
+        val elapsedText = stringResource(R.string.rd_translation_loading_seconds, elapsedSec)
+        label.replaceFirst(loadingSuffix, "$loadingSuffix $elapsedText")
+    } else {
+        label
+    }
     Row(
         modifier = Modifier
             // Grow with the (scaled) label instead of clipping at 200% font.
@@ -673,7 +696,7 @@ private fun TranslationBadge(
                 vertical = ChapterHeaderMetrics.badgeVerticalPadding,
             )
             .semantics(mergeDescendants = true) {
-                contentDescription = "$description: $label"
+                contentDescription = "$description: $displayLabel"
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -685,7 +708,7 @@ private fun TranslationBadge(
         )
         Spacer(Modifier.width(ChapterHeaderMetrics.badgeIconGap))
         Text(
-            text = label,
+            text = displayLabel,
             color = textColor.copy(alpha = 0.8f),
             fontSize = ChapterHeaderMetrics.badgeFontSizeSp.sp,
             lineHeight = ChapterHeaderMetrics.badgeLineHeightSp.sp,

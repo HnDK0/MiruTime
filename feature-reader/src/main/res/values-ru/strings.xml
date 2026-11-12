@@ -59,6 +59,8 @@
     <string name="rd_background">Фон</string>
     <string name="rd_background_import_failed">Не удалось импортировать изображение</string>
     <string name="rd_bold">Полужирный</string>
+    <string name="rd_book_not_found">Книга не найдена</string>
+    <string name="rd_no_chapters">Нет глав</string>
     <string name="rd_chapter_error">Не удалось загрузить главу</string>
     <string name="rd_chapter_fmt">Глава %1$d / %2$d</string>
     <string name="rd_colors">Цвета</string>

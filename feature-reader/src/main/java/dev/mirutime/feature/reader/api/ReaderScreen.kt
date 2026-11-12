@@ -9,18 +9,26 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import dev.mirutime.uikit.MiruButton
+import dev.mirutime.uikit.MiruButtonStyle
+import dev.mirutime.uikit.MiruSpace
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -142,15 +150,24 @@ fun ReaderScreen(
     val mangaStyle = config.mangaStyle.sanitized()
     // Active paragraph is always marked while TTS has a cursor; the optional
     // word range follows the style switch.
-    val ttsHighlight = ttsState.blockId?.let { blockId ->
-        TtsHighlight(
-            blockId = blockId,
-            start = ttsState.rangeStart,
-            end = ttsState.rangeEnd,
-            colorArgb = style.highlightColor,
-            translated = ttsState.translated,
-            rangeEnabled = style.ttsHighlight,
-        )
+    val ttsHighlight = remember(
+        ttsState.blockId,
+        ttsState.rangeStart,
+        ttsState.rangeEnd,
+        style.highlightColor,
+        ttsState.translated,
+        style.ttsHighlight,
+    ) {
+        ttsState.blockId?.let { blockId ->
+            TtsHighlight(
+                blockId = blockId,
+                start = ttsState.rangeStart,
+                end = ttsState.rangeEnd,
+                colorArgb = style.highlightColor,
+                translated = ttsState.translated,
+                rangeEnabled = style.ttsHighlight,
+            )
+        }
     }
     val autoTheme = style.backgroundId == "auto"
     val background = ReaderPalette.background(style.backgroundId)
@@ -502,7 +519,9 @@ fun ReaderScreen(
     }
     // A disabled mode must hide whatever is still cached from a previous
     // configuration instead of leaving translated text on screen.
-    val visibleTranslations = visibleTranslations(mode, bookUrl, translations, expectedConfigKeys)
+    val visibleTranslations = remember(mode, bookUrl, translations, expectedConfigKeys) {
+        visibleTranslations(mode, bookUrl, translations, expectedConfigKeys)
+    }
     fun ttsSource(document: ReaderDocument): TtsTextSource =
         ttsTextSource(
             parallelEnabled = graph.settings.parallelEnabled,
@@ -675,8 +694,6 @@ fun ReaderScreen(
         }
     }
     val loadingSuffix = stringResource(R.string.rd_translation_loading)
-    // A wait with no numbers reads as a hang: the badge counts the seconds the
-    // active chapter has been translating, reset per chapter.
     val activeChapterUrl = state.documents[state.activeChapterIndex]?.chapterUrl.orEmpty()
     val hasPair = mode?.hasPair == true
     val chapterReady = state.statuses[state.activeChapterIndex] is ChapterLoadStatus.Ready
@@ -684,65 +701,59 @@ fun ReaderScreen(
     // page currently hides still blocks the retry, or the tap would cancel it.
     val activeTranslating =
         translations[activeChapterUrl]?.status == ReaderTranslationStatus.Loading
-    val activeRetranslating = state.activeChapterIndex in retranslatingChapters
-    var translationElapsedSec by remember(activeChapterUrl) { mutableIntStateOf(0) }
-    LaunchedEffect(activeChapterUrl, activeTranslating, activeRetranslating) {
-        translationElapsedSec = 0
-        if (!activeTranslating && !activeRetranslating) return@LaunchedEffect
-        while (true) {
-            delay(1_000)
-            translationElapsedSec++
-        }
-    }
-    val translationElapsedText =
-        stringResource(R.string.rd_translation_loading_seconds, translationElapsedSec)
     val failedSuffix = stringResource(R.string.rd_translation_failed)
     val localNetworkSuffix = stringResource(R.string.rd_translation_local_network)
     val cleartextSuffix = stringResource(R.string.rd_translation_cleartext)
     val originalUnavailable = stringResource(R.string.rd_original_unavailable)
-    val labelFor: (Int) -> String? = { chapterIndex ->
-        translationLabel?.let { base ->
-            val translation = state.documents[chapterIndex]?.chapterUrl
-                ?.let { visibleTranslations[it] }
-            val status = when (translation?.status) {
-                ReaderTranslationStatus.Loading -> if (chapterIndex == state.activeChapterIndex && translationElapsedSec > 0) {
-                    " · $loadingSuffix $translationElapsedText"
-                } else {
+    val labelFor: (Int) -> String? = remember(
+        translationLabel,
+        state.documents,
+        visibleTranslations,
+        retranslatingChapters,
+        loadingSuffix,
+        failedSuffix,
+        localNetworkSuffix,
+        cleartextSuffix,
+        originalUnavailable,
+    ) {
+        { chapterIndex ->
+            translationLabel?.let { base ->
+                val translation = state.documents[chapterIndex]?.chapterUrl
+                    ?.let { visibleTranslations[it] }
+                val status = when (translation?.status) {
+                    ReaderTranslationStatus.Loading -> " · $loadingSuffix"
+                    ReaderTranslationStatus.Failed -> " · " + when (translation.failure) {
+                        ReaderTranslationFailure.LocalNetworkRequired -> localNetworkSuffix
+                        ReaderTranslationFailure.CleartextNotAllowed -> cleartextSuffix
+                        null -> failedSuffix
+                    }
+                    ReaderTranslationStatus.Ready, null -> ""
+                }
+                // A forced retry keeps the old text visible, so the status stays
+                // Ready; the busy suffix is the only progress cue once the chrome
+                // hides. A Loading status already shows it.
+                val busy = if (chapterIndex in retranslatingChapters &&
+                    translation?.status != ReaderTranslationStatus.Loading
+                ) {
                     " · $loadingSuffix"
-                }
-                ReaderTranslationStatus.Failed -> " · " + when (translation.failure) {
-                    ReaderTranslationFailure.LocalNetworkRequired -> localNetworkSuffix
-                    ReaderTranslationFailure.CleartextNotAllowed -> cleartextSuffix
-                    null -> failedSuffix
-                }
-                ReaderTranslationStatus.Ready, null -> ""
-            }
-            // A forced retry keeps the old text visible, so the status stays
-            // Ready; the busy suffix is the only progress cue once the chrome
-            // hides. A Loading status already shows it.
-            val busy = if (chapterIndex in retranslatingChapters &&
-                translation?.status != ReaderTranslationStatus.Loading
-            ) {
-                if (chapterIndex == state.activeChapterIndex && translationElapsedSec > 0) {
-                    " · $loadingSuffix $translationElapsedText"
                 } else {
-                    " · $loadingSuffix"
+                    ""
                 }
-            } else {
-                ""
+                val notice = if (state.documents[chapterIndex]?.translationOnly == true) {
+                    " · $originalUnavailable"
+                } else {
+                    ""
+                }
+                base + status + busy + notice
             }
-            val notice = if (state.documents[chapterIndex]?.translationOnly == true) {
-                " · $originalUnavailable"
-            } else {
-                ""
-            }
-            base + status + busy + notice
         }
     }
-    val pagedTranslations: Map<BlockId, String> = activeDocument?.let { document ->
-        visibleTranslations[document.chapterUrl]?.translations
-            ?.mapKeys { (index, _) -> BlockId(document.chapterUrl, index) }
-    }.orEmpty()
+    val pagedTranslations: Map<BlockId, String> = remember(activeDocument, visibleTranslations) {
+        activeDocument?.let { document ->
+            visibleTranslations[document.chapterUrl]?.translations
+                ?.mapKeys { (index, _) -> BlockId(document.chapterUrl, index) }
+        }.orEmpty()
+    }
     val bookTitle = metadataEntry?.title ?: state.book?.title.orEmpty()
     var notificationDenied by rememberSaveable { mutableStateOf(false) }
     // API 33+ needs a runtime grant before the ongoing playback notification is
@@ -963,11 +974,46 @@ fun ReaderScreen(
                     CircularProgressIndicator(Modifier.align(Alignment.Center), color = textColor)
                 }
                 state.restorePhase == RestorePhase.Failed -> {
+                    val errorText = when (state.error) {
+                        "Book not found" -> stringResource(R.string.rd_book_not_found)
+                        "No chapters" -> stringResource(R.string.rd_no_chapters)
+                        "Could not load chapter", null, "" -> stringResource(R.string.rd_chapter_error)
+                        else -> state.error ?: stringResource(R.string.rd_chapter_error)
+                    }
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = state.error ?: stringResource(R.string.rd_chapter_error),
-                            color = textColor,
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(MiruSpace.Xl),
+                        ) {
+                            Text(
+                                text = errorText,
+                                color = textColor,
+                            )
+                            Spacer(Modifier.height(MiruSpace.M))
+                            Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                                MiruButton(
+                                    onClick = onBack,
+                                    style = MiruButtonStyle.Secondary,
+                                ) {
+                                    Text(stringResource(R.string.header_back))
+                                }
+                                MiruButton(
+                                    onClick = {
+                                        scope.launch {
+                                            store.open(
+                                                bookUrl = bookUrl,
+                                                requestedChapterIndex = startChapterIndex,
+                                                restoreSaved = restoreSaved,
+                                                reopened = reopened,
+                                            )
+                                        }
+                                    },
+                                    style = MiruButtonStyle.Primary,
+                                ) {
+                                    Text(stringResource(R.string.rd_retry))
+                                }
+                            }
+                        }
                     }
                 }
                 activeDocument != null && mangaPages.isNotEmpty() -> ReaderMangaPager(

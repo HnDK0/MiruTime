@@ -59,6 +59,8 @@
     <string name="rd_background">Background</string>
     <string name="rd_background_import_failed">Couldn\'t import this image</string>
     <string name="rd_bold">Bold</string>
+    <string name="rd_book_not_found">Book not found</string>
+    <string name="rd_no_chapters">No chapters</string>
     <string name="rd_chapter_error">Couldn\'t load this chapter</string>
     <string name="rd_chapter_fmt">Chapter %1$d / %2$d</string>
     <string name="rd_colors">Colors</string>
