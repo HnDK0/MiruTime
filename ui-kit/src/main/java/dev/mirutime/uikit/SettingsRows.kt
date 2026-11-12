@@ -1,6 +1,9 @@
 package dev.mirutime.uikit
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -34,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
@@ -464,7 +468,7 @@ fun <T> SearchableChoiceSheet(
                     SettingsHint(emptyLabel)
                 }
             } else {
-                items(count = filtered.size) { index ->
+                items(count = filtered.size, key = { filtered[it].key ?: it }) { index ->
                     val option = filtered[index]
                     SettingsRadioRow(
                         title = option.label,
@@ -474,6 +478,43 @@ fun <T> SearchableChoiceSheet(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun MiruSwatchDot(
+    fill: Color,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    letterColor: Color? = null,
+) {
+    val borderColor = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.outline
+    }
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .compactTouchTarget(MiruSize.Control)
+            .size(MiruSize.Control)
+            .clip(CircleShape)
+            .background(fill)
+            .border(
+                if (selected) MiruSize.StrokeFocus else MiruSize.Stroke,
+                borderColor,
+                CircleShape,
+            )
+            .clickable(role = Role.RadioButton, onClick = onClick),
+    ) {
+        if (letterColor != null) {
+            Text(
+                text = "A",
+                style = MaterialTheme.typography.labelMedium,
+                color = letterColor,
+            )
         }
     }
 }

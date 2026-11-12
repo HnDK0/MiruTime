@@ -2,6 +2,8 @@ package dev.mirutime.uikit
 
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Shapes
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -101,6 +103,29 @@ object MiruSize {
 // Full-row targets use the row height directly; sliders use the thumb.
 fun compactTouchTarget(surface: Dp): Dp =
     maxOf(surface, (surface + 8.dp).coerceIn(32.dp, 48.dp))
+
+// Reserves the compact touch slot around a smaller visual surface without
+// stretching it: the child is measured with loose minimums and centered in a
+// slot of at least compactTouchTarget(surface). Place it before the visual
+// size modifiers.
+fun Modifier.compactTouchTarget(surface: Dp): Modifier = layout { measurable, constraints ->
+    val target = dev.mirutime.uikit.compactTouchTarget(surface).roundToPx()
+    // Only minimums below the slot are loosened: a caller fill (fillMaxWidth)
+    // larger than the slot still reaches the child.
+    val placeable = measurable.measure(
+        constraints.copy(
+            minWidth = if (constraints.minWidth > target) constraints.minWidth else 0,
+            minHeight = if (constraints.minHeight > target) constraints.minHeight else 0,
+        ),
+    )
+    val width = maxOf(placeable.width, target, constraints.minWidth)
+        .coerceAtMost(constraints.maxWidth)
+    val height = maxOf(placeable.height, target, constraints.minHeight)
+        .coerceAtMost(constraints.maxHeight)
+    layout(width, height) {
+        placeable.place((width - placeable.width) / 2, (height - placeable.height) / 2)
+    }
+}
 
 val MiruShapes = Shapes(
     extraSmall = RoundedCornerShape(MiruRadius.Cover),

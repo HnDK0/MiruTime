@@ -172,4 +172,19 @@ class MiruControlsContractTest {
         assertTrue(rows.contains("MiruTextField("))
         assertFalse(rows.contains("OutlinedTextField("))
     }
+
+    @Test
+    fun `compact touch modifier reserves a slot without stretching the visual surface`() {
+        val modifier = source("MiruShapes").substringAfter("fun Modifier.compactTouchTarget(")
+        // defaultMinSize/sizeIn would push the minimum into the child and
+        // inflate a 40dp swatch to 48dp visually.
+        assertFalse(modifier.contains("defaultMinSize("))
+        assertTrue(modifier.contains("layout {"))
+        assertTrue(modifier.contains("compactTouchTarget(surface)"))
+        assertTrue(modifier.contains("placeable.place("))
+        val swatch = source("SettingsRows").substringAfter("fun MiruSwatchDot(")
+        assertTrue(
+            swatch.indexOf(".compactTouchTarget(") in 0 until swatch.indexOf(".size(MiruSize.Control)"),
+        )
+    }
 }

@@ -311,18 +311,21 @@ fun SheetSection(
     // sentence-length label turns it into a shouting wall, so those sections
     // keep the text as authored while app-owned headers stay small caps.
     preserveCase: Boolean = false,
+    expanded: Boolean? = null,
+    onExpandedChange: ((Boolean) -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
+    var internalExpanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
+    val isExpanded = expanded ?: internalExpanded
     val requester = remember { BringIntoViewRequester() }
     val chevron by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
+        targetValue = if (isExpanded) 180f else 0f,
         animationSpec = tween(180),
         label = "sheet-section-chevron",
     )
     // Let the expanding body be laid out before scrolling to the section.
-    LaunchedEffect(expanded) {
-        if (!expanded) return@LaunchedEffect
+    LaunchedEffect(isExpanded) {
+        if (!isExpanded) return@LaunchedEffect
         withFrameNanos { }
         withFrameNanos { }
         try {
@@ -342,7 +345,14 @@ fun SheetSection(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { expanded = !expanded }
+                .clickable {
+                    val next = !isExpanded
+                    if (onExpandedChange != null) {
+                        onExpandedChange(next)
+                    } else {
+                        internalExpanded = next
+                    }
+                }
                 .heightIn(min = MiruSize.Touch)
                 .padding(vertical = MiruSpace.S),
             verticalAlignment = Alignment.CenterVertically,
@@ -373,7 +383,7 @@ fun SheetSection(
             )
         }
         AnimatedVisibility(
-            visible = expanded,
+            visible = isExpanded,
             enter = fadeIn(tween(160)) + expandVertically(tween(180)),
             exit = fadeOut(tween(120)) + shrinkVertically(tween(160)),
         ) {
