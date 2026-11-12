@@ -1791,4 +1791,10 @@
     <string name="opds_delete_confirm">Удалить</string>
     <string name="opds_sections_hint">Выберите раздел</string>
     <string name="opds_sort_label">Сортировка</string>
+    <string name="opds_reason_sample">только образец</string>
+    <string name="opds_reason_buy">требуется покупка</string>
+    <string name="opds_reason_borrow">требуется выдача</string>
+    <string name="opds_reason_subscribe">требуется подписка</string>
+    <string name="opds_reason_indirect">только через промежуточную страницу</string>
+    <string name="opds_reason_unsupported">формат не поддерживается</string>
 </resources>

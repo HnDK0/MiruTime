@@ -1770,4 +1770,10 @@
     <string name="opds_delete_confirm">Remove</string>
     <string name="opds_sections_hint">Pick a section</string>
     <string name="opds_sort_label">Sort</string>
+    <string name="opds_reason_sample">sample only</string>
+    <string name="opds_reason_buy">purchase required</string>
+    <string name="opds_reason_borrow">loan required</string>
+    <string name="opds_reason_subscribe">subscription required</string>
+    <string name="opds_reason_indirect">only behind a landing page</string>
+    <string name="opds_reason_unsupported">format not supported</string>
 </resources>

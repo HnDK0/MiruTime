@@ -152,7 +152,7 @@ fun continueChapterTitle(
  * metadata, so "Read again"/"Continue · Ch. N" must never be derived from an
  * empty list (which used to fall back to chapter 1).
  */
-enum class BookActionKind { LoadingChapters, NoChapters, Start, Continue, ReadAgain, AddToLibrary, OpenLibrary, OpenCatalog }
+enum class BookActionKind { LoadingChapters, NoChapters, Start, Continue, ReadAgain, AddToLibrary, OpenLibrary, OpenCatalog, NotDownloadable }
 
 /** One OPDS acquisition the detail page can add; [key] is stable per option. */
 data class BookDownloadOption(
@@ -173,7 +173,9 @@ data class BookActionState(
 ) {
     /** Loading and a chapterless book are honest dead ends, not Ch. 1. */
     val enabled: Boolean
-        get() = kind != BookActionKind.LoadingChapters && kind != BookActionKind.NoChapters
+        get() = kind != BookActionKind.LoadingChapters &&
+            kind != BookActionKind.NoChapters &&
+            kind != BookActionKind.NotDownloadable
 }
 
 fun bookActionState(

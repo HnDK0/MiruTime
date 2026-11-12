@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.BookmarkAdded
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -2922,6 +2923,16 @@ internal fun opdsSelectedOption(
 // a rail of formats when there is a real choice, one plain label otherwise —
 // and an option the server will not hand over keeps its reason under it.
 @Composable
+private fun opdsReasonRes(reason: String): Int = when {
+    reason.equals("Sample", true) -> R.string.opds_reason_sample
+    reason.equals("Buy", true) -> R.string.opds_reason_buy
+    reason.equals("Borrow", true) -> R.string.opds_reason_borrow
+    reason.equals("Subscribe", true) -> R.string.opds_reason_subscribe
+    reason.equals("IndirectOnly", true) -> R.string.opds_reason_indirect
+    else -> R.string.opds_reason_unsupported
+}
+
+@Composable
 private fun OpdsActions(
     action: BookActionKind,
     options: List<BookDownloadOption>,
@@ -2938,16 +2949,21 @@ private fun OpdsActions(
     val label = when (action) {
         BookActionKind.AddToLibrary -> stringResource(R.string.opds_add_to_library)
         BookActionKind.OpenLibrary -> stringResource(R.string.opds_open)
+        // Known entry with pdf/djvu/mobi only: say so instead of bouncing back
+        // to the catalogue, which looks like an endless loop.
+        BookActionKind.NotDownloadable -> stringResource(R.string.opds_no_format)
         else -> stringResource(R.string.opds_open_catalog)
     }
     val onClick = when (action) {
         BookActionKind.AddToLibrary -> onAdd
         BookActionKind.OpenLibrary -> onOpenLibrary
+        BookActionKind.NotDownloadable -> ({})
         else -> onOpenCatalog
     }
     val leadingIcon = when (action) {
         BookActionKind.AddToLibrary -> Icons.Filled.BookmarkBorder
         BookActionKind.OpenLibrary -> Icons.Filled.PlayArrow
+        BookActionKind.NotDownloadable -> Icons.Filled.Block
         else -> Icons.Filled.Public
     }
     Column {
@@ -2981,7 +2997,7 @@ private fun OpdsActions(
             options.forEach { option ->
                 val reason = option.unavailableReason ?: return@forEach
                 Text(
-                    text = "${option.format} · $reason",
+                    text = "${option.format} · ${stringResource(opdsReasonRes(reason))}",
                     style = MiruCardType.Meta,
                     color = extra.muted,
                 )
@@ -2997,7 +3013,7 @@ private fun OpdsActions(
             MiruButton(
                 onClick = onClick,
                 style = MiruButtonStyle.InversePrimary,
-                enabled = !adding,
+                enabled = !adding && action != BookActionKind.NotDownloadable,
                 busy = adding,
                 busyDescription = label,
                 leadingIcon = leadingIcon,
@@ -3089,6 +3105,7 @@ private fun ActionRow(
         BookActionKind.AddToLibrary -> stringResource(R.string.opds_add_to_library)
         BookActionKind.OpenLibrary -> stringResource(R.string.opds_open)
         BookActionKind.OpenCatalog -> stringResource(R.string.opds_open_catalog)
+        BookActionKind.NotDownloadable -> stringResource(R.string.opds_no_format)
     }
     Column {
         MiruButton(

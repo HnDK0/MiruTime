@@ -238,11 +238,13 @@ class PluginBookDataProvider(
             (opds?.resolveEntry(catalog.url, entryUrl) as? Outcome.Ok)?.let { options = it.value }
         }
         val downloadable = options.filter { it.isDownloadable }
-        val action = when {
-            membership != null -> BookActionKind.OpenLibrary
-            downloadable.isEmpty() -> BookActionKind.OpenCatalog
-            else -> BookActionKind.AddToLibrary
-        }
+        // OpenCatalog is only for an entry we know nothing about: bouncing back
+        // to the catalogue from a known pdf-only book reads as a loop.
+        val action = opdsBookAction(
+            hasMembership = membership != null,
+            hasDownloadable = downloadable.isNotEmpty(),
+            entryKnown = entry != null || options.isNotEmpty(),
+        )
         val built = BookDetails(
             bookUrl = bookKey,
             title = entry?.title?.takeIf { it.isNotBlank() } ?: entryUrl,
@@ -2162,4 +2164,16 @@ class PluginBookDataProvider(
         // One batch + one FTS rebuild, not a reindex per tag.
         repo.replaceBookTags(bookId, tags)
     }
+}
+
+/** OPDS detail CTA: open, add, or state that no readable file exists. */
+internal fun opdsBookAction(
+    hasMembership: Boolean,
+    hasDownloadable: Boolean,
+    entryKnown: Boolean,
+): BookActionKind = when {
+    hasMembership -> BookActionKind.OpenLibrary
+    hasDownloadable -> BookActionKind.AddToLibrary
+    entryKnown -> BookActionKind.NotDownloadable
+    else -> BookActionKind.OpenCatalog
 }
