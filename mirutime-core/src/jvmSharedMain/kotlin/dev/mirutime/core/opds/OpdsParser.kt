@@ -4,20 +4,16 @@ import dev.mirutime.core.api.Outcome
 import dev.mirutime.core.local.XmlElement
 import dev.mirutime.core.local.parseXmlDocument
 import java.net.URI
-import java.net.URLEncoder
-
-internal object OpdsQuery {
-    fun encode(raw: String): String = URLEncoder.encode(raw, "UTF-8")
-}
 
 /**
  * OPDS 1.x (Atom) reader. Tolerant by design: real feeds omit the opds profile,
  * lie about media types, use legacy cover relations and relative hrefs.
  *
- * Not handled on purpose: xml:base, PSE page streaming, OPDS 2 (JSON). An
- * indirect acquisition (page -> file hop) is parsed and exposed, but never
- * followed: such an option is listed as `IndirectOnly` and stays
- * non-downloadable — the app never resolves the hop itself.
+ * Not handled on purpose: xml:base, PSE page streaming. An indirect
+ * acquisition (page -> file hop) is parsed and exposed, but never followed:
+ * such an option is listed as `IndirectOnly` and stays non-downloadable — the
+ * app never resolves the hop itself. OPDS 2 (JSON) is [Opds2Parser]'s job; this
+ * reader only reports it as such for callers that bypass [OpdsFeeds].
  */
 object OpdsParser {
     const val ACQUISITION_REL = "http://opds-spec.org/acquisition"
@@ -72,7 +68,7 @@ object OpdsParser {
     }
 
     // Enough bytes to tell JSON from XML, BOM included.
-    private fun preview(bytes: ByteArray): String {
+    internal fun preview(bytes: ByteArray): String {
         val limit = minOf(bytes.size, 256)
         val start = if (limit >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() &&
             bytes[2] == 0xBF.toByte()
@@ -158,7 +154,8 @@ object OpdsParser {
         return cleaned
     }
 
-    private fun cleanDescription(raw: String?): String? {
+    /** OPDS 2 descriptions carry the same escaped markup, so both readers share it. */
+    internal fun cleanDescription(raw: String?): String? {
         val source = raw?.takeIf { it.isNotBlank() } ?: return null
         // Feed bodies are escaped HTML, sometimes escaped twice.
         var text = source

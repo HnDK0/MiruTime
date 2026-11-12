@@ -32,7 +32,7 @@ import kotlinx.coroutines.sync.withLock
  */
 internal class OpdsCatalogSession(
     private val fetchFeed: suspend (url: String?, includeLinks: Boolean?) -> Outcome<OpdsPage>,
-    /** Search template (still containing `{searchTerms}`) for the feed, or null. */
+    /** Search template (still carrying its `{…}` variable) for the feed, or null. */
     private val resolveSearchUrl: suspend (feedUrl: String) -> Outcome<String?>,
     private val mapBooks: (OpdsPage, Boolean) -> List<CatalogBook>,
     private val scope: CoroutineScope,

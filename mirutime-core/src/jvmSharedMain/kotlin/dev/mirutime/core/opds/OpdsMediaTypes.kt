@@ -19,6 +19,9 @@ object OpdsMediaTypes {
             "application/fb2", "text/fb2+xml",
             -> OpdsFormat.FB2
             "application/vnd.comicbook+zip", "application/x-cbz" -> OpdsFormat.CBZ
+            // OPDS 2 catalogue and publication documents are pages, not books,
+            // whatever their href happens to end with.
+            "application/opds+json", "application/opds-publication+json" -> null
             else -> byExtension(link.href)
         }
     }

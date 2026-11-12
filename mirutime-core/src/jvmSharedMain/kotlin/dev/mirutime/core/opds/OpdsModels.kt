@@ -73,6 +73,12 @@ data class OpdsEntry(
     val categories: List<String> = emptyList(),
     /** Every acquisition link of the entry, whatever its relation. */
     val acquisitionLinks: List<OpdsAcquisitionLink> = emptyList(),
+    /**
+     * The entry was listed under OPDS 2 `publications`: it is a book even when
+     * the catalogue offers no file we can open, so it must never render as a
+     * section link.
+     */
+    val isPublication: Boolean = false,
 ) {
     /** Downloads the catalog offers for this book, in feed order. */
     val acquisitions: List<OpdsLink>
@@ -110,23 +116,23 @@ data class OpdsFeed(
     val sortLinks: List<OpdsLink> = emptyList(),
     val searchLink: OpdsSearchLink? = null,
 ) {
-    /** Navigation feed = no entry offers a downloadable publication. */
+    /** Navigation feed = no entry is a publication. */
     val isNavigation: Boolean
-        get() = entries.none { it.acquisitions.isNotEmpty() }
+        get() = entries.none { it.isPublication || it.acquisitions.isNotEmpty() }
 
     val nextUrl: String?
         get() = links.firstOrNull { it.rel == "next" }?.href
 
-    /** Raw search template, usually containing `{searchTerms}`. */
+    /** Raw search template, usually containing `{searchTerms}` or `{?query}`. */
     val searchTemplate: String?
         get() = links
             .filter { it.rel == "search" }
             .map { it.href }
-            .firstOrNull { "{searchTerms}" in it }
+            .firstOrNull { OpdsSearchTemplate.isTemplated(it) }
             ?: links.firstOrNull { it.rel == "search" }?.href
 
     fun searchUrl(query: String): String? {
         val template = searchTemplate ?: return null
-        return template.replace("{searchTerms}", OpdsQuery.encode(query))
+        return OpdsSearchTemplate.substitute(template, query)
     }
 }

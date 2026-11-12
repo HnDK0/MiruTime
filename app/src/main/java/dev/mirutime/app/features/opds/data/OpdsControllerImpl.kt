@@ -17,17 +17,18 @@ import dev.mirutime.core.log.MiruLog
 import dev.mirutime.core.opds.OpdsEntry
 import dev.mirutime.core.opds.OpdsError
 import dev.mirutime.core.opds.OpdsFeed
+import dev.mirutime.core.opds.OpdsFeeds
 import dev.mirutime.core.opds.OpdsFileNormalizer
 import dev.mirutime.core.opds.OpdsFormat
 import dev.mirutime.core.opds.OpdsMediaTypes
 import dev.mirutime.core.opds.OpdsParser
+import dev.mirutime.core.opds.OpdsSearchTemplate
 import dev.mirutime.core.network.security.ResponseTooLargeException
 import dev.mirutime.data.library.LibraryRepository
 import dev.mirutime.data.library.OpdsCatalogEntity
 import dev.mirutime.data.library.OpdsEntryEntity
 import java.io.File
 import java.net.URI
-import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -167,7 +168,7 @@ class OpdsControllerImpl(
         if (fetch.status !in 200..299) return Outcome.Err(failureFor(fetch))
 
         val bytes = fetch.bytes ?: return Outcome.Err(OpdsFailure.Network(fetch.status))
-        return when (val parsed = OpdsParser.parse(bytes, fetch.finalUrl)) {
+        return when (val parsed = OpdsFeeds.parse(bytes, fetch.finalUrl)) {
             is Outcome.Ok -> parsed
             is Outcome.Err -> Outcome.Err(
                 when (parsed.error) {
@@ -182,7 +183,7 @@ class OpdsControllerImpl(
 
     override fun searchUrl(catalogId: String, page: OpdsPage, query: String): String? {
         val template = page.searchTemplate ?: return null
-        return template.replace("{searchTerms}", URLEncoder.encode(query, "UTF-8"))
+        return OpdsSearchTemplate.substitute(template, query)
     }
 
     override suspend fun text(catalogId: String, url: String): Outcome<String> {
@@ -491,17 +492,28 @@ class OpdsControllerImpl(
 
     private fun OpdsCatalogEntity.toCatalog() = OpdsCatalog(id, name, url, addedAt)
 
-    private fun OpdsFeed.toPage(): OpdsPage = OpdsPage(
-        url = baseUrl,
-        title = title.ifBlank { baseUrl },
-        links = entries.filter { it.acquisitions.isEmpty() }.mapNotNull { it.toLink() },
-        books = entries.filter { it.acquisitions.isNotEmpty() }.map { it.toBook() },
-        nextUrl = nextUrl,
-        searchTemplate = searchTemplate,
-        facets = facets,
-        sortLinks = sortLinks,
-        searchLink = searchLink,
-    )
+    private fun OpdsFeed.toPage(): OpdsPage {
+        // A feed with navigation links is a menu. An OPDS 2 catalogue may attach
+        // preview publications (groups) to it, and those must not turn the page
+        // into a book list: the session drops sections as soon as books exist.
+        val sections = entries.filter { !it.isPublication && it.acquisitions.isEmpty() }
+        val books = if (sections.isEmpty()) {
+            entries.filter { it.isPublication || it.acquisitions.isNotEmpty() }
+        } else {
+            entries.filter { !it.isPublication && it.acquisitions.isNotEmpty() }
+        }
+        return OpdsPage(
+            url = baseUrl,
+            title = title.ifBlank { baseUrl },
+            links = sections.mapNotNull { it.toLink() },
+            books = books.map { it.toBook() },
+            nextUrl = nextUrl,
+            searchTemplate = searchTemplate,
+            facets = facets,
+            sortLinks = sortLinks,
+            searchLink = searchLink,
+        )
+    }
 
     private fun OpdsEntry.toLink(): OpdsCatalogLink? {
         val chosen = links.firstOrNull { link ->

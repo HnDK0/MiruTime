@@ -45,4 +45,18 @@ class OpdsSearchTemplateTest {
             resolveUrlAgainst("https://c.test/opds/osd.xml", "https://other.test/search?q={searchTerms}"),
         )
     }
+
+    // OPDS 2 advertises search as an RFC 6570 template; the same substitution
+    // serves both dialects.
+    @Test
+    fun `an opds 2 query template fills the query parameter`() {
+        assertEquals(
+            "https://c.test/catalog?query=war+and+peace&type=search",
+            substituteSearchTerms("https://c.test/catalog{?query}&type=search", "war and peace"),
+        )
+        assertEquals(
+            "https://c.test/search?q=war+and+peace",
+            substituteSearchTerms("https://c.test/search?q={searchTerms}", "war and peace"),
+        )
+    }
 }

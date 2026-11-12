@@ -139,6 +139,32 @@ class OpdsCatalogSessionTest {
     }
 
     @Test
+    fun `search fills an OPDS 2 query template`() = runTest {
+        val harness = Harness(this)
+        harness.feeds[null] = feed(
+            url = "https://c.test/root",
+            books = listOf(book("One")),
+            search = OpdsSearchLink(
+                "https://c.test/catalog{?query}&type=search",
+                "application/opds+json",
+            ),
+        )
+        harness.searchTemplate = "https://c.test/catalog{?query}&type=search"
+        val results = "https://c.test/catalog?query=war+and+peace&type=search"
+        harness.feeds[results] = feed(url = results, books = listOf(book("War")))
+
+        harness.session.ensureLoaded()
+        advanceUntilIdle()
+        assertTrue(harness.session.state.value.searchAvailable)
+
+        harness.session.search("war and peace")
+        advanceUntilIdle()
+
+        assertEquals(results, harness.requests.last())
+        assertEquals(listOf("War"), harness.titles)
+    }
+
+    @Test
     fun `retry reloads the current feed rather than the root`() = runTest {
         val harness = Harness(this)
         harness.feeds[null] = feed(

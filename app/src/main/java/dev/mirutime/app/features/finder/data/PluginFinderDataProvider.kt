@@ -67,8 +67,8 @@ import dev.mirutime.core.api.PluginError
 import dev.mirutime.core.api.PluginSource
 import dev.mirutime.core.api.getOrNull
 import dev.mirutime.core.installer.IndexEntry
+import dev.mirutime.core.opds.OpdsSearchTemplate
 import java.net.URI
-import java.net.URLEncoder
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.cancellation.CancellationException
@@ -359,10 +359,10 @@ class PluginFinderDataProvider(
     }
 
     /**
-     * Search template for [feedUrl] (`{searchTerms}` left for the caller to
-     * fill), or null when the feed offers no usable search. A link pointing at
-     * an OpenSearch description is fetched and its Atom template resolved
-     * against that document's URL.
+     * Search template for [feedUrl] (its variable left for the caller to fill,
+     * `{searchTerms}` or OPDS 2's `{?query}`), or null when the feed offers no
+     * usable search. A link pointing at an OpenSearch description is fetched and
+     * its Atom template resolved against that document's URL.
      */
     suspend fun opdsSearchUrl(sourceId: String, feedUrl: String): Outcome<String?> {
         val catalogId = OpdsSources.catalogIdOf(sourceId)
@@ -374,7 +374,7 @@ class PluginFinderDataProvider(
                 is Outcome.Ok -> loaded.value
             }
         val link = feed.searchLink ?: return Outcome.Ok(null)
-        if (SEARCH_TERMS in link.href) return Outcome.Ok(link.href)
+        if (OpdsSearchTemplate.isTemplated(link.href)) return Outcome.Ok(link.href)
         if (link.type?.startsWith(OPENSEARCH_DESCRIPTION_TYPE) != true) return Outcome.Ok(null)
         val cacheKey = "$catalogId|${link.href}"
         opdsSearchTemplates[cacheKey]?.let { return Outcome.Ok(it) }
@@ -1374,7 +1374,7 @@ internal fun opdsPluginError(error: MiruError): PluginError = when (error) {
 }
 
 internal fun substituteSearchTerms(template: String, query: String): String =
-    template.replace(SEARCH_TERMS, URLEncoder.encode(query, "UTF-8"))
+    OpdsSearchTemplate.substitute(template, query)
 
 // OpenSearch 1.1 description: `<Url type="application/atom+xml" template="..."/>`.
 // Only attributes matter here, so this stays regex-based and dependency-free.

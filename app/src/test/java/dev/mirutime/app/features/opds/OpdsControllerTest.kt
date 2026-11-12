@@ -115,12 +115,68 @@ class OpdsControllerTest {
     }
 
     @Test
-    fun `OPDS 2 json body maps to JsonCatalog`() = runTest {
+    fun `OPDS 2 root opens its sections and keeps the search template`() = runTest {
         val transport = FakeTransport()
-        transport.respond(200, """{"metadata":{"title":"OPDS 2"}}""", "https://final.test/opds")
+        transport.respond(200, OPDS2_ROOT, "https://final.test/opds")
         val controller = controller(transport)
         val catalog = (controller.add("c", "https://final.test/opds", "", "") as Outcome.Ok).value
-        assertFailure(controller.page(catalog.id, null), OpdsFailure.JsonCatalog)
+
+        val page = (controller.page(catalog.id, null) as Outcome.Ok).value
+
+        assertEquals("Archive.org", page.title)
+        assertEquals(listOf("eBooks", "Audiobooks"), page.links.map { it.title })
+        // Group previews never replace the sections a catalogue root is for.
+        assertTrue(page.books.isEmpty())
+        assertEquals(
+            "https://archive.org/services/opds/catalog{?query}&type=search",
+            page.searchTemplate,
+        )
+        assertEquals(
+            "https://archive.org/services/opds/catalog?query=a+b&type=search",
+            controller.searchUrl(catalog.id, page, "a b"),
+        )
+        assertTrue(page.facets.isEmpty())
+    }
+
+    @Test
+    fun `OPDS 2 publications become book cards, pdf-only stays unavailable`() = runTest {
+        val transport = FakeTransport()
+        transport.respond(200, OPDS2_PUBLICATIONS, "https://final.test/opds/catalog")
+        val controller = controller(transport)
+        val catalog = (controller.add("c", "https://final.test/opds", "", "") as Outcome.Ok).value
+
+        val page = (controller.page(catalog.id, null) as Outcome.Ok).value
+
+        assertEquals(2, page.books.size)
+        assertEquals("https://final.test/opds/catalog?page=2", page.nextUrl)
+
+        val pdfOnly = page.books[0]
+        assertEquals("Kirkland, Thomas", pdfOnly.author)
+        assertEquals("https://final.test/opds/publications/1", pdfOnly.entryUrl)
+        assertNull(pdfOnly.format)
+        assertNull(pdfOnly.downloadUrl)
+        assertTrue(!pdfOnly.isDownloadable)
+        // The Readium manifest is a landing document, never an option.
+        assertTrue(pdfOnly.options.none { it.url.contains("action=webpub") })
+        assertTrue(pdfOnly.options.none { it.isDownloadable })
+
+        val epub = page.books[1]
+        assertEquals(OpdsFormat.EPUB, epub.format)
+        assertEquals("https://final.test/opds/books/2.epub", epub.downloadUrl)
+        assertTrue(epub.isDownloadable)
+
+        val facet = page.facets.single()
+        assertEquals("Browse by Language", facet.label)
+        assertEquals(listOf("English", "French"), facet.options.map { it.label })
+    }
+
+    @Test
+    fun `a JSON body that is not a catalogue is a typed NotAFeed`() = runTest {
+        val transport = FakeTransport()
+        transport.respond(200, """{"status":"error"}""", "https://final.test/opds")
+        val controller = controller(transport)
+        val catalog = (controller.add("c", "https://final.test/opds", "", "") as Outcome.Ok).value
+        assertFailure(controller.page(catalog.id, null), OpdsFailure.NotAFeed)
     }
 
     @Test
@@ -860,6 +916,54 @@ private val MULTI_PUBLICATION_FEED = """
               type="application/epub+zip"/>
       </entry>
     </feed>
+""".trimIndent()
+
+// OPDS 2 root, as archive.org serves it: navigation sections plus group previews.
+private val OPDS2_ROOT = """
+    {"@context":"https://readium.org/webpub-manifest/context.jsonld",
+     "metadata":{"title":"Archive.org"},
+     "links":[{"href":"https://archive.org/services/opds/catalog{?query}&type=search",
+               "type":"application/opds+json","rel":"search","templated":true}],
+     "navigation":[{"href":"https://final.test/opds?nav_key=page_ebooks","title":"eBooks",
+                    "type":"application/opds+json","rel":"collection"},
+                   {"href":"https://final.test/opds?nav_key=page_audiobooks","title":"Audiobooks",
+                    "type":"application/opds+json","rel":"collection"}],
+     "groups":[{"metadata":{"title":"eBooks Open Access","numberOfItems":3667231},
+                "publications":[{"metadata":{"title":"Preview","identifier":"https://final.test/details/p"},
+                                 "links":[{"href":"https://final.test/details/p&view=theater",
+                                           "type":"text/html",
+                                           "rel":"http://opds-spec.org/acquisition/sample"}]}]}]}
+""".trimIndent()
+
+private val OPDS2_PUBLICATIONS = """
+    {"@context":"https://readium.org/webpub-manifest/context.jsonld",
+     "metadata":{"title":"eBooks Open Access","numberOfItems":10000,"itemsPerPage":25,"currentPage":1},
+     "links":[{"href":"https://archive.org/services/opds/catalog{?query}&type=search",
+               "type":"application/opds+json","rel":"search","templated":true},
+              {"href":"https://final.test/opds/catalog?page=2","type":"application/opds+json","rel":"next"}],
+     "publications":[
+       {"metadata":{"title":"A reply to Mr. Maxwell's Answer",
+                    "identifier":"https://final.test/opds/publications/1",
+                    "language":["en"],
+                    "description":"2 unnumbered leaves",
+                    "author":[{"name":"Kirkland, Thomas"}]},
+        "links":[{"href":"https://final.test/details/1&view=theater","type":"text/html",
+                  "rel":"http://opds-spec.org/acquisition/sample"},
+                 {"href":"https://final.test/loans/loan?action=webpub&identifier=1",
+                  "type":"application/opds-publication+json","rel":"self","title":"Internet Archive"},
+                 {"href":"https://final.test/opds/book/1?glob_pattern=*pdf","type":"application/pdf",
+                  "rel":"http://opds-spec.org/acquisition/open-access",
+                  "properties":{"availability":{"state":"available"}}}],
+        "images":[{"href":"https://final.test/download/1/thumb.jpg","type":"image/jpeg","rel":"cover"}]},
+       {"metadata":{"title":"Open book","identifier":"https://final.test/opds/publications/2",
+                    "author":[{"name":"Ann Author"}]},
+        "links":[{"href":"https://final.test/opds/books/2.epub","type":"application/epub+zip",
+                  "rel":"http://opds-spec.org/acquisition/open-access"}]}],
+     "facets":[{"metadata":{"title":"Browse by Language"},"links":[
+       {"title":"English","href":"https://final.test/opds/catalog?facet_item=english",
+        "type":"application/opds+json"},
+       {"title":"French","href":"https://final.test/opds/catalog?facet_item=french",
+        "type":"application/opds+json","properties":{"numberOfItems":12}}]}]}
 """.trimIndent()
 
 // What the feed mapper would have written for MIXED_RELATIONS_FEED.
