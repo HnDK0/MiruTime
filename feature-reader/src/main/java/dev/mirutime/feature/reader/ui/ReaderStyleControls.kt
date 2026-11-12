@@ -50,6 +50,7 @@ import dev.mirutime.uikit.ChoiceOption
 import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
+import dev.mirutime.uikit.MiruSwatchDot
 import dev.mirutime.uikit.SearchableChoiceSheet
 import dev.mirutime.uikit.SettingsSliderRow
 import dev.mirutime.uikit.SettingsSwitchRow
@@ -77,13 +78,10 @@ fun ReaderStyleControls(
     hostedInSheet: Boolean = false,
     /** Keep the old asset until Save; Cancel deletes only the new preview asset. */
     deferAssetDeletion: Boolean = false,
+    onOpenFontPicker: (() -> Unit)? = null,
 ) {
     var fontSheet by remember { mutableStateOf(false) }
-    var fontOptions by remember { mutableStateOf(ReaderFontCatalog.legacyOptions()) }
     var resetConfirm by remember { mutableStateOf(false) }
-    LaunchedEffect(fontSheet) {
-        if (fontSheet) fontOptions = ReaderFontCatalog.load()
-    }
     val update: (ReaderStyle) -> Unit = { onStyleChange(it.sanitized()) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -151,7 +149,13 @@ fun ReaderStyleControls(
             SettingsValueRow(
                 title = stringResource(R.string.rd_font),
                 value = fontLabel(style.fontFamily),
-                onClick = { fontSheet = true },
+                onClick = {
+                    if (onOpenFontPicker != null) {
+                        onOpenFontPicker()
+                    } else {
+                        fontSheet = true
+                    }
+                },
                 horizontalPadding = rowPad,
             )
             MiruRowDivider()
@@ -414,14 +418,9 @@ fun ReaderStyleControls(
         }
     }
 
-    if (fontSheet) {
-        SearchableChoiceSheet(
-            title = stringResource(R.string.rd_font),
-            description = stringResource(R.string.rd_typography),
-            options = fontOptions.map { key ->
-                ChoiceOption(key, fontLabel(key))
-            },
-            selected = ReaderFontCatalog.canonicalKey(style.fontFamily),
+    if (fontSheet && onOpenFontPicker == null) {
+        ReaderFontChoiceSheet(
+            selectedFontFamily = style.fontFamily,
             onSelect = {
                 update(
                     style.copy(
@@ -432,8 +431,6 @@ fun ReaderStyleControls(
                 )
             },
             onClose = { fontSheet = false },
-            searchPlaceholder = stringResource(R.string.rd_font_search),
-            emptyLabel = stringResource(R.string.rd_font_search_empty),
         )
     }
     if (resetConfirm && !hostedInSheet) {
@@ -590,14 +587,14 @@ private fun TextColorSection(
             .fillMaxWidth()
             .padding(horizontal = horizontalPadding, vertical = MiruSpace.S),
     ) {
-        SwatchDot(
+        MiruSwatchDot(
             fill = MaterialTheme.colorScheme.surfaceContainerHighest,
             letterColor = MaterialTheme.colorScheme.onSurface,
             selected = selected == null,
             onClick = { onSelect(null) },
         )
         ReaderPalette.textColors.forEach { color ->
-            SwatchDot(
+            MiruSwatchDot(
                 fill = Color(color),
                 letterColor = null,
                 selected = selected == color,
@@ -632,7 +629,7 @@ private fun BackgroundSection(
     ) {
         ReaderPalette.backgrounds.forEach { background ->
             val auto = background.id == "auto"
-            SwatchDot(
+            MiruSwatchDot(
                 fill = if (auto) MaterialTheme.colorScheme.background else Color(background.backgroundArgb),
                 letterColor = if (auto) {
                     MaterialTheme.colorScheme.onBackground
@@ -647,34 +644,27 @@ private fun BackgroundSection(
 }
 
 @Composable
-private fun SwatchDot(
-    fill: Color,
-    letterColor: Color?,
-    selected: Boolean,
-    onClick: () -> Unit,
+internal fun ReaderFontChoiceSheet(
+    selectedFontFamily: String,
+    onSelect: (String) -> Unit,
+    onClose: () -> Unit,
 ) {
-    val borderColor = if (selected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.outline
+    var fontOptions by remember { mutableStateOf(ReaderFontCatalog.legacyOptions()) }
+    LaunchedEffect(Unit) {
+        fontOptions = ReaderFontCatalog.load()
     }
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(fill)
-            .border(if (selected) 2.dp else 1.dp, borderColor, CircleShape)
-            .clickable(role = Role.RadioButton, onClick = onClick),
-    ) {
-        if (letterColor != null) {
-            Text(
-                text = "A",
-                style = MaterialTheme.typography.labelMedium,
-                color = letterColor,
-            )
-        }
-    }
+    SearchableChoiceSheet(
+        title = stringResource(R.string.rd_font),
+        description = stringResource(R.string.rd_typography),
+        options = fontOptions.map { key ->
+            ChoiceOption(key, fontLabel(key))
+        },
+        selected = ReaderFontCatalog.canonicalKey(selectedFontFamily),
+        onSelect = onSelect,
+        onClose = onClose,
+        searchPlaceholder = stringResource(R.string.rd_font_search),
+        emptyLabel = stringResource(R.string.rd_font_search_empty),
+    )
 }
 
 @Composable

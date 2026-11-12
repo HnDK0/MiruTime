@@ -211,6 +211,40 @@ private fun ReaderStylePanel(
     assets: ReaderAssetPort,
 ) {
     var resetConfirm by remember { mutableStateOf(false) }
+    var fontSheetOpen by remember { mutableStateOf(false) }
+
+    if (resetConfirm) {
+        AppBottomSheet(
+            title = stringResource(R.string.rd_reset_confirm_title),
+            description = stringResource(R.string.rd_reset_confirm_desc),
+            onClose = { resetConfirm = false },
+            doneLabel = stringResource(R.string.rd_reset_style),
+            doneDanger = true,
+            closeLabel = stringResource(R.string.lib_cancel),
+            onDone = {
+                resetConfirm = false
+                onStylePreview(ReaderStyle.Default)
+            },
+            content = {},
+        )
+        return
+    }
+    if (fontSheetOpen) {
+        ReaderFontChoiceSheet(
+            selectedFontFamily = style.fontFamily,
+            onSelect = {
+                onStylePreview(
+                    style.copy(
+                        fontFamily = it,
+                        customFontPath = null,
+                        customFontName = null,
+                    ).sanitized(),
+                )
+            },
+            onClose = { fontSheetOpen = false },
+        )
+        return
+    }
 
     AppBottomSheet(
         title = stringResource(R.string.rd_style),
@@ -240,22 +274,7 @@ private fun ReaderStylePanel(
             assets = assets,
             hostedInSheet = true,
             deferAssetDeletion = true,
-        )
-    }
-
-    if (resetConfirm) {
-        AppBottomSheet(
-            title = stringResource(R.string.rd_reset_confirm_title),
-            description = stringResource(R.string.rd_reset_confirm_desc),
-            onClose = { resetConfirm = false },
-            doneLabel = stringResource(R.string.rd_reset_style),
-            doneDanger = true,
-            closeLabel = stringResource(R.string.lib_cancel),
-            onDone = {
-                resetConfirm = false
-                onStylePreview(ReaderStyle.Default)
-            },
-            content = {},
+            onOpenFontPicker = { fontSheetOpen = true },
         )
     }
 }
