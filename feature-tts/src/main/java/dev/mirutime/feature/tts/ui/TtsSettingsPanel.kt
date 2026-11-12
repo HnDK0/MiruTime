@@ -107,7 +107,9 @@ import dev.mirutime.uikit.MiruCompactTextField
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSlider
+import dev.mirutime.uikit.MiruSwatchDot
 import dev.mirutime.uikit.SettingsSwitchRow
+import dev.mirutime.uikit.SheetSection
 import dev.mirutime.feature.tts.TtsCapabilities
 import dev.mirutime.feature.tts.TtsMaxPitch
 import dev.mirutime.feature.tts.TtsMaxSpeed
@@ -419,6 +421,27 @@ fun TtsSettingsPanel(
         null -> Unit
     }
 
+    if (overlayPrompt) {
+        AppBottomSheet(
+            title = stringResource(R.string.rd_tts_overlay_permission_title),
+            description = stringResource(R.string.rd_tts_overlay_permission_desc),
+            onClose = { overlayPrompt = false },
+            doneLabel = stringResource(R.string.rd_tts_overlay_permission_open),
+            closeLabel = stringResource(R.string.rd_tts_cancel),
+            onDone = {
+                overlayPrompt = false
+                overlayPermissionLauncher.launch(
+                    Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:${context.packageName}"),
+                    ),
+                )
+            },
+            content = {},
+        )
+        return
+    }
+
     AppBottomSheet(
         title = stringResource(R.string.rd_tts_panel_title),
         description = stringResource(R.string.rd_tts_panel_desc),
@@ -584,13 +607,13 @@ fun TtsSettingsPanel(
         MiruRowDivider()
 
         if (capabilities.engines.size > 1) {
-            TtsAccordion(
+            SheetSection(
                 title = stringResource(R.string.rd_tts_engine),
-                value = capabilities.engines.firstOrNull {
+                summary = capabilities.engines.firstOrNull {
                     it.id == (settings.engineId ?: capabilities.currentEngineId)
                 }?.label.orEmpty(),
                 expanded = section == TtsSettingSection.Engine,
-                onToggle = {
+                onExpandedChange = {
                     section = if (section == TtsSettingSection.Engine) {
                         null
                     } else {
@@ -626,11 +649,11 @@ fun TtsSettingsPanel(
             }
         }
 
-        TtsAccordion(
+        SheetSection(
             title = stringResource(R.string.rd_tts_auto_next),
-            value = stringResource(if (settings.autoNextChapter) R.string.tts_state_on else R.string.tts_state_off),
+            summary = stringResource(if (settings.autoNextChapter) R.string.tts_state_on else R.string.tts_state_off),
             expanded = section == TtsSettingSection.AutoNext,
-            onToggle = {
+            onExpandedChange = {
                 section = if (section == TtsSettingSection.AutoNext) {
                     null
                 } else {
@@ -667,11 +690,11 @@ fun TtsSettingsPanel(
             )
         }
 
-        TtsAccordion(
+        SheetSection(
             title = stringResource(R.string.rd_tts_highlight),
-            value = stringResource(if (highlight) R.string.tts_state_on else R.string.tts_state_off),
+            summary = stringResource(if (highlight) R.string.tts_state_on else R.string.tts_state_off),
             expanded = section == TtsSettingSection.Highlight,
-            onToggle = {
+            onExpandedChange = {
                 section = if (section == TtsSettingSection.Highlight) {
                     null
                 } else {
@@ -700,8 +723,8 @@ fun TtsSettingsPanel(
                     .padding(top = MiruSpace.Xs),
             ) {
                 highlightColors.forEach { color ->
-                    TtsHighlightDot(
-                        color = color,
+                    MiruSwatchDot(
+                        fill = Color(color),
                         selected = highlightColor == color,
                         onClick = { onHighlightColorChange(color) },
                     )
@@ -709,11 +732,11 @@ fun TtsSettingsPanel(
             }
         }
 
-        TtsAccordion(
+        SheetSection(
             title = stringResource(R.string.rd_tts_test_reset),
-            value = "",
+            summary = "",
             expanded = section == TtsSettingSection.TestReset,
-            onToggle = {
+            onExpandedChange = {
                 section = if (section == TtsSettingSection.TestReset) {
                     null
                 } else {
@@ -734,26 +757,6 @@ fun TtsSettingsPanel(
                 }
             }
         }
-    }
-
-    if (overlayPrompt) {
-        AppBottomSheet(
-            title = stringResource(R.string.rd_tts_overlay_permission_title),
-            description = stringResource(R.string.rd_tts_overlay_permission_desc),
-            onClose = { overlayPrompt = false },
-            doneLabel = stringResource(R.string.rd_tts_overlay_permission_open),
-            closeLabel = stringResource(R.string.rd_tts_cancel),
-            onDone = {
-                overlayPrompt = false
-                overlayPermissionLauncher.launch(
-                    Intent(
-                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:${context.packageName}"),
-                    ),
-                )
-            },
-            content = {},
-        )
     }
 }
 
@@ -776,11 +779,11 @@ private fun TtsSleepTimerAccordion(
     } else {
         stringResource(R.string.rd_tts_sleep_timer_off)
     }
-    TtsAccordion(
+    SheetSection(
         title = stringResource(R.string.rd_tts_sleep_timer),
-        value = value,
+        summary = value,
         expanded = expanded,
-        onToggle = onToggle,
+        onExpandedChange = { onToggle() },
     ) {
         SleepTimerRow(
             label = stringResource(R.string.rd_tts_sleep_timer_minutes),
@@ -1543,139 +1546,6 @@ private fun TtsDeleteSavedVoiceSheet(
 }
 
 @Composable
-private fun TtsAccordion(
-    title: String,
-    value: String,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    content: @Composable () -> Unit,
-) {
-    val rotation by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
-        animationSpec = tween(180),
-        label = "tts-accordion-arrow",
-    )
-    Column(Modifier.fillMaxWidth()) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(role = Role.Button, onClick = onToggle)
-                .padding(vertical = 10.dp),
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.width(MiruSpace.S))
-            Text(
-                text = value,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Icon(
-                imageVector = Icons.Filled.ExpandMore,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .size(18.dp)
-                    .rotate(rotation),
-            )
-        }
-        AnimatedVisibility(
-            visible = expanded,
-            enter = fadeIn(tween(160)) + expandVertically(tween(180)),
-            exit = fadeOut(tween(120)) + shrinkVertically(tween(160)),
-        ) {
-            Column(Modifier.padding(bottom = MiruSpace.S)) { content() }
-        }
-    }
-    MiruRowDivider()
-}
-
-
-@Composable
-private fun TtsHighlightDot(
-    color: Long,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val borderColor = if (selected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.outline
-    }
-    Box(
-        modifier = Modifier
-            .minimumInteractiveComponentSize()
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(Color(color))
-            .border(if (selected) 2.dp else 1.dp, borderColor, CircleShape)
-            .clickable(role = Role.RadioButton, onClick = onClick),
-    )
-}
-
-@Composable
-private fun TtsStatusPill(status: TtsStatus, atEnd: Boolean) {
-    val color = when (status) {
-        TtsStatus.Playing, TtsStatus.Loading -> MaterialTheme.colorScheme.primary
-        TtsStatus.Paused -> MaterialTheme.colorScheme.tertiary
-        TtsStatus.Failed -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Surface(
-        shape = RoundedCornerShape(MiruRadius.Badge),
-        color = color.copy(alpha = 0.14f),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
-        ) {
-            Box(
-                Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(color),
-            )
-            Spacer(Modifier.width(5.dp))
-            Text(
-                text = ttsStatusLabel(status, atEnd),
-                style = MaterialTheme.typography.labelSmall,
-                color = color,
-            )
-        }
-    }
-}
-
-@Composable
-private fun StopTtsButton(onStop: () -> Unit, enabled: Boolean) {
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(44.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.9f))
-            .clickable(enabled = enabled, role = Role.Button, onClick = onStop),
-    ) {
-        Icon(
-            imageVector = Icons.Filled.Stop,
-            contentDescription = stringResource(R.string.rd_tts_stop),
-            tint = if (enabled) {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
-            },
-            modifier = Modifier.size(20.dp),
-        )
-    }
-}
-
-@Composable
 private fun TtsPlayPauseButton(
     playing: Boolean,
     onClick: () -> Unit,
@@ -1831,34 +1701,6 @@ private fun TtsInlineLoading(label: String) {
         )
     }
 }
-
-@Composable
-private fun ttsStatusLabel(status: TtsStatus, atEnd: Boolean): String = when (status) {
-    TtsStatus.Playing -> stringResource(R.string.rd_tts_playing)
-    TtsStatus.Loading -> stringResource(R.string.rd_tts_loading)
-    TtsStatus.Paused -> stringResource(R.string.rd_tts_paused)
-    TtsStatus.Failed -> stringResource(R.string.rd_tts_status_failed)
-    else -> if (atEnd) {
-        stringResource(R.string.rd_tts_finished_short)
-    } else {
-        stringResource(R.string.rd_tts_ready)
-    }
-}
-
-@Composable
-private fun ttsChapterLabel(chapterNumber: Int, chapterCount: Int): String =
-    if (chapterNumber > 0 && chapterCount > 0) {
-        stringResource(R.string.rd_tts_chapter_position_fmt, chapterNumber, chapterCount)
-    } else {
-        ""
-    }
-
-private fun ttsProgressPercentValue(sentenceNumber: Int, chunkCount: Int): Int =
-    if (chunkCount <= 0) {
-        0
-    } else {
-        ((sentenceNumber.toFloat() / chunkCount) * 100f).toInt().coerceIn(0, 100)
-    }
 
 @Composable
 private fun voiceMetaLabel(

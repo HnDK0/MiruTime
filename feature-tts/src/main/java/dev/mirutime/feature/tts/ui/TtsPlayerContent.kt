@@ -465,6 +465,7 @@ fun TtsPlayerContent(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .compactTouchTarget(MiruSpace.L)
                             .height(MiruSpace.L)
                             .clickable(role = Role.Button) { controlsHidden = false },
                     ) {
@@ -783,6 +784,7 @@ private fun FloatingChipRow(
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
                     modifier = Modifier
+                        .compactTouchTarget(MiruSize.ChipCompact)
                         .clip(RoundedCornerShape(MiruRadius.Badge))
                         .clickable(role = Role.RadioButton) { onSelect(id) },
                 ) {

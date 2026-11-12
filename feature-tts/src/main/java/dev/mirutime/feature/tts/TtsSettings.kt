@@ -1,5 +1,6 @@
 package dev.mirutime.feature.tts
 
+import androidx.compose.runtime.Immutable
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -32,6 +33,7 @@ val TtsFloatingParagraphModes = setOf("tts", "both", "inverse")
 val TtsFloatingGlowModes = setOf("auto", "on", "off")
 
 /** User defaults for the next utterance; a restored session still wins. */
+@Immutable
 data class TtsSettings(
     val voiceId: String? = null,
     val engineId: String? = null,
