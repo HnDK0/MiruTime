@@ -24,9 +24,13 @@ data class MangaReaderStyle(
     val colorFilter: MangaColorFilter = MangaColorFilter.None,
     val pagedNavigation: MangaPagedNavigation = MangaPagedNavigation.Both,
     val pageTransition: Boolean = true,
+    // Stored apart from the novel speed: the reader shows one pill, but manga
+    // and novels keep their own pace.
+    val autoScrollSpeed: Int = Autoscroll.DefaultSpeed,
 ) {
     fun sanitized(): MangaReaderStyle = copy(
         brightness = brightness.coerceIn(MinBrightness, MaxBrightness),
+        autoScrollSpeed = Autoscroll.sanitizeSpeed(autoScrollSpeed),
     )
 
     companion object {

@@ -1365,12 +1365,7 @@
     <string name="rd_autoscroll">Автоскролл</string>
     <string name="rd_autoscroll_speed">Скорость автоскролла</string>
     <string name="rd_autoscroll_speed_value">%1$d dp/с</string>
-    <string name="rd_autoscroll_hint">Коснитесь страницы, чтобы приостановить</string>
-    <string name="rd_autoscroll_hint_off">Прокручивает главу автоматически</string>
-    <string name="rd_autoscroll_menu_paused">Пауза, пока открыто меню</string>
-    <string name="rd_autoscroll_tts_paused">Пауза, пока идёт озвучивание</string>
     <string name="rd_autoscroll_feed_only">Доступно в режиме ленты</string>
-    <string name="rd_autoscroll_manga_off">Для манги недоступно</string>
     <string name="rd_autoscroll_end">Автоскролл остановлен в конце</string>
     <string name="rd_reading">Чтение</string>
     <string name="rd_fullscreen_desc">Скрывает системные панели, пока меню закрыто</string>

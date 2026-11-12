@@ -81,10 +81,6 @@ fun ReaderPanelHost(
     onSleepTimerMinutes: (Int) -> Unit = {},
     onSleepTimerChapters: (Int) -> Unit = {},
     onSleepTimerCancel: () -> Unit = {},
-    autoScrollEnabled: Boolean = false,
-    autoScrollSupported: Boolean = true,
-    autoScrollSubtitle: String? = null,
-    onAutoScrollChange: ((Boolean) -> Unit)? = null,
 ) {
     when (panel) {
         ReaderPanel.Style -> if (manga) {
@@ -115,10 +111,6 @@ fun ReaderPanelHost(
                 mode = mode,
                 onModeChange = onModeChange,
                 showMode = showMode,
-                autoScrollEnabled = autoScrollEnabled,
-                autoScrollSupported = autoScrollSupported,
-                autoScrollSubtitle = autoScrollSubtitle,
-                onAutoScrollChange = onAutoScrollChange,
             )
         }
         ReaderPanel.Translation -> if (!manga) {
@@ -289,10 +281,6 @@ private fun ReaderMorePanel(
     mode: ReaderMode,
     onModeChange: (ReaderMode) -> Unit,
     showMode: Boolean,
-    autoScrollEnabled: Boolean = false,
-    autoScrollSupported: Boolean = true,
-    autoScrollSubtitle: String? = null,
-    onAutoScrollChange: ((Boolean) -> Unit)? = null,
 ) {
     var draft by remember(style) { mutableStateOf(style) }
 
@@ -336,15 +324,13 @@ private fun ReaderMorePanel(
                 }
             }
         }
-        // Reading controls live here now, not in the Style sheet.
+        // Reading controls live here now, not in the Style sheet. The autoscroll
+        // speed row is the header pill's job in the reader.
         ReaderReadingControls(
             style = draft,
             onStyleChange = { draft = it },
             hostedInSheet = true,
-            autoScrollEnabled = autoScrollEnabled,
-            autoScrollSupported = autoScrollSupported,
-            autoScrollSubtitle = autoScrollSubtitle,
-            onAutoScrollChange = onAutoScrollChange,
+            showAutoScrollSpeed = false,
         )
         SheetSection(title = stringResource(R.string.rd_menu_opens_with)) {
             Row(

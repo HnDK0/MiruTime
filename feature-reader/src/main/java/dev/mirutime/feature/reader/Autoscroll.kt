@@ -1,10 +1,13 @@
 package dev.mirutime.feature.reader
 
 object Autoscroll {
-    const val MinSpeed = 10
+    const val MinSpeed = 5
     const val MaxSpeed = 200
-    const val Step = 10
+    const val Step = 5
     const val DefaultSpeed = 40
+
+    /** Intermediate slider stops for the whole speed range. */
+    const val SliderSteps = (MaxSpeed - MinSpeed) / Step - 1
 
     // A delayed frame (GC, a long layout pass) must not skip a paragraph.
     private const val MaxFrameMs = 100L

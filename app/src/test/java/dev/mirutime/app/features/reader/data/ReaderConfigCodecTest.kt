@@ -104,4 +104,22 @@ class ReaderConfigCodecTest {
         assertEquals(MangaPagedNavigation.Both, legacy.pagedNavigation)
         assertEquals(true, legacy.pageTransition)
     }
+
+    @Test
+    fun `manga autoscroll speed survives a round trip apart from the novel one`() {
+        val manga = MangaReaderStyle.Default.copy(autoScrollSpeed = 125).sanitized()
+        val novel = ReaderStyle.Default.copy(autoScrollSpeed = 40).sanitized()
+
+        val decodedManga = mangaStyleFromJson(mangaStyleToJson(manga))
+        val decodedNovel = styleFromJson(styleToJson(novel))
+
+        assertEquals(125, decodedManga.autoScrollSpeed)
+        assertEquals(40, decodedNovel.autoScrollSpeed)
+    }
+
+    @Test
+    fun `hostile manga autoscroll speed is clamped`() {
+        val decoded = mangaStyleFromJson(buildJsonObject { put("autoScrollSpeed", 1) })
+        assertEquals(5, decoded.autoScrollSpeed)
+    }
 }

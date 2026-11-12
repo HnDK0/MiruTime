@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import dev.mirutime.uikit.SettingsPage
 import dev.mirutime.app.di.ReaderGraph
 import dev.mirutime.feature.reader.ReaderStyle
+import dev.mirutime.feature.reader.ui.MangaReadingControls
 import dev.mirutime.feature.reader.ui.ReaderReadingControls
 import dev.mirutime.feature.reader.ui.ReaderStyleControls
 
@@ -32,6 +33,12 @@ fun ReaderSettingsScreen(
             ReaderReadingControls(
                 style = config.style,
                 onStyleChange = readerGraph.config::setStyle,
+            )
+        }
+        item(key = "reader-manga") {
+            MangaReadingControls(
+                mangaStyle = config.mangaStyle,
+                onMangaStyleChange = readerGraph.config::setMangaStyle,
             )
         }
     }

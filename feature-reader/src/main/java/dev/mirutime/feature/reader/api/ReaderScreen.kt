@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -57,15 +59,21 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil3.compose.AsyncImage
 import dev.mirutime.app.features.reader.document.BlockId
 import dev.mirutime.app.features.reader.document.BlockKind
+import dev.mirutime.app.features.reader.document.ReaderBlock
 import dev.mirutime.app.features.reader.document.ReaderDocument
 import dev.mirutime.app.features.reader.document.ReadingAnchor
 import dev.mirutime.app.features.reader.document.mangaPages
 import dev.mirutime.feature.reader.ChapterLoadStatus
+import dev.mirutime.feature.reader.MangaFeedPage
 import dev.mirutime.feature.reader.MangaFeedPlanner
+import dev.mirutime.feature.reader.MangaReaderStyle
+import dev.mirutime.feature.reader.MangaReadingMode
 import dev.mirutime.feature.reader.R
 import dev.mirutime.feature.reader.ReaderMode
 import dev.mirutime.feature.reader.ReaderPalette
+import dev.mirutime.feature.reader.ReaderStyle
 import dev.mirutime.feature.reader.SavedReading
+import dev.mirutime.feature.reader.session.ReaderSessionState
 import dev.mirutime.feature.reader.session.ReaderSessionStore
 import dev.mirutime.feature.reader.session.RestorePhase
 import dev.mirutime.feature.reader.session.TtsChapterCoordinator
@@ -219,6 +227,9 @@ fun ReaderScreen(
     // starting it is a deliberate per-chapter action.
     var autoScrollEnabled by rememberSaveable { mutableStateOf(false) }
     var autoScrollTouching by remember { mutableStateOf(false) }
+    // A speed drag holds the chrome open: hiding it would dispose the slider
+    // under the finger and leave the page moving.
+    var autoScrollPillDragging by remember { mutableStateOf(false) }
     var readerResumed by remember(lifecycleOwner) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
     }
@@ -308,23 +319,31 @@ fun ReaderScreen(
         }
     }
 
+    // A drag can end by the chrome closing under the finger (an outside tap
+    // with a second finger), where no change-finished callback arrives. Never
+    // leave the pill reported as dragging: it would disable auto-hide forever.
+    LaunchedEffect(chromeVisible) {
+        if (!chromeVisible) autoScrollPillDragging = false
+    }
     LaunchedEffect(
         chromeVisible,
         panel,
         ttsState.status,
         ttsSessionActive,
         mangaScrubber.dragging,
+        autoScrollPillDragging,
         retranslatingChapters,
     ) {
         // A failed speaker keeps its retry affordance visible instead of
         // disappearing with the rest of the auto-hidden chrome. Otherwise the
         // menu always auto-hides, independent of the floating-player option.
-        // A scrub in progress holds it open; hiding would dispose the slider
-        // and leave the reader thinking a drag is still active. A running
-        // re-translation keeps its busy icon reachable: the request can take
-        // minutes and the page shows no other progress.
+        // A scrub or a speed-slider drag holds it open; hiding would dispose
+        // the slider and leave the reader thinking a drag is still active. A
+        // running re-translation keeps its busy icon reachable: the request can
+        // take minutes and the page shows no other progress.
         if (chromeVisible && panel == null && ttsState.status != TtsStatus.Failed &&
-            !mangaScrubber.dragging && state.activeChapterIndex !in retranslatingChapters
+            !mangaScrubber.dragging && !autoScrollPillDragging &&
+            state.activeChapterIndex !in retranslatingChapters
         ) {
             delay(3500)
             chromeVisible = false
@@ -895,34 +914,39 @@ fun ReaderScreen(
             safeBottomDp = safeInsets.calculateBottomPadding().value,
         ).dp,
     )
-    val autoScrollSupported = !isManga && state.mode == ReaderMode.Feed
-    val autoScrollSubtitle = when {
-        isManga -> stringResource(R.string.rd_autoscroll_manga_off)
-        state.mode == ReaderMode.Paged -> stringResource(R.string.rd_autoscroll_feed_only)
-        autoScrollEnabled && ttsActive -> stringResource(R.string.rd_autoscroll_tts_paused)
-        autoScrollEnabled && chromeVisible -> stringResource(R.string.rd_autoscroll_menu_paused)
-        autoScrollEnabled -> stringResource(R.string.rd_autoscroll_hint)
-        else -> stringResource(R.string.rd_autoscroll_hint_off)
+    val mangaWebtoon = isManga && mangaStyle.mode == MangaReadingMode.Webtoon
+    val autoScrollSupported = if (isManga) mangaWebtoon else state.mode == ReaderMode.Feed
+    // Manga and novels keep their own pace; the pill is shared.
+    val autoScrollSpeed = if (isManga) mangaStyle.autoScrollSpeed else style.autoScrollSpeed
+    val autoScrollUnsupportedHint = if (isManga) {
+        stringResource(R.string.rd_autoscroll_webtoon_only)
+    } else {
+        stringResource(R.string.rd_autoscroll_feed_only)
     }
-    LaunchedEffect(state.mode, isManga) {
+    LaunchedEffect(state.mode, isManga, mangaStyle.mode) {
         if (!autoScrollSupported) autoScrollEnabled = false
     }
-    ReaderAutoscrollEffect(
-        enabled = autoScrollEnabled &&
-            autoScrollSupported &&
-            !autoScrollTouching &&
-            !chromeVisible &&
-            panel == null &&
-            !ttsActive &&
-            readerResumed &&
-            state.restorePhase == RestorePhase.Ready,
-        listState = listState,
-        speed = style.autoScrollSpeed,
-        onReachedEnd = {
-            autoScrollEnabled = false
-            Toast.makeText(context, R.string.rd_autoscroll_end, Toast.LENGTH_SHORT).show()
-        },
-    )
+    val onAutoScrollEnd: () -> Unit = {
+        autoScrollEnabled = false
+        Toast.makeText(context, R.string.rd_autoscroll_end, Toast.LENGTH_SHORT).show()
+    }
+    // One pause set for both readers; they only differ in who owns the list.
+    val autoScrollRunning = autoScrollEnabled &&
+        autoScrollSupported &&
+        !autoScrollTouching &&
+        !chromeVisible &&
+        panel == null &&
+        !ttsActive &&
+        readerResumed &&
+        state.restorePhase == RestorePhase.Ready
+    if (!isManga) {
+        ReaderAutoscrollEffect(
+            enabled = autoScrollRunning,
+            listState = listState,
+            speed = autoScrollSpeed,
+            onReachedEnd = onAutoScrollEnd,
+        )
+    }
 
     Box(
         modifier = Modifier
@@ -969,169 +993,92 @@ fun ReaderScreen(
                     }
                 },
         ) {
-            when {
-                state.restorePhase == RestorePhase.Restoring -> {
-                    CircularProgressIndicator(Modifier.align(Alignment.Center), color = textColor)
-                }
-                state.restorePhase == RestorePhase.Failed -> {
-                    val errorText = when (state.error) {
-                        "Book not found" -> stringResource(R.string.rd_book_not_found)
-                        "No chapters" -> stringResource(R.string.rd_no_chapters)
-                        "Could not load chapter", null, "" -> stringResource(R.string.rd_chapter_error)
-                        else -> state.error ?: stringResource(R.string.rd_chapter_error)
+            ReaderContent(
+                state = state,
+                activeDocument = activeDocument,
+                mangaPages = mangaPages,
+                mangaStyle = mangaStyle,
+                chapterPosition = chapterPosition,
+                chapterCount = chapterCount,
+                chromeVisible = chromeVisible,
+                chapterTitle = chapterTitle,
+                displayStyle = displayStyle,
+                contentPadding = contentPadding,
+                listState = listState,
+                labelFor = labelFor,
+                pagedTranslations = pagedTranslations,
+                visibleTranslations = visibleTranslations,
+                chapterTitles = if (mode?.chapterTitles == false) {
+                    emptyMap()
+                } else {
+                    metadataEntry?.chapterTitles.orEmpty()
+                },
+                parallel = graph.settings.parallelEnabled,
+                translationFirst = graph.settings.parallelOrder == "TRANSLATION_FIRST",
+                doubleTapMenu = style.doubleTapMenu,
+                ttsHighlight = ttsHighlight,
+                focusToken = ttsFocusToken,
+                textColor = textColor,
+                mangaScrubber = mangaScrubber,
+                nextChapterFirstPage = nextChapterFirstPage,
+                mangaFeed = mangaFeed,
+                mangaPageFile = mangaPageFile,
+                autoScrollRunning = autoScrollRunning,
+                autoScrollSpeed = autoScrollSpeed,
+                onAutoScrollEnd = onAutoScrollEnd,
+                onAnchor = onReaderAnchor,
+                onPrevChapter = {
+                    state.chapters.getOrNull(chapterPosition - 1)?.let {
+                        scope.launch { store.goToChapter(it.index, atEnd = true) }
                     }
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(MiruSpace.Xl),
-                        ) {
-                            Text(
-                                text = errorText,
-                                color = textColor,
-                            )
-                            Spacer(Modifier.height(MiruSpace.M))
-                            Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                                MiruButton(
-                                    onClick = onBack,
-                                    style = MiruButtonStyle.Secondary,
-                                ) {
-                                    Text(stringResource(R.string.header_back))
-                                }
-                                MiruButton(
-                                    onClick = {
-                                        scope.launch {
-                                            store.open(
-                                                bookUrl = bookUrl,
-                                                requestedChapterIndex = startChapterIndex,
-                                                restoreSaved = restoreSaved,
-                                                reopened = reopened,
-                                            )
-                                        }
-                                    },
-                                    style = MiruButtonStyle.Primary,
-                                ) {
-                                    Text(stringResource(R.string.rd_retry))
-                                }
-                            }
-                        }
+                },
+                onNextChapter = {
+                    state.chapters.getOrNull(chapterPosition + 1)?.let {
+                        scope.launch { store.goToChapter(it.index) }
                     }
-                }
-                activeDocument != null && mangaPages.isNotEmpty() -> ReaderMangaPager(
-                    document = activeDocument,
-                    pages = mangaPages,
-                    chapterIndex = state.activeChapterIndex,
-                    anchor = state.anchor,
-                    scrollToken = state.scrollToken,
-                    style = mangaStyle,
-                    chromeVisible = chromeVisible,
-                    canPrevChapter = chapterPosition > 0,
-                    canNextChapter = chapterPosition >= 0 && chapterPosition < chapterCount - 1,
-                    onPrevChapter = {
-                        state.chapters.getOrNull(chapterPosition - 1)?.let {
-                            scope.launch { store.goToChapter(it.index, atEnd = true) }
-                        }
-                    },
-                    onNextChapter = {
-                        state.chapters.getOrNull(chapterPosition + 1)?.let {
-                            scope.launch { store.goToChapter(it.index) }
-                        }
-                    },
-                    onAnchor = onReaderAnchor,
-                    onChapterFinished = { index ->
-                        scope.launch { store.onChapterFinished(index) }
-                    },
-                    onToggleChrome = { chromeVisible = !chromeVisible },
-                    scrubber = mangaScrubber,
-                    onVisiblePage = { mangaPage = it },
-                    nextChapterFirstPage = nextChapterFirstPage,
-                    onNearEnd = {
-                        // continue forward through the same deduplicated path the
-                        // novel feed uses; a Failed chapter is left to its Retry.
-                        state.chapters.getOrNull(chapterPosition + 1)?.let { next ->
-                            scope.launch { store.ensureNext(next.index) }
-                        }
-                    },
-                    pageFile = mangaPageFile,
-                    feed = mangaFeed,
-                    onVisibleChapter = { index, chapterAnchor ->
-                        scope.launch { store.adoptVisibleChapter(index, chapterAnchor) }
-                    },
-                    onNearStart = { index ->
-                        scope.launch { store.ensurePrevious(index) }
-                    },
-                    // A page that still fails after 2×/1s means the chapter's
-                    // CDN tokens rotated: reuse the session retry, no second
-                    // reader data path.
-                    onRefreshPages = {
-                        scope.launch { store.retry(state.activeChapterIndex) }
-                    },
-                )
-                state.mode == ReaderMode.Paged -> ReaderPaged(
-                    document = activeDocument,
-                    status = state.statuses[state.activeChapterIndex],
-                    style = displayStyle,
-                    contentPadding = contentPadding,
-                    chapterIndex = state.activeChapterIndex,
-                    chapterTitle = chapterTitle,
-                    translationLabel = labelFor(state.activeChapterIndex),
-                    translations = pagedTranslations,
-                    parallel = graph.settings.parallelEnabled,
-                    translationFirst = graph.settings.parallelOrder == "TRANSLATION_FIRST",
-                    ttsHighlight = ttsHighlight,
-                    focusToken = ttsFocusToken,
-                    doubleTapMenu = style.doubleTapMenu,
-                    anchor = state.anchor,
-                    scrollToken = state.scrollToken,
-                    canPrevChapter = chapterPosition > 0,
-                    canNextChapter = chapterPosition >= 0 && chapterPosition < chapterCount - 1,
-                    onPrevChapter = {
-                        state.chapters.getOrNull(chapterPosition - 1)?.let {
-                            scope.launch { store.goToChapter(it.index, atEnd = true) }
-                        }
-                    },
-                    onNextChapter = {
-                        state.chapters.getOrNull(chapterPosition + 1)?.let {
-                            scope.launch { store.goToChapter(it.index) }
-                        }
-                    },
-                    onRetry = { index -> scope.launch { store.retry(index) } },
-                    onOpenAuth = onOpenAuthUrl,
-                    onAnchor = onReaderAnchor,
-                    onChapterFinished = { index ->
-                        scope.launch { store.onChapterFinished(index) }
-                    },
-                    onToggleChrome = { chromeVisible = !chromeVisible },
-                    onSearchSelection = { text -> openWebSearch(context, text) },
-                )
-                else -> ReaderFeed(
-                    state = state,
-                    style = displayStyle,
-                    listState = listState,
-                    contentPadding = contentPadding,
-                    translationLabelFor = labelFor,
-                    translations = visibleTranslations,
-                    chapterTitles = if (mode?.chapterTitles == false) {
-                        emptyMap()
-                    } else {
-                        metadataEntry?.chapterTitles.orEmpty()
-                    },
-                    parallel = graph.settings.parallelEnabled,
-                    translationFirst = graph.settings.parallelOrder == "TRANSLATION_FIRST",
-                    ttsHighlight = ttsHighlight,
-                    focusToken = ttsFocusToken,
-                    onSearchSelection = { text -> openWebSearch(context, text) },
-                    onAnchor = onReaderAnchor,
-                    onRetry = { index -> scope.launch { store.retry(index) } },
-                    onLoadPrevious = { index -> scope.launch { store.ensurePrevious(index) } },
-                    onLoadNext = { index -> scope.launch { store.ensureNext(index) } },
-                    onOpenAuth = onOpenAuthUrl,
-                    onChapterFinished = { index -> scope.launch { store.onChapterFinished(index) } },
-                    onStartOver = {
-                        state.chapters.firstOrNull()?.let { scope.launch { store.goToChapter(it.index) } }
-                    },
-                    onUserScrollChange = { autoScrollTouching = it },
-                )
-        }
+                },
+                onChapterFinished = { index ->
+                    scope.launch { store.onChapterFinished(index) }
+                },
+                onToggleChrome = { chromeVisible = !chromeVisible },
+                onVisiblePage = { mangaPage = it },
+                onVisibleChapter = { index, chapterAnchor ->
+                    scope.launch { store.adoptVisibleChapter(index, chapterAnchor) }
+                },
+                onNearStart = { index ->
+                    scope.launch { store.ensurePrevious(index) }
+                },
+                onNearEnd = {
+                    // continue forward through the same deduplicated path the
+                    // novel feed uses; a Failed chapter is left to its Retry.
+                    state.chapters.getOrNull(chapterPosition + 1)?.let { next ->
+                        scope.launch { store.ensureNext(next.index) }
+                    }
+                },
+                onRefreshPages = {
+                    scope.launch { store.retry(state.activeChapterIndex) }
+                },
+                onRetry = { index -> scope.launch { store.retry(index) } },
+                onLoadPrevious = { index -> scope.launch { store.ensurePrevious(index) } },
+                onLoadNext = { index -> scope.launch { store.ensureNext(index) } },
+                onStartOver = {
+                    state.chapters.firstOrNull()?.let { scope.launch { store.goToChapter(it.index) } }
+                },
+                onOpenAuth = onOpenAuthUrl,
+                onSearchSelection = { text -> openWebSearch(context, text) },
+                onUserScrollChange = { autoScrollTouching = it },
+                onBack = onBack,
+                onRetryOpen = {
+                    scope.launch {
+                        store.open(
+                            bookUrl = bookUrl,
+                            requestedChapterIndex = startChapterIndex,
+                            restoreSaved = restoreSaved,
+                            reopened = reopened,
+                        )
+                    }
+                },
+            )
         }
 
         if (chromeVisible && state.restorePhase == RestorePhase.Ready) {
@@ -1263,6 +1210,32 @@ fun ReaderScreen(
                 },
                 onDismiss = { chromeVisible = false },
                 ttsMiniPlayer = ttsDockMini,
+                autoScrollEnabled = autoScrollEnabled,
+                autoScrollSupported = autoScrollSupported,
+                autoScrollUnsupportedHint = autoScrollUnsupportedHint,
+                autoScrollSpeed = autoScrollSpeed,
+                onAutoScrollToggle = {
+                    if (autoScrollEnabled) {
+                        autoScrollEnabled = false
+                    } else {
+                        autoScrollEnabled = true
+                        // The press came from the chrome: hide it so the page
+                        // is clear before the first frame scrolls.
+                        chromeVisible = false
+                    }
+                },
+                onAutoScrollSpeedChange = { speed ->
+                    if (isManga) {
+                        graph.config.setMangaStyle(
+                            mangaStyle.copy(autoScrollSpeed = speed).sanitized(),
+                        )
+                    } else {
+                        graph.config.setStyle(
+                            committedStyle.copy(autoScrollSpeed = speed).sanitized(),
+                        )
+                    }
+                },
+                onAutoScrollSpeedDragChange = { autoScrollPillDragging = it },
             )
         }
 
@@ -1376,16 +1349,183 @@ fun ReaderScreen(
         onHighlightColorChange = { color ->
             graph.config.setStyle(committedStyle.copy(highlightColor = color).sanitized())
         },
-        autoScrollEnabled = autoScrollEnabled,
-        autoScrollSupported = autoScrollSupported,
-        autoScrollSubtitle = autoScrollSubtitle,
-        onAutoScrollChange = { enabled ->
-            autoScrollEnabled = enabled
-            // The sheet is open, so the page is paused anyway; hiding the
-            // chrome now means scrolling starts as soon as the sheet closes.
-            if (enabled) chromeVisible = false
-        },
     )
+}
+
+/**
+ * The reading surface: restore states, the manga viewer and both text
+ * readers. It is an extension of the caller's Box so a restore spinner can
+ * centre itself. Split out of [ReaderScreen]: a single composable above the
+ * ART method limit (16384 code units) is never JIT-compiled.
+ */
+@Composable
+private fun BoxScope.ReaderContent(
+    state: ReaderSessionState,
+    activeDocument: ReaderDocument?,
+    mangaPages: List<ReaderBlock>,
+    mangaStyle: MangaReaderStyle,
+    chapterPosition: Int,
+    chapterCount: Int,
+    chromeVisible: Boolean,
+    chapterTitle: String,
+    displayStyle: ReaderStyle,
+    contentPadding: PaddingValues,
+    listState: LazyListState,
+    labelFor: (Int) -> String?,
+    pagedTranslations: Map<BlockId, String>,
+    visibleTranslations: Map<String, ReaderChapterTranslation>,
+    chapterTitles: Map<Int, String>,
+    parallel: Boolean,
+    translationFirst: Boolean,
+    doubleTapMenu: Boolean,
+    ttsHighlight: TtsHighlight?,
+    focusToken: Int,
+    textColor: Color,
+    mangaScrubber: MangaScrubberState,
+    nextChapterFirstPage: String?,
+    mangaFeed: List<MangaFeedPage>,
+    mangaPageFile: suspend (String) -> File?,
+    autoScrollRunning: Boolean,
+    autoScrollSpeed: Int,
+    onAutoScrollEnd: () -> Unit,
+    onAnchor: (ReadingAnchor, Int) -> Unit,
+    onPrevChapter: () -> Unit,
+    onNextChapter: () -> Unit,
+    onChapterFinished: (Int) -> Unit,
+    onToggleChrome: () -> Unit,
+    onVisiblePage: (Int) -> Unit,
+    onVisibleChapter: (Int, ReadingAnchor?) -> Unit,
+    onNearStart: (Int) -> Unit,
+    onNearEnd: () -> Unit,
+    onRefreshPages: () -> Unit,
+    onRetry: (Int) -> Unit,
+    onLoadPrevious: (Int) -> Unit,
+    onLoadNext: (Int) -> Unit,
+    onStartOver: () -> Unit,
+    onOpenAuth: (String) -> Unit,
+    onSearchSelection: (String) -> Unit,
+    onUserScrollChange: (Boolean) -> Unit,
+    onBack: () -> Unit,
+    onRetryOpen: () -> Unit,
+) {
+    when {
+        state.restorePhase == RestorePhase.Restoring -> {
+            CircularProgressIndicator(Modifier.align(Alignment.Center), color = textColor)
+        }
+        state.restorePhase == RestorePhase.Failed -> {
+            val errorText = when (state.error) {
+                "Book not found" -> stringResource(R.string.rd_book_not_found)
+                "No chapters" -> stringResource(R.string.rd_no_chapters)
+                "Could not load chapter", null, "" -> stringResource(R.string.rd_chapter_error)
+                else -> state.error ?: stringResource(R.string.rd_chapter_error)
+            }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(MiruSpace.Xl),
+                ) {
+                    Text(
+                        text = errorText,
+                        color = textColor,
+                    )
+                    Spacer(Modifier.height(MiruSpace.M))
+                    Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                        MiruButton(
+                            onClick = onBack,
+                            style = MiruButtonStyle.Secondary,
+                        ) {
+                            Text(stringResource(R.string.header_back))
+                        }
+                        MiruButton(
+                            onClick = onRetryOpen,
+                            style = MiruButtonStyle.Primary,
+                        ) {
+                            Text(stringResource(R.string.rd_retry))
+                        }
+                    }
+                }
+            }
+        }
+        activeDocument != null && mangaPages.isNotEmpty() -> ReaderMangaPager(
+            document = activeDocument,
+            pages = mangaPages,
+            chapterIndex = state.activeChapterIndex,
+            anchor = state.anchor,
+            scrollToken = state.scrollToken,
+            style = mangaStyle,
+            chromeVisible = chromeVisible,
+            canPrevChapter = chapterPosition > 0,
+            canNextChapter = chapterPosition >= 0 && chapterPosition < chapterCount - 1,
+            onPrevChapter = onPrevChapter,
+            onNextChapter = onNextChapter,
+            onAnchor = onAnchor,
+            onChapterFinished = onChapterFinished,
+            onToggleChrome = onToggleChrome,
+            scrubber = mangaScrubber,
+            onVisiblePage = onVisiblePage,
+            nextChapterFirstPage = nextChapterFirstPage,
+            onNearEnd = onNearEnd,
+            pageFile = mangaPageFile,
+            feed = mangaFeed,
+            onVisibleChapter = onVisibleChapter,
+            onNearStart = onNearStart,
+            // A page that still fails after 2x/1s means the chapter's CDN
+            // tokens rotated: reuse the session retry, no second data path.
+            onRefreshPages = onRefreshPages,
+            autoScroll = autoScrollRunning,
+            autoScrollSpeed = autoScrollSpeed,
+            onAutoScrollEnd = onAutoScrollEnd,
+        )
+        state.mode == ReaderMode.Paged -> ReaderPaged(
+            document = activeDocument,
+            status = state.statuses[state.activeChapterIndex],
+            style = displayStyle,
+            contentPadding = contentPadding,
+            chapterIndex = state.activeChapterIndex,
+            chapterTitle = chapterTitle,
+            translationLabel = labelFor(state.activeChapterIndex),
+            translations = pagedTranslations,
+            parallel = parallel,
+            translationFirst = translationFirst,
+            ttsHighlight = ttsHighlight,
+            focusToken = focusToken,
+            doubleTapMenu = doubleTapMenu,
+            anchor = state.anchor,
+            scrollToken = state.scrollToken,
+            canPrevChapter = chapterPosition > 0,
+            canNextChapter = chapterPosition >= 0 && chapterPosition < chapterCount - 1,
+            onPrevChapter = onPrevChapter,
+            onNextChapter = onNextChapter,
+            onRetry = onRetry,
+            onOpenAuth = onOpenAuth,
+            onAnchor = onAnchor,
+            onChapterFinished = onChapterFinished,
+            onToggleChrome = onToggleChrome,
+            onSearchSelection = onSearchSelection,
+        )
+        else -> ReaderFeed(
+            state = state,
+            style = displayStyle,
+            listState = listState,
+            contentPadding = contentPadding,
+            translationLabelFor = labelFor,
+            translations = visibleTranslations,
+            chapterTitles = chapterTitles,
+            parallel = parallel,
+            translationFirst = translationFirst,
+            ttsHighlight = ttsHighlight,
+            focusToken = focusToken,
+            onSearchSelection = onSearchSelection,
+            onAnchor = onAnchor,
+            onRetry = onRetry,
+            onLoadPrevious = onLoadPrevious,
+            onLoadNext = onLoadNext,
+            onOpenAuth = onOpenAuth,
+            onChapterFinished = onChapterFinished,
+            onStartOver = onStartOver,
+            onUserScrollChange = onUserScrollChange,
+        )
+    }
 }
 
 /**

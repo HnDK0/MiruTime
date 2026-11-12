@@ -15,7 +15,7 @@ class AutoscrollTest {
 
     @Test
     fun `speed is clamped`() {
-        assertEquals(10, Autoscroll.sanitizeSpeed(1))
+        assertEquals(5, Autoscroll.sanitizeSpeed(1))
         assertEquals(200, Autoscroll.sanitizeSpeed(999))
         assertEquals(40, Autoscroll.sanitizeSpeed(40))
     }

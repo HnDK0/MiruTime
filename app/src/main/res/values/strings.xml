@@ -1352,12 +1352,7 @@
     <string name="rd_autoscroll">Autoscroll</string>
     <string name="rd_autoscroll_speed">Autoscroll speed</string>
     <string name="rd_autoscroll_speed_value">%1$d dp/s</string>
-    <string name="rd_autoscroll_hint">Tap the page to pause</string>
-    <string name="rd_autoscroll_hint_off">Scrolls this chapter automatically</string>
-    <string name="rd_autoscroll_menu_paused">Paused while the menu is open</string>
-    <string name="rd_autoscroll_tts_paused">Paused while text-to-speech is active</string>
     <string name="rd_autoscroll_feed_only">Available in Feed mode</string>
-    <string name="rd_autoscroll_manga_off">Not available for manga</string>
     <string name="rd_autoscroll_end">Autoscroll stopped at the end</string>
     <string name="rd_reading">Reading</string>
     <string name="rd_fullscreen_desc">Hides the system bars while the menu is closed</string>

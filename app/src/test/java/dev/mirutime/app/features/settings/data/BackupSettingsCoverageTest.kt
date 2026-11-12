@@ -89,6 +89,7 @@ class BackupSettingsCoverageTest {
             colorFilter = MangaColorFilter.Sepia,
             pagedNavigation = MangaPagedNavigation.TapEdges,
             pageTransition = false,
+            autoScrollSpeed = 135,
         )
 
         assertEquals(style, mangaStyleFromJson(mangaStyleToJson(style)))

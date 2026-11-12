@@ -10,7 +10,10 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -54,6 +57,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -66,6 +70,7 @@ import dev.mirutime.app.features.reader.document.ReaderBlock
 import dev.mirutime.app.features.reader.document.ReaderDocument
 import dev.mirutime.app.features.reader.document.ReadingAnchor
 import dev.mirutime.app.features.reader.document.pageIndexForAnchor
+import dev.mirutime.feature.reader.Autoscroll
 import dev.mirutime.feature.reader.MangaColorFilter
 import dev.mirutime.feature.reader.MangaEndAction
 import dev.mirutime.feature.reader.MangaFeedPage
@@ -129,6 +134,10 @@ internal fun ReaderMangaPager(
     pageFile: suspend (String) -> File? = { null },
     // One chapter-pages refresh after a page exhausted its automatic retries.
     onRefreshPages: () -> Unit = {},
+    // Continuous-strip autoscroll; the caller owns the global pause conditions.
+    autoScroll: Boolean = false,
+    autoScrollSpeed: Int = Autoscroll.DefaultSpeed,
+    onAutoScrollEnd: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val initialPage = remember(document, pages, anchor) {
@@ -227,6 +236,9 @@ internal fun ReaderMangaPager(
                     onVisibleChapter = onVisibleChapter,
                     onNearStart = onNearStart,
                     onNearEnd = onNearEnd,
+                    autoScroll = autoScroll,
+                    autoScrollSpeed = autoScrollSpeed,
+                    onAutoScrollEnd = onAutoScrollEnd,
                 )
             }
 
@@ -571,6 +583,9 @@ private fun MangaWebtoonView(
     onVisibleChapter: (Int, ReadingAnchor?) -> Unit,
     onNearStart: (Int) -> Unit,
     onNearEnd: () -> Unit,
+    autoScroll: Boolean = false,
+    autoScrollSpeed: Int = Autoscroll.DefaultSpeed,
+    onAutoScrollEnd: () -> Unit = {},
 ) {
     // One endless strip: the active chapter plus any neighbour already loaded.
     val strip = remember(feed, document, pages) {
@@ -581,6 +596,16 @@ private fun MangaWebtoonView(
             strip.indexOfFirst { it.chapterUrl == anchor?.chapterUrl && it.page.id == anchor?.blockId }
                 .coerceAtLeast(0)
         },
+    )
+    // The strip pauses from touch-down until the gesture ends or the first
+    // movement cancels it (same reading as ReaderFeed): a tap or a long press
+    // must never fight a moving page.
+    var touching by remember { mutableStateOf(false) }
+    ReaderAutoscrollEffect(
+        enabled = autoScroll && !touching,
+        listState = listState,
+        speed = autoScrollSpeed,
+        onReachedEnd = onAutoScrollEnd,
     )
     val activeChapter by rememberUpdatedState(chapterIndex)
     val currentOnVisiblePage by rememberUpdatedState(onVisiblePage)
@@ -711,6 +736,17 @@ private fun MangaWebtoonView(
                             null
                         },
                     )
+                }
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(
+                            requireUnconsumed = false,
+                            pass = PointerEventPass.Initial,
+                        )
+                        touching = true
+                        waitForUpOrCancellation(pass = PointerEventPass.Initial)
+                        touching = false
+                    }
                 },
             contentPadding = PaddingValues(
                 start = horizontalPadding,

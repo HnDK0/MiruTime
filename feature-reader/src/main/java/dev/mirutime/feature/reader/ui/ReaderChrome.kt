@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.FormatSize
 import androidx.compose.material.icons.outlined.MoreVert
@@ -56,6 +58,7 @@ import dev.mirutime.uikit.MiruSplitProgress
 import dev.mirutime.uikit.miruCardElevation
 import dev.mirutime.uikit.miruCardSurface
 import dev.mirutime.uikit.miruPlateBorder
+import dev.mirutime.feature.reader.Autoscroll
 import dev.mirutime.feature.reader.R
 import dev.mirutime.feature.tts.R as TtsR
 import dev.mirutime.feature.tts.TtsSleepTimerState
@@ -94,6 +97,15 @@ internal fun ReaderChrome(
     retranslateEnabled: Boolean = false,
     retranslateBusy: Boolean = false,
     onRetranslate: () -> Unit = {},
+    // Session autoscroll switch in the header; its speed pill sits right under
+    // the plate and only while this chrome is open.
+    autoScrollEnabled: Boolean = false,
+    autoScrollSupported: Boolean = true,
+    autoScrollUnsupportedHint: String? = null,
+    autoScrollSpeed: Int = Autoscroll.DefaultSpeed,
+    onAutoScrollToggle: () -> Unit = {},
+    onAutoScrollSpeedChange: (Int) -> Unit = {},
+    onAutoScrollSpeedDragChange: (Boolean) -> Unit = {},
     onTts: () -> Unit,
     onTranslation: () -> Unit,
     onStyle: () -> Unit,
@@ -124,59 +136,91 @@ internal fun ReaderChrome(
                     }
                 },
         )
-        MiruPlateHeader(
-            title = title,
-            subtitle = bookTitle,
-            subtitleFirst = true,
-            titleMaxLines = 1,
-            navigation = {
-                ReaderIconButton(
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.header_back),
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    onClick = onBack,
-                )
-            },
-            actions = {
-                if (showRetranslate) {
-                    ReaderIconButton(
-                        icon = Icons.Outlined.Autorenew,
-                        contentDescription = stringResource(R.string.rd_retranslate),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        enabled = retranslateEnabled && !retranslateBusy,
-                        busy = retranslateBusy,
-                        busyDescription = stringResource(R.string.rd_translation_loading),
-                        onClick = onRetranslate,
-                    )
-                }
-                ReaderIconButton(
-                    icon = Icons.Outlined.Public,
-                    contentDescription = stringResource(R.string.rd_open_web),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    enabled = canOpenWebView,
-                    onClick = onOpenWebView,
-                )
-            },
-            progress = {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(2.dp)
-                        .background(MaterialTheme.colorScheme.outlineVariant),
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth((chapterPercent / 100f).coerceIn(0f, 1f))
-                            .height(2.dp)
-                            .background(MaterialTheme.colorScheme.primary),
-                    )
-                }
-            },
-            modifier = Modifier
+        Column(
+            Modifier
                 .zIndex(1f)
                 .align(Alignment.TopCenter)
                 .fillMaxWidth(),
-        )
+        ) {
+            MiruPlateHeader(
+                title = title,
+                subtitle = bookTitle,
+                subtitleFirst = true,
+                titleMaxLines = 1,
+                navigation = {
+                    ReaderIconButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.header_back),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        onClick = onBack,
+                    )
+                },
+                actions = {
+                    ReaderIconButton(
+                        icon = if (autoScrollEnabled) Icons.Filled.Pause else Icons.Filled.ArrowDownward,
+                        contentDescription = when {
+                            !autoScrollSupported -> autoScrollUnsupportedHint
+                                ?: stringResource(R.string.rd_autoscroll)
+                            autoScrollEnabled -> stringResource(R.string.rd_autoscroll_stop)
+                            else -> stringResource(R.string.rd_autoscroll)
+                        },
+                        tint = if (autoScrollEnabled) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        selected = autoScrollEnabled,
+                        enabled = autoScrollSupported,
+                        onClick = onAutoScrollToggle,
+                    )
+                    if (showRetranslate) {
+                        ReaderIconButton(
+                            icon = Icons.Outlined.Autorenew,
+                            contentDescription = stringResource(R.string.rd_retranslate),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            enabled = retranslateEnabled && !retranslateBusy,
+                            busy = retranslateBusy,
+                            busyDescription = stringResource(R.string.rd_translation_loading),
+                            onClick = onRetranslate,
+                        )
+                    }
+                    ReaderIconButton(
+                        icon = Icons.Outlined.Public,
+                        contentDescription = stringResource(R.string.rd_open_web),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        enabled = canOpenWebView,
+                        onClick = onOpenWebView,
+                    )
+                },
+                progress = {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(MaterialTheme.colorScheme.outlineVariant),
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth((chapterPercent / 100f).coerceIn(0f, 1f))
+                                .height(2.dp)
+                                .background(MaterialTheme.colorScheme.primary),
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (autoScrollEnabled && autoScrollSupported) {
+                Spacer(Modifier.height(MiruSpace.Xs))
+                ReaderAutoscrollPill(
+                    speed = autoScrollSpeed,
+                    onSpeedChange = onAutoScrollSpeedChange,
+                    onDragChange = onAutoScrollSpeedDragChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = MiruSpace.M),
+                )
+            }
+        }
 
         Surface(
             modifier = Modifier
@@ -333,6 +377,7 @@ internal fun ReaderIconButton(
     tint: Color,
     onClick: () -> Unit,
     enabled: Boolean = true,
+    selected: Boolean? = null,
     busy: Boolean = false,
     busyDescription: String? = null,
 ) {
@@ -341,6 +386,7 @@ internal fun ReaderIconButton(
         contentDescription = contentDescription,
         onClick = onClick,
         enabled = enabled,
+        selected = selected,
         tint = tint,
         busy = busy,
         busyDescription = busyDescription,

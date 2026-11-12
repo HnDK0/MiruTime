@@ -33,14 +33,14 @@ class ReaderStyleTest {
             paragraphSpacingDp = -5,
             marginStartDp = 500,
             letterSpacingEm = 2f,
-            autoScrollSpeed = 7,
+            autoScrollSpeed = 1,
         ).sanitized()
         assertEquals(32, s.fontSizeSp)
         assertEquals(2.5f, s.lineHeight, 0.001f)
         assertEquals(0, s.paragraphSpacingDp)
         assertEquals(100, s.marginStartDp)
         assertEquals(0.3f, s.letterSpacingEm, 0.001f)
-        assertEquals(10, s.autoScrollSpeed)
+        assertEquals(5, s.autoScrollSpeed)
     }
 
     @Test

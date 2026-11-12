@@ -20,6 +20,7 @@ class MangaReaderStyleTest {
         assertEquals(MangaColorFilter.None, s.colorFilter)
         assertEquals(MangaPagedNavigation.Both, s.pagedNavigation)
         assertTrue(s.pageTransition)
+        assertEquals(Autoscroll.DefaultSpeed, s.autoScrollSpeed)
     }
 
     @Test
@@ -35,6 +36,13 @@ class MangaReaderStyleTest {
         assertEquals(0.2f, MangaReaderStyle(brightness = -2f).sanitized().brightness, 0.001f)
         assertEquals(1f, MangaReaderStyle(brightness = 9f).sanitized().brightness, 0.001f)
         assertEquals(0.55f, MangaReaderStyle(brightness = 0.55f).sanitized().brightness, 0.001f)
+    }
+
+    @Test
+    fun `sanitize clamps the autoscroll speed to the shared range`() {
+        assertEquals(5, MangaReaderStyle(autoScrollSpeed = 1).sanitized().autoScrollSpeed)
+        assertEquals(200, MangaReaderStyle(autoScrollSpeed = 999).sanitized().autoScrollSpeed)
+        assertEquals(115, MangaReaderStyle(autoScrollSpeed = 115).sanitized().autoScrollSpeed)
     }
 
     @Test

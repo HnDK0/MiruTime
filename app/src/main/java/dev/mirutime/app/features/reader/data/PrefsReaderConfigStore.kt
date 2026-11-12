@@ -142,6 +142,7 @@ internal fun mangaStyleToJson(style: MangaReaderStyle): JsonObject = buildJsonOb
     put("colorFilter", style.colorFilter.name)
     put("pagedNavigation", style.pagedNavigation.name)
     put("pageTransition", style.pageTransition)
+    put("autoScrollSpeed", style.autoScrollSpeed)
 }
 
 internal fun mangaStyleFromJson(json: JsonObject): MangaReaderStyle {
@@ -167,6 +168,7 @@ internal fun mangaStyleFromJson(json: JsonObject): MangaReaderStyle {
             json.str("pagedNavigation", defaults.pagedNavigation.name),
         ),
         pageTransition = json.bool("pageTransition", defaults.pageTransition),
+        autoScrollSpeed = json.int("autoScrollSpeed", defaults.autoScrollSpeed),
     ).sanitized()
 }
 

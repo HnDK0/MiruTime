@@ -58,6 +58,7 @@ import dev.mirutime.uikit.SettingsValueRow
 import dev.mirutime.uikit.SheetSection
 import dev.mirutime.feature.reader.api.ReaderAssetPort
 import dev.mirutime.feature.reader.Autoscroll
+import dev.mirutime.feature.reader.MangaReaderStyle
 import dev.mirutime.feature.reader.ReaderPalette
 import dev.mirutime.feature.reader.ReaderStyle
 import java.util.Locale
@@ -450,17 +451,15 @@ fun ReaderStyleControls(
     }
 }
 
-// Reading controls belong to the reader More sheet and Settings → Reader, not
-// to the reader Style sheet. Both hosts share this one implementation.
+// Reading controls are shared by the reader More sheet and Settings → Reader.
+// The reader hides the speed row: it runs autoscroll from the header toggle and
+// its floating pill, so a second slider there would only duplicate it.
 @Composable
 fun ReaderReadingControls(
     style: ReaderStyle,
     onStyleChange: (ReaderStyle) -> Unit,
     hostedInSheet: Boolean = false,
-    autoScrollEnabled: Boolean = false,
-    autoScrollSupported: Boolean = true,
-    autoScrollSubtitle: String? = null,
-    onAutoScrollChange: ((Boolean) -> Unit)? = null,
+    showAutoScrollSpeed: Boolean = true,
 ) {
     val update: (ReaderStyle) -> Unit = { onStyleChange(it.sanitized()) }
     val rowPad = if (hostedInSheet) 0.dp else MiruSpace.L
@@ -514,35 +513,53 @@ fun ReaderReadingControls(
                 label = stringResource(R.string.rd_tap_two),
             )
         }
-        if (onAutoScrollChange != null) {
+        if (showAutoScrollSpeed) {
             MiruRowDivider()
-            SettingsSwitchRow(
-                title = stringResource(R.string.rd_autoscroll),
-                subtitle = autoScrollSubtitle,
-                checked = autoScrollEnabled,
-                enabled = autoScrollSupported,
-                onChange = onAutoScrollChange,
-                horizontalPadding = rowPad,
-            )
-        }
-        if (autoScrollSupported) {
-            MiruRowDivider()
-            SettingsSliderRow(
-                title = stringResource(R.string.rd_autoscroll_speed),
-                valueText = stringResource(
-                    R.string.rd_autoscroll_speed_value,
-                    style.autoScrollSpeed,
-                ),
-                value = style.autoScrollSpeed.toFloat(),
-                range = Autoscroll.MinSpeed.toFloat()..Autoscroll.MaxSpeed.toFloat(),
-                steps = (Autoscroll.MaxSpeed - Autoscroll.MinSpeed) / Autoscroll.Step - 1,
-                onChange = {
-                    update(style.copy(autoScrollSpeed = it.roundToInt()))
-                },
+            AutoScrollSpeedRow(
+                speed = style.autoScrollSpeed,
+                onChange = { update(style.copy(autoScrollSpeed = it)) },
                 horizontalPadding = rowPad,
             )
         }
     }
+}
+
+// Manga stores its autoscroll speed apart from the novel one, so Settings
+// exposes it as its own section. The reader keeps a single speed pill.
+@Composable
+fun MangaReadingControls(
+    mangaStyle: MangaReaderStyle,
+    onMangaStyleChange: (MangaReaderStyle) -> Unit,
+) {
+    ReaderStyleSection(
+        title = stringResource(R.string.rd_manga_settings),
+        inSheet = false,
+    ) {
+        AutoScrollSpeedRow(
+            speed = mangaStyle.autoScrollSpeed,
+            onChange = {
+                onMangaStyleChange(mangaStyle.copy(autoScrollSpeed = it).sanitized())
+            },
+            horizontalPadding = MiruSpace.L,
+        )
+    }
+}
+
+@Composable
+private fun AutoScrollSpeedRow(
+    speed: Int,
+    onChange: (Int) -> Unit,
+    horizontalPadding: Dp,
+) {
+    SettingsSliderRow(
+        title = stringResource(R.string.rd_autoscroll_speed),
+        valueText = stringResource(R.string.rd_autoscroll_speed_value, speed),
+        value = speed.toFloat(),
+        range = Autoscroll.MinSpeed.toFloat()..Autoscroll.MaxSpeed.toFloat(),
+        steps = Autoscroll.SliderSteps,
+        onChange = { onChange(it.roundToInt()) },
+        horizontalPadding = horizontalPadding,
+    )
 }
 
 // One Style block in both hosts: a titled card on the Settings page, a flat
