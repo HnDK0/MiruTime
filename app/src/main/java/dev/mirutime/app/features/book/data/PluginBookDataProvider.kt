@@ -159,6 +159,9 @@ class PluginBookDataProvider(
     private val latestMembershipTarget = ConcurrentHashMap<String, Boolean>()
     // One enrichment pass per book at a time: chapters + cover + tags.
     private val enrichmentJobs = ConcurrentHashMap<String, Job>()
+    // One background page-cache pass per chapter: a reopen while images are
+    // still downloading reuses the running job instead of fetching twice.
+    private val pageCacheJobs = ConcurrentHashMap<String, Job>()
     // Direct SAF file identity (URI + mtime + size hash). A changed file drops
     // the provider chapter cache before the page asks for the new list.
     private val localSafHashes = ConcurrentHashMap<String, String>()
@@ -848,7 +851,7 @@ class PluginBookDataProvider(
         bookUrl: String,
     ): MembershipResult {
         val key = "local-file|$bookUrl"
-        val lock = membershipLocks.getOrPut(key) { Mutex() }
+        val lock = membershipLocks.computeIfAbsent(key) { Mutex() }
         return try {
             lock.withLock {
                 if (latestMembershipTarget[bookUrl] != true) {
@@ -866,7 +869,7 @@ class PluginBookDataProvider(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            MiruLog.w("library", "Direct local add failed for $bookUrl", e)
+            MiruLog.w("library", "Direct local add failed for ${MiruLog.idHash(bookUrl)} (${e.javaClass.simpleName})")
             MembershipResult(success = false)
         }
     }
@@ -882,7 +885,7 @@ class PluginBookDataProvider(
             return removeFromLibrary(repo, bookUrl)
         }
         val key = "local-file|$bookUrl"
-        val lock = membershipLocks.getOrPut(key) { Mutex() }
+        val lock = membershipLocks.computeIfAbsent(key) { Mutex() }
         return lock.withLock {
             if (latestMembershipTarget[bookUrl] != false) {
                 return@withLock MembershipResult(success = true, superseded = true)
@@ -1456,7 +1459,20 @@ class PluginBookDataProvider(
                 val urls = parsed.pageUrls.mapNotNull { raw -> resolveCoverUrl(raw, chapterUrl) }
                 // Page CDNs often require the chapter URL as Referer.
                 graph.registerCoverReferers(sourceId, urls, chapterUrl)
-                cacheChapterPages(bookUrl, chapterIndex, urls, sourceId)
+                val cacheKey = "$bookUrl#$chapterIndex"
+                pageCacheJobs.compute(cacheKey) { _, running ->
+                    if (running?.isActive == true) {
+                        running
+                    } else {
+                        scope.launch {
+                            try {
+                                cacheChapterPages(bookUrl, chapterIndex, urls, sourceId)
+                            } finally {
+                                pageCacheJobs.remove(cacheKey)
+                            }
+                        }
+                    }
+                }
                 urls
             }
             else -> emptyList()
@@ -1787,7 +1803,7 @@ class PluginBookDataProvider(
         val localBook = LocalBookProvider.isLocalBook(realUrl(bookUrl))
         val key = (PluginBookIndex.sourceForBook(bookUrl) ?: if (localBook) "local" else "unknown") +
             "|" + bookUrl
-        val lock = membershipLocks.getOrPut(key) { Mutex() }
+        val lock = membershipLocks.computeIfAbsent(key) { Mutex() }
 
         // Ensure the row exists first. Cached page metadata keeps this a local
         // write; only a never-opened book falls back to the plugin network call,
@@ -1851,7 +1867,7 @@ class PluginBookDataProvider(
         val localBook = LocalBookProvider.isLocalBook(realUrl(bookUrl))
         val key = (PluginBookIndex.sourceForBook(bookUrl) ?: if (localBook) "local" else "unknown") +
             "|" + bookUrl
-        val lock = membershipLocks.getOrPut(key) { Mutex() }
+        val lock = membershipLocks.computeIfAbsent(key) { Mutex() }
         return lock.withLock {
             if (latestMembershipTarget[bookUrl] != false) {
                 return@withLock MembershipResult(success = true, superseded = true)
@@ -1868,7 +1884,7 @@ class PluginBookDataProvider(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                MiruLog.w("library", "Library remove failed for $bookUrl", e)
+                MiruLog.w("library", "Library remove failed for ${MiruLog.idHash(bookUrl)} (${e.javaClass.simpleName})")
                 return@withLock MembershipResult(false)
             }
             // Keep page metadata for a fast re-add, but report the real flag;
@@ -1887,7 +1903,7 @@ class PluginBookDataProvider(
                 }
                 cleanupFailed = cleanup.isFailure
                 cleanup.exceptionOrNull()?.let {
-                    MiruLog.w("library", "Removed $bookUrl but file cleanup failed", it)
+                    MiruLog.w("library", "Removed ${MiruLog.idHash(bookUrl)} but file cleanup failed (${it.javaClass.simpleName})")
                 }
             }
             try {
@@ -1916,7 +1932,7 @@ class PluginBookDataProvider(
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        MiruLog.w("library", "Library enrichment failed for $bookUrl", e)
+                        MiruLog.w("library", "Library enrichment failed for ${MiruLog.idHash(bookUrl)} (${e.javaClass.simpleName})")
                     } finally {
                         enrichmentJobs.remove(bookUrl)
                     }
@@ -2015,209 +2031,4 @@ class PluginBookDataProvider(
         // One batch + one FTS rebuild, not a reindex per tag.
         repo.replaceBookTags(bookId, tags)
     }
-}
-
-// Status overlay is pure so tests cover the mapping without Room/Compose.
-internal fun applyChapterStatus(
-    chapters: List<BookChapter>,
-    snapshot: ChapterStatusSnapshot?,
-    offline: Boolean,
-): List<BookChapter> {
-    val lastIndex = snapshot?.lastIndex ?: chapters.maxOfOrNull { it.index }
-    return chapters.map { chapter ->
-        val url = chapter.url
-        val downloaded = !offline && snapshot != null && (
-            snapshot.downloadedIndexes.contains(chapter.index) ||
-                (url != null && snapshot.downloadedUrls.contains(url))
-            )
-        val translated = snapshot != null && (
-            snapshot.translatedIndexes.contains(chapter.index) ||
-                (url != null && snapshot.translatedUrls.contains(url))
-            )
-        val download = snapshot?.downloads?.get(chapter.index)
-        val downloadState = download?.state?.takeUnless { it == "COMPLETED" }
-        chapter.copy(
-            isRead = snapshot?.readIndexes?.contains(chapter.index) == true,
-            downloaded = downloaded,
-            translated = translated,
-            isLast = chapter.index == lastIndex,
-            offline = offline,
-            isLastRead = snapshot != null && (
-                snapshot.lastReadIndex == chapter.index ||
-                    (url != null && snapshot.lastReadUrl == url)
-                ),
-            downloading = downloadState == "QUEUED" || downloadState == "RUNNING",
-            downloadState = downloadState,
-            downloadProgress = download?.progress?.toFloat() ?: 0f,
-            translationState = snapshot?.translationStates?.get(chapter.index)
-                ?.takeUnless { it.equals("COMPLETE", ignoreCase = true) },
-            sizeBytes = snapshot?.sizeBytes?.get(chapter.index) ?: 0L,
-        )
-    }
-}
-
-// Existing content came from the local file/DB, not the plugin network.
-internal fun chapterSourceFor(bookUrl: String, safCacheHit: Boolean): ChapterSource = when {
-    isLocalFileBook(bookKeyUrl(bookUrl)) ->
-        if (safCacheHit) ChapterSource.LOCAL_SAF_CACHE else ChapterSource.LOCAL_SAF_DIRECT
-    LocalBookProvider.isLocalBook(bookKeyUrl(bookUrl)) -> ChapterSource.IMPORTED_DB_BODY
-    else -> ChapterSource.PLUGIN_NETWORK
-}
-
-internal fun chapterSourceLogLine(
-    source: ChapterSource,
-    chapterId: Long?,
-    chapterIndex: Int?,
-    bytes: Int,
-    elapsedMs: Long,
-    cacheHit: Boolean,
-): String = "source=$source chapterId=${chapterId ?: "-"} " +
-    "chapterIndex=${chapterIndex ?: "-"} bytes=$bytes elapsedMs=$elapsedMs " +
-    "cache=${if (cacheHit) "hit" else "miss"}"
-
-private fun shortHash(value: String): String =
-    MessageDigest.getInstance("SHA-256")
-        .digest(value.encodeToByteArray())
-        .joinToString("") { "%02x".format(it) }
-        .take(16)
-
-// Chapter identity is the resolved URL. Providers occasionally repeat a URL
-// (mirrors/fixtures); keep the first occurrence and reindex contiguously so
-// chapterUrls, seeds and the reader feed all agree.
-internal fun dedupeChapters(chapters: List<BookChapter>): List<BookChapter> {
-    val seen = HashSet<String>()
-    return chapters
-        .filter { chapter ->
-            val url = chapter.url
-            url.isNullOrBlank() || seen.add(url)
-        }
-        .mapIndexed { position, chapter -> chapter.copy(index = position + 1) }
-}
-
-// Book-page view of an imported local book's cover. Kept as a tiny seam so
-// the EPUB/FB2/CBZ/folder precedence is testable without Room/plugin graph.
-internal suspend fun localBookCoverUrl(
-    row: BookEntity?,
-    coverStore: BookCoverStore?,
-): String? = row?.let { resolveStoredCover(coverStore, it.bookId, it.coverUrl) }
-
-// Plugin ratings arrive as a raw string: a bare number on the 0-5 scale, or
-// "value/max" (the corpus sends "9.5/10" — see chikari.lua). Scale a "/max"
-// form onto 0-5 and clamp; anything unparseable is 0 ("no rating").
-internal fun parsePluginRating(raw: String?): Float {
-    val parts = raw?.trim().orEmpty().split('/')
-    val value = parts.firstOrNull()?.toFloatOrNull() ?: return 0f
-    if (!value.isFinite()) return 0f
-    val max = parts.getOrNull(1)?.toFloatOrNull()?.takeIf { it.isFinite() && it > 0f }
-    val scaled = if (max != null) value / max * 5f else value
-    return scaled.coerceIn(0f, 5f)
-}
-
-// BookMeta.status is free text; "ongoing" -> ongoing, "complete"/"finished"
-// -> completed, anything else (or absent) is treated as completed.
-internal fun pluginStatusOngoing(status: String?): Boolean {
-    val text = status?.lowercase().orEmpty()
-    return when {
-        text.contains("ongoing") -> true
-        text.contains("complete") || text.contains("finished") -> false
-        else -> false
-    }
-}
-
-private fun hostOf(url: String): String =
-    runCatching { URI(url).host.orEmpty() }.getOrNull().orEmpty()
-
-// shortcut: 1s TTL, replace with a status Flow if downloads need push updates.
-private const val ChapterStatusTtlMs = 1_000L
-
-// A repaired cover is re-resolved at most once per this window per book: a
-// dead hitomi token must not turn a grid of failed covers into a request storm.
-private const val COVER_REFRESH_COOLDOWN_MS = 10 * 60 * 1000L
-
-private data class CachedChapterStatus(
-    val snapshot: ChapterStatusSnapshot?,
-    val generation: Long,
-    val at: Long,
-)
-
-// A route passes an opaque (installId + URL) key; the database stores the real
-// URL only. Kept top-level and pure so the row builder is unit-testable.
-internal fun persistedBookUrl(bookKey: String): String = bookKeyUrl(bookKey)
-
-private fun normalizeTag(raw: String): String =
-    raw.trim().lowercase().replace(Regex("\\s+"), " ")
-
-private fun extraTags(extras: Map<String, String>): List<String> =
-    extras.entries
-        .filter { it.key.lowercase() in setOf("tags", "tag", "warnings", "warning") }
-        .flatMap { it.value.split(',', ';', '\n') }
-        .map { it.trim() }
-        .filter { it.isNotEmpty() }
-
-private fun extraAltTitles(extras: Map<String, String>): String {
-    val values = listOfNotNull(
-        extras["altTitle"] ?: extras["altTitles"],
-        extras["alternativeTitle"],
-    ).flatMap { it.split('|', '\n') }.map { it.trim() }.filter { it.isNotEmpty() }
-    return buildJsonArray { values.forEach { add(it) } }.toString()
-}
-
-private fun extraAuthors(author: String?): String =
-    buildJsonArray {
-        author?.takeIf { it.isNotBlank() }?.let { add(it) }
-    }.toString()
-
-// Pure-JVM author JSON for the direct row (no Android JSONObject stub in tests).
-private fun jsonAuthors(author: String): String {
-    val value = author.trim()
-    if (value.isEmpty()) return "[]"
-    val escaped = value.replace("\\", "\\\\").replace("\"", "\\\"")
-    return "[\"$escaped\"]"
-}
-
-private fun normalizeStatus(raw: String?): String {
-    val value = raw?.trim()?.lowercase().orEmpty()
-    return when {
-        value.isBlank() -> "UNKNOWN"
-        "ongoing" in value || "progress" in value -> "ONGOING"
-        "complete" in value || "finished" in value -> "COMPLETED"
-        "hiatus" in value || "hold" in value || "pause" in value -> "HIATUS"
-        else -> "UNKNOWN"
-    }
-}
-
-// Manga plugins return page URLs, not HTML. Absolute URLs are required before
-// the reader parser can keep stable image refs; a blank/unresolvable list is
-// an empty chapter, not a text page.
-internal fun resolveMangaPageUrls(pageUrls: List<String>, chapterUrl: String): List<String> =
-    pageUrls.mapNotNull { resolveCoverUrl(it, chapterUrl) }
-
-internal fun mangaPagesHtml(pageUrls: List<String>, chapterUrl: String): String? =
-    mangaPagesHtml(resolveMangaPageUrls(pageUrls, chapterUrl))
-
-internal fun mangaPagesHtml(pageUrls: List<String>): String? {
-    if (pageUrls.isEmpty()) return null
-    return pageUrls.joinToString(separator = "") { url ->
-        // The reader parser turns &amp; back into &; a raw quote would end the
-        // attribute early, so percent-encode it instead of inventing an entity.
-        val safe = url.replace("\"", "%22").replace("&", "&amp;")
-        "<p><img src=\"$safe\"/></p>"
-    }
-}
-
-private fun metadataHash(meta: BookMeta): String {
-    val payload = listOf(
-        meta.title,
-        meta.coverUrl.orEmpty(),
-        meta.description.orEmpty(),
-        meta.genres.joinToString("\u0001"),
-        meta.rating.orEmpty(),
-        meta.status.orEmpty(),
-        meta.lastUpdated.orEmpty(),
-        meta.author.orEmpty(),
-        meta.extras.entries.sortedBy { it.key }.joinToString("\u0001") { "${it.key}=${it.value}" },
-    ).joinToString("\u0000")
-    return MessageDigest.getInstance("SHA-256")
-        .digest(payload.encodeToByteArray())
-        .joinToString("") { "%02x".format(it) }
 }
