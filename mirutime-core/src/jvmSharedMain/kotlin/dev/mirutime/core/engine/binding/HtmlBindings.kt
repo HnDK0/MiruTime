@@ -28,8 +28,25 @@ object HtmlBindings {
 
     fun install(session: LuaSession) {
         val globals = session.globals
+        var cachedRawHtml: String? = null
+        var cachedDoc: com.fleeksoft.ksoup.nodes.Document? = null
+        fun parseCached(raw: String): com.fleeksoft.ksoup.nodes.Document {
+            if (raw === cachedRawHtml || (raw.length == cachedRawHtml?.length && raw == cachedRawHtml)) {
+                cachedDoc?.let { return it }
+            }
+            val parsed = Ksoup.parse(raw, "")
+            if (raw.length <= 512_000) {
+                cachedRawHtml = raw
+                cachedDoc = parsed
+            }
+            return parsed
+        }
+        fun invalidateCache() {
+            cachedRawHtml = null
+            cachedDoc = null
+        }
         // One metatable for every element table this session builds.
-        val tables = ElementTables()
+        val tables = ElementTables(onMutate = ::invalidateCache)
         // NoveLA LuaSourceLoader.kt:1025-1035: html_parse(html) → { text, html,
         // title, body } (1-arg); body is an element table, so select/text keep
         // working on `parsed.body`. Any failure → nil.
@@ -57,7 +74,7 @@ object HtmlBindings {
                 val matches = if (element != null) {
                     element.select(selector)
                 } else {
-                    Ksoup.parse(el.checkjstring(), "").select(selector)
+                    parseCached(el.checkjstring()).select(selector)
                 }
                 LuaTable().also { table ->
                     matches.forEachIndexed { i, child -> table.set(i + 1, tables.from(child)) }
@@ -73,7 +90,7 @@ object HtmlBindings {
                 val first = if (element != null) {
                     element.selectFirst(selector)
                 } else {
-                    Ksoup.parse(el.checkjstring(), "").selectFirst(selector)
+                    parseCached(el.checkjstring()).selectFirst(selector)
                 }
                 if (first != null) tables.from(first) else LuaValue.NIL
             } catch (_: Exception) {
@@ -104,7 +121,7 @@ object HtmlBindings {
                     val target = if (element != null) {
                         element.selectFirst(selector)
                     } else {
-                        Ksoup.parse(source.checkjstring(), "").selectFirst(selector)
+                        parseCached(source.checkjstring()).selectFirst(selector)
                     }
                     LuaValue.valueOf(target?.attr(attrName) ?: "")
                 } else {
@@ -144,10 +161,12 @@ object HtmlBindings {
                 val element = elementFromValue(arg1)
                 if (element != null && args.narg() == 1) {
                     // MiruTime single-argument form: detach the element.
+                    invalidateCache()
                     element.remove()
                     LuaValue.NIL
                 } else if (element != null) {
                     // NoveLA cleaner: drop matching selectors, return html.
+                    invalidateCache()
                     for (i in 2..args.narg()) {
                         val selector = args.arg(i).optjstring(null) ?: continue
                         if (selector.isNotBlank()) element.select(selector).remove()
@@ -250,7 +269,9 @@ object HtmlBindings {
 // Per-session rather than process-wide: this is a live LuaTable and LuaJ
 // tables are not thread-safe; the saving is the same either way, the sharing
 // risk is not taken.
-internal class ElementTables {
+internal class ElementTables(
+    private val onMutate: () -> Unit = {},
+) {
     private val metatable: LuaTable =
         LuaTable().also { mt ->
             mt.set(LuaValue.INDEX, object : TwoArgFunction() {
@@ -300,6 +321,7 @@ internal class ElementTables {
                         }
                         "remove" -> object : ZeroArgFunction() {
                             override fun call(): LuaValue {
+                                onMutate()
                                 el.remove()
                                 return LuaValue.NIL
                             }
