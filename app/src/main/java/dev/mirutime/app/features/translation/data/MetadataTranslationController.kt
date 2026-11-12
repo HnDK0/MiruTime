@@ -90,6 +90,7 @@ class MetadataTranslationController(
     private val _state = MutableStateFlow<Map<String, BookMetadataTranslation>>(emptyMap())
     val state: StateFlow<Map<String, BookMetadataTranslation>> = _state.asStateFlow()
 
+    private val queueLock = Any()
     private val pending = ArrayDeque<Pending>()
     private val queued = mutableSetOf<String>()
     // Insertion-ordered bookUrls for the small in-memory cache.
@@ -248,9 +249,11 @@ class MetadataTranslationController(
     }
 
     private fun enqueue(job: Pending) {
-        if (!queued.add(job.key)) return
-        pending.addLast(job)
-        startWorker()
+        synchronized(queueLock) {
+            if (!queued.add(job.key)) return
+            pending.addLast(job)
+            startWorkerLocked()
+        }
         MiruLog.event(
             "translation",
             "metadata-submit",
@@ -260,11 +263,17 @@ class MetadataTranslationController(
         )
     }
 
-    private fun startWorker() {
+    // An empty queue retires the worker under the same lock enqueue uses, so
+    // a job added while the worker is exiting always starts a new one.
+    private fun nextPending(): Pending? = synchronized(queueLock) {
+        pending.removeFirstOrNull().also { if (it == null) worker = null }
+    }
+
+    private fun startWorkerLocked() {
         if (worker?.isActive == true) return
         worker = scope.launch {
-            while (pending.isNotEmpty()) {
-                val job = pending.removeFirst()
+            while (true) {
+                val job = nextPending() ?: break
                 try {
                     val outcome = try {
                         engine.translateMetadata(job.request)
@@ -306,7 +315,9 @@ class MetadataTranslationController(
                         }
                     }
                 } finally {
-                    queued -= job.key
+                    synchronized(queueLock) {
+                        queued -= job.key
+                    }
                 }
             }
         }
@@ -314,54 +325,55 @@ class MetadataTranslationController(
 
     private suspend fun apply(job: Pending, result: MetadataTranslationResult) {
         val translations = result.translations
-        // One writer on the main dispatcher: build the next map in place and
-        // publish it once, so a batch of 50 titles cannot be interleaved with
-        // another state write and lose entries.
-        var next = _state.value
-        val applied = ArrayList<String>(job.books.size)
-        job.books.forEachIndexed { index, bookUrl ->
-            val entry = next[bookUrl] ?: return@forEachIndexed
-            // Only the request this entry is still waiting for may paint it.
-            if (entry.config != job.config || entry.pendingKey != job.key) return@forEachIndexed
-            next = when (job.kind) {
-                MetadataKind.Titles -> {
-                    val title = translations[index]?.takeIf { it.isNotBlank() }
-                    next + (bookUrl to entry.copy(
-                        status = MetadataTranslationStatus.Ready,
-                        title = title ?: entry.title,
-                        provider = result.provider,
-                        pendingKey = null,
-                    ))
+        // Atomic state update: build the next map in place and publish it once,
+        // so a batch of 50 titles cannot be interleaved with another state write.
+        val applied = LinkedHashSet<String>()
+        _state.update { current ->
+            var next = current
+            job.books.forEachIndexed { index, bookUrl ->
+                val entry = next[bookUrl] ?: return@forEachIndexed
+                // Only the request this entry is still waiting for may paint it.
+                if (entry.config != job.config || entry.pendingKey != job.key) return@forEachIndexed
+                next = when (job.kind) {
+                    MetadataKind.Titles -> {
+                        val title = translations[index]?.takeIf { it.isNotBlank() }
+                        next + (bookUrl to entry.copy(
+                            status = MetadataTranslationStatus.Ready,
+                            title = title ?: entry.title,
+                            provider = result.provider,
+                            pendingKey = null,
+                        ))
+                    }
+                    MetadataKind.Details -> {
+                        val title = translations[0]?.takeIf { it.isNotBlank() }
+                        val description = translations[1]?.takeIf { it.isNotBlank() }
+                        val chapterTitles = chapterTitlesOf(translations)
+                        next + (bookUrl to entry.copy(
+                            status = MetadataTranslationStatus.Ready,
+                            title = title ?: entry.title,
+                            description = description ?: entry.description,
+                            chapterTitles = chapterTitles.ifEmpty { entry.chapterTitles },
+                            detailsLoaded = true,
+                            provider = result.provider,
+                            pendingKey = null,
+                        ))
+                    }
+                    MetadataKind.Chapters -> {
+                        val title = translations[0]?.takeIf { it.isNotBlank() }
+                        val chapterTitles = chapterTitlesOf(translations)
+                        next + (bookUrl to entry.copy(
+                            status = MetadataTranslationStatus.Ready,
+                            title = title ?: entry.title,
+                            chapterTitles = chapterTitles.ifEmpty { entry.chapterTitles },
+                            provider = result.provider,
+                            pendingKey = null,
+                        ))
+                    }
                 }
-                MetadataKind.Details -> {
-                    val title = translations[0]?.takeIf { it.isNotBlank() }
-                    val description = translations[1]?.takeIf { it.isNotBlank() }
-                    val chapterTitles = chapterTitlesOf(translations)
-                    next + (bookUrl to entry.copy(
-                        status = MetadataTranslationStatus.Ready,
-                        title = title ?: entry.title,
-                        description = description ?: entry.description,
-                        chapterTitles = chapterTitles.ifEmpty { entry.chapterTitles },
-                        detailsLoaded = true,
-                        provider = result.provider,
-                        pendingKey = null,
-                    ))
-                }
-                MetadataKind.Chapters -> {
-                    val title = translations[0]?.takeIf { it.isNotBlank() }
-                    val chapterTitles = chapterTitlesOf(translations)
-                    next + (bookUrl to entry.copy(
-                        status = MetadataTranslationStatus.Ready,
-                        title = title ?: entry.title,
-                        chapterTitles = chapterTitles.ifEmpty { entry.chapterTitles },
-                        provider = result.provider,
-                        pendingKey = null,
-                    ))
-                }
+                applied += bookUrl
             }
-            applied += bookUrl
+            next
         }
-        _state.value = next
         applied.forEach(::touch)
         // Persistence is per config, so a batch that lost the paint race still
         // stores a valid translation for its own language pair.
@@ -496,13 +508,19 @@ class MetadataTranslationController(
     }
 
     private fun touch(bookUrl: String) {
-        order.remove(bookUrl)
-        order.add(bookUrl)
-        while (order.size > CACHE_LIMIT) {
-            val oldest = order.first()
-            if (_state.value[oldest]?.status == MetadataTranslationStatus.Loading) break
-            order.remove(oldest)
-            _state.update { it - oldest }
+        val evicted = mutableListOf<String>()
+        synchronized(queueLock) {
+            order.remove(bookUrl)
+            order.add(bookUrl)
+            while (order.size > CACHE_LIMIT) {
+                val oldest = order.first()
+                if (_state.value[oldest]?.status == MetadataTranslationStatus.Loading) break
+                order.remove(oldest)
+                evicted += oldest
+            }
+        }
+        if (evicted.isNotEmpty()) {
+            _state.update { current -> current - evicted.toSet() }
         }
     }
 

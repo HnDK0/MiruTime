@@ -62,7 +62,10 @@ class BookCoverStore(
     // Hitomi rotates CDN tokens and a site may replace a broken cover. A
     // transient 5xx cooldown is already time-bounded by retryAt.
     suspend fun needsRepair(bookId: Long): Boolean =
-        isDeadCoverError(runCatching { load(bookId) }.getOrNull()?.lastError)
+        needsRepair(runCatching { load(bookId) }.getOrNull())
+
+    fun needsRepair(row: BookCoverEntity?): Boolean =
+        isDeadCoverError(row?.lastError)
 
     // Local cover bytes for consumers that must not touch the network (EPUB
     // export): a missing or invalid file is simply null.
@@ -273,7 +276,7 @@ class BookCoverStore(
         }
     }
 
-    private fun lockFor(bookId: Long): Mutex = locks.getOrPut(bookId) { Mutex() }
+    private fun lockFor(bookId: Long): Mutex = locks.computeIfAbsent(bookId) { Mutex() }
 
     private fun coverFile(bookId: Long): File = File(File(root, bookId.toString()), COVER_NAME)
 

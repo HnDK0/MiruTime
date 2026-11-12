@@ -659,7 +659,8 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
         val restoredSettings = recovered?.settings
         // Synchronous read: every screen must see saved keys/provider/backup
         // settings on its first composition. Writes stay on appScope (IO).
-        AppSettings.applyPersisted(restoredSettings ?: settingsStore.load())
+        val initialSettings = restoredSettings ?: settingsStore.load()
+        AppSettings.applyPersisted(initialSettings)
         startSettingsPersistence()
         registerNetworkRetry()
         appScope.launch {
@@ -697,13 +698,13 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             }
             step("startup_shelves_failed") { libraryRepository.ensureDefaultShelves() }
             step("startup_auto_backup_failed") {
-                AutoBackupScheduler.sync(this@MiruApp, settingsStore.load())
+                AutoBackupScheduler.sync(this@MiruApp, initialSettings)
             }
             step("startup_library_update_failed") {
-                LibraryUpdateScheduler.sync(this@MiruApp, settingsStore.load())
+                LibraryUpdateScheduler.sync(this@MiruApp, initialSettings)
             }
             step("startup_app_update_failed") {
-                AppUpdateScheduler.sync(this@MiruApp, settingsStore.load())
+                AppUpdateScheduler.sync(this@MiruApp, initialSettings)
             }
             step("startup_cover_backfill_failed") { backfillCovers() }
             step("startup_download_reconcile_failed") { downloadEngine.reconcile() }
@@ -805,21 +806,27 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
 
     private suspend fun backfillCovers() {
         val books = runCatching { libraryRepository.libraryBooks() }.getOrNull() ?: return
+        val coversByBook = runCatching {
+            libraryRepository.bookCovers()
+        }.getOrDefault(emptyMap())
         MiruLog.event("covers", "backfill-start", "books" to books.size)
         val seen = HashSet<String>()
         var attempted = 0
         for (book in books) {
             if (attempted >= MAX_COVER_BACKFILL) break
-            val remote = coverStore.remoteCoverUrl(book.bookId)
+            val row = coversByBook[book.bookId]
+            val remote = coverStore.remoteCoverUrl(row)
                 ?: book.coverUrl?.takeIf { it.isNotBlank() }
                 ?: continue
             if (!seen.add(remote)) continue
+            val fastLocal = row?.localPath?.takeIf { it.isNotBlank() && row.bytes > 0L }
+            if (fastLocal != null && File(fastLocal).isFile) continue
             if (coverStore.localCoverUrl(book.bookId) != null) continue
             attempted++
             runCatching {
                 // A persisted dead URL means the source moved the cover
                 // (Hitomi token rotation): repair instead of retrying it.
-                if (coverStore.needsRepair(book.bookId)) {
+                if (coverStore.needsRepair(row)) {
                     pluginBookProvider.refreshCover(book.url)
                 } else {
                     coverStore.ensureCover(book.bookId, book.installId, remote)
