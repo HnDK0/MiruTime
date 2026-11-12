@@ -267,7 +267,12 @@ class DownloadTranslationRunner(
     }
 
     private fun dev.mirutime.core.api.MiruError.isRetryable(): Boolean = when (this) {
-        is PluginError.Network, is PluginError.DnsFailure -> true
+        is PluginError.Network,
+        is PluginError.DnsFailure,
+        is dev.mirutime.translator.TranslationError.Network,
+        is dev.mirutime.translator.TranslationError.RateLimited,
+        is dev.mirutime.translator.TranslationError.Server,
+        -> true
         else -> false
     }
 
