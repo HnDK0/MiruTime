@@ -123,4 +123,31 @@ class ReaderHtmlParserTest {
         assertFalse(text.contains('<'))
         assertFalse(text.contains('>'))
     }
+
+    @Test
+    fun `container div preserves nested paragraphs and headings`() {
+        val blocks = ReaderHtmlParser.parse(
+            "<div class=\"chapter\"><h2>Chapter 1</h2><p>First.</p><p>Second.</p></div>",
+        )
+        assertEquals(
+            listOf(
+                ParsedBlock.Heading("Chapter 1"),
+                ParsedBlock.Paragraph("First."),
+                ParsedBlock.Paragraph("Second."),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun `text outside block tags is preserved in order`() {
+        val blocks = ReaderHtmlParser.parse("<h1>Title</h1>Trailing text")
+        assertEquals(
+            listOf(
+                ParsedBlock.Heading("Title"),
+                ParsedBlock.Paragraph("Trailing text"),
+            ),
+            blocks,
+        )
+    }
 }

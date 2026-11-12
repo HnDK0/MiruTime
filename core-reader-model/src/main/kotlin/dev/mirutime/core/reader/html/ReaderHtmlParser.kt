@@ -66,21 +66,45 @@ object ReaderHtmlParser {
         return out
     }
 
+    private fun extractBlockSegments(cleanHtml: String): List<Pair<String, String>> {
+        val matches = blockTag.findAll(cleanHtml).toList()
+        if (matches.isEmpty()) return listOf("p" to cleanHtml)
+        val segments = mutableListOf<Pair<String, String>>()
+        var cursor = 0
+        for (match in matches) {
+            if (match.range.first > cursor) {
+                val gap = cleanHtml.substring(cursor, match.range.first)
+                if (clean(gap).isNotBlank() || imgTag.containsMatchIn(gap)) {
+                    segments += "p" to gap
+                }
+            }
+            val tag = match.groupValues[1].lowercase()
+            val inner = match.groupValues[2]
+            if (tag == "div" && blockTag.containsMatchIn(inner)) {
+                segments += extractBlockSegments(inner)
+            } else {
+                segments += tag to inner
+            }
+            cursor = match.range.last + 1
+        }
+        if (cursor < cleanHtml.length) {
+            val tail = cleanHtml.substring(cursor)
+            if (clean(tail).isNotBlank() || imgTag.containsMatchIn(tail)) {
+                segments += "p" to tail
+            }
+        }
+        return segments
+    }
+
     fun parse(html: String): List<ParsedBlock> {
         val cleanHtml = stripScriptStyle(html)
-        val matches = blockTag.findAll(cleanHtml).toList()
-        val blocks = if (matches.isEmpty()) {
-            val text = clean(cleanHtml)
-            if (text.isBlank()) emptyList() else listOf(ParsedBlock.Paragraph(text))
-        } else {
-            matches.mapNotNull { match ->
-                val tag = match.groupValues[1].lowercase()
-                val text = clean(match.groupValues[2])
-                when {
-                    text.isBlank() -> null
-                    tag.startsWith("h") -> ParsedBlock.Heading(text)
-                    else -> ParsedBlock.Paragraph(text)
-                }
+        val segments = extractBlockSegments(cleanHtml)
+        val blocks = segments.mapNotNull { (tag, inner) ->
+            val text = clean(inner)
+            when {
+                text.isBlank() -> null
+                tag.startsWith("h") -> ParsedBlock.Heading(text)
+                else -> ParsedBlock.Paragraph(text)
             }
         }
         val bounded = blocks.flatMap { block ->
@@ -104,14 +128,8 @@ object ReaderHtmlParser {
         transform: (String) -> String = { it },
     ): List<DocumentBlock> {
         val cleanHtml = stripScriptStyle(html)
-        val matches = blockTag.findAll(cleanHtml).toList()
-        val raw = if (matches.isEmpty()) {
-            rawBlocks("p", cleanHtml, chapterUrl)
-        } else {
-            matches.flatMap { match ->
-                val tag = match.groupValues[1].lowercase()
-                rawBlocks(tag, match.groupValues[2], chapterUrl)
-            }
+        val raw = extractBlockSegments(cleanHtml).flatMap { (tag, inner) ->
+            rawBlocks(tag, inner, chapterUrl)
         }
         val bounded = raw.flatMap { block ->
             if (block.imageRef != null) listOf(block)
