@@ -34,8 +34,9 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import dev.mirutime.core.log.MiruLog
+import kotlin.math.roundToInt
 import dev.mirutime.feature.tts.R
 import dev.mirutime.feature.tts.clampFloatingPanelWidth
 import dev.mirutime.feature.tts.floatingWidthRange
@@ -292,7 +293,12 @@ fun TtsFloatingPlayer(
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 shadowElevation = 10.dp,
                 modifier = Modifier
-                    .offset(shownBubbleLeft.dp, shownBubbleTop.dp)
+                    .offset {
+                        IntOffset(
+                            (shownBubbleLeft * density.density).roundToInt(),
+                            (shownBubbleTop * density.density).roundToInt(),
+                        )
+                    }
                     .size(bubbleSize.dp)
                     .clickable(role = Role.Button) {
                         // Expand where the bubble is, not at a fixed corner.
@@ -358,18 +364,15 @@ fun TtsFloatingPlayer(
                 expanded = false
             },
             modifier = Modifier
-                .offset(shownPanelLeft.dp, shownPanelTop.dp)
+                .offset {
+                    IntOffset(
+                        (shownPanelLeft * density.density).roundToInt(),
+                        (shownPanelTop * density.density).roundToInt(),
+                    )
+                }
                 .width(shownPanelWidth.dp)
                 .onSizeChanged {
                     panelHeight = it.height / density.density
-                    MiruLog.event(
-                        "tts",
-                        "floating-panel-size",
-                        "width" to it.width / density.density,
-                        "height" to panelHeight,
-                        "left" to shownPanelLeft,
-                        "top" to shownPanelTop,
-                    )
                 }
                 .then(panelDrag),
             sleepTimer = sleepTimer,
