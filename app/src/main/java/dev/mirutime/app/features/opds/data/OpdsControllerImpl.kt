@@ -72,6 +72,10 @@ class OpdsControllerImpl(
     // and the add both ask for the same list, so keep it for the session.
     private val resolvedOptions = ConcurrentHashMap<String, List<OpdsBookOption>>()
 
+    // archive.org answers the epub probe per item; a miss is cached too, so a
+    // pdf-only item costs one request per session.
+    private val archiveEpub = ConcurrentHashMap<String, List<OpdsBookOption>>()
+
     override suspend fun refresh() {
         _catalogs.value = library.opdsCatalogs().map { it.toCatalog() }
     }
@@ -263,7 +267,9 @@ class OpdsControllerImpl(
                 is Outcome.Err -> return loaded
                 is Outcome.Ok -> loaded.value
             }
-            optionsForEntry(feed, entryUrl)
+            entryFor(feed, entryUrl)
+                ?.let { withArchiveEpub(it, it.toOptions()) }
+                ?.takeIf { it.isNotEmpty() }
                 ?: return (fromPage as? Outcome.Err) ?: Outcome.Err(OpdsFailure.NotDownloadable)
         } else {
             return (fromPage as Outcome.Err)
@@ -277,17 +283,36 @@ class OpdsControllerImpl(
         canonicalCatalogUrl(catalogUrl) + "\n" + entryUrl
 
     /**
-     * Options of the entry the user asked for: never silently another book's.
-     * A bare feed with exactly one publication is the indirect-feed shape; more
-     * than one is ambiguous and fails instead of guessing.
+     * The entry the user asked for: never silently another book's. A bare feed
+     * with exactly one publication is the indirect-feed shape; more than one is
+     * ambiguous and resolves to null instead of guessing.
      */
-    private fun optionsForEntry(feed: OpdsFeed, entryUrl: String): List<OpdsBookOption>? {
+    private fun entryFor(feed: OpdsFeed, entryUrl: String): OpdsEntry? {
         val requested = feed.entries.firstOrNull { it.entryUrl() == entryUrl }
-        val entry = requested ?: feed.entries
+        return requested ?: feed.entries
             .filter { it.acquisitionLinks.isNotEmpty() }
             .singleOrNull()
-            ?: return null
-        return entry.toOptions().takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * archive.org lists a text item as a pdf even when it also has a public
+     * epub, which its OPDS never advertises. Probe the item once and add the
+     * epub; a failed probe leaves the catalogue's own list untouched.
+     */
+    private suspend fun withArchiveEpub(
+        entry: OpdsEntry,
+        options: List<OpdsBookOption>,
+    ): List<OpdsBookOption> {
+        if (options.any { it.format == OpdsFormat.EPUB }) return options
+        val itemId = entry.acquisitionLinks.firstNotNullOfOrNull {
+            ArchiveOrgFormats.isArchiveBookLink(it.href)
+        } ?: return options
+        val extra = archiveEpub[itemId] ?: run {
+            val probed = ArchiveOrgFormats.epubOption(itemId, transport)
+            listOfNotNull(probed).also { archiveEpub[itemId] = it }
+        }
+        if (extra.isEmpty()) return options
+        return (options + extra).sortedForDisplay()
     }
 
     /** Fetches the page [entryUrl] was listed in and re-caches what it offers. */
@@ -304,7 +329,7 @@ class OpdsControllerImpl(
         // exists in the page, but its files live one feed down.
         val entry = feed.entries.firstOrNull { it.entryUrl() == entryUrl }
             ?: return Outcome.Err(OpdsFailure.Unknown("entry-not-found"))
-        val options = entry.toOptions()
+        val options = withArchiveEpub(entry, entry.toOptions())
         if (options.isEmpty()) return Outcome.Err(OpdsFailure.NotDownloadable)
         library.upsertOpdsEntries(
             listOf(
@@ -590,9 +615,7 @@ class OpdsControllerImpl(
                 unavailableReason = reasonFor(link.rel, format, link.indirect.isNotEmpty()),
             )
         }
-        .sortedWith(
-            compareBy({ it.unavailableReason != null }, { it.format?.ordinal ?: Int.MAX_VALUE }),
-        )
+        .sortedForDisplay()
         // An unreadable landing link ("text/html") is noise next to the real
         // files; keep it only when the entry offers nothing else.
         .let { all ->
@@ -600,6 +623,12 @@ class OpdsControllerImpl(
                 it.format != null || it.unavailableReason != OpdsUnavailableReason.UnsupportedType
             }.ifEmpty { all }
         }
+
+    /** Downloadable formats in reader preference order, then the rest. */
+    private fun List<OpdsBookOption>.sortedForDisplay(): List<OpdsBookOption> =
+        sortedWith(
+            compareBy({ it.unavailableReason != null }, { it.format?.ordinal ?: Int.MAX_VALUE }),
+        )
 
     private fun reasonFor(
         rel: String,

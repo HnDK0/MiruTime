@@ -90,9 +90,14 @@ object OpdsParser {
             author = author,
             summary = descriptionOf(node, author),
             id = node.child("id")?.textContent?.trim()?.takeIf { it.isNotBlank() },
-            coverUrl = COVER_RELS.firstNotNullOfOrNull { rel ->
-                links.firstOrNull { it.rel == rel }?.href
-            },
+            coverUrl = links
+                // An inline `data:` image is not something the image loader can fetch.
+                .filterNot { it.href.startsWith("data:", ignoreCase = true) }
+                .let { images ->
+                    COVER_RELS.firstNotNullOfOrNull { rel ->
+                        images.firstOrNull { it.rel == rel }?.href
+                    }
+                },
             links = links,
             categories = node.childTags("category").mapNotNull { category ->
                 (category.attr("label") ?: category.attr("term"))
@@ -175,10 +180,44 @@ object OpdsParser {
         while (end > 0 && (lines[end - 1].isEmpty() || METADATA_LINE.containsMatchIn(lines[end - 1]))) {
             end--
         }
-        val kept = lines.subList(0, end)
-        if (kept.isEmpty() || kept.all { it.isEmpty() }) return null
-        return kept.joinToString("\n").trim()
+        val kept = lines.subList(0, end).filterNot { isLabelledMetadata(it) }
+        // Library collation ("xiv, 276 p. : 22 cm") opens some catalogue blurbs.
+        val prose = kept.dropWhile { it.isEmpty() || COLLATION_LINE.containsMatchIn(it) }
+        if (prose.isEmpty()) return null
+        return prose.joinToString("\n").trim()
     }
+
+    private val METADATA_LINE = Regex(
+        "^(Формат|Язык|Размер|ISBN|Серия|Издательство|Год(\\s+издания)?|Страниц|Автор обложки)\\s*:",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** Gutenberg and library-card labels, a whole line of them at a time. */
+    private val LABEL_LINE = Regex(
+        "^(Title|Author|Credits|Summary|Subject|Category|Reading Level|Downloads|" +
+            "Ebook No\\.|LoCC|Note|Alternate Title|Publisher|Language)\\s*:",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** Library collation at the head of an annotation: "xiv, 276 p. : 22 cm". */
+    private val COLLATION_LINE = Regex(
+        "^(?:[ivxlcdm\\d][\\divxlcdm,.:;\\s]*(?:\\bp\\.|\\bpages\\b)|\\d+\\s*p\\.)",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /**
+     * A labelled line is metadata, unless what follows the colon reads like a
+     * sentence ("Note: this edition keeps the original spelling.") or the line
+     * is long enough to be prose. Here "sentence" means punctuation, not grammar.
+     */
+    private fun isLabelledMetadata(line: String): Boolean {
+        if (line.length >= LABEL_LINE_LIMIT) return false
+        val label = LABEL_LINE.find(line) ?: return false
+        val rest = line.substring(label.range.last + 1)
+        return rest.none { it == '.' || it == '!' || it == '?' }
+    }
+
+    private const val LABEL_LINE_LIMIT = 120
 
     private fun authorOf(node: XmlElement): String? {
         val named = node.child("author")?.child("name")?.textContent?.trim()
@@ -197,11 +236,6 @@ object OpdsParser {
             title = node.attr("title"),
         )
     }
-
-    private val METADATA_LINE = Regex(
-        "^(Формат|Язык|Размер|ISBN|Серия|Издательство|Год(\\s+издания)?|Страниц|Автор обложки)\\s*:",
-        RegexOption.IGNORE_CASE,
-    )
 
     private fun XmlElement.localName(): String = if (':' in name) name.substringAfter(':') else name
 

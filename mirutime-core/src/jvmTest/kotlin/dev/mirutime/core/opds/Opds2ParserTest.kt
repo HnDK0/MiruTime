@@ -17,7 +17,7 @@ class Opds2ParserTest {
         }
 
     @Test
-    fun `archive root maps navigation to sections and keeps the search template`() {
+    fun `archive root maps navigation and groups to sections and keeps the search template`() {
         val feed = parse(
             """
             {"@context":"https://readium.org/webpub-manifest/context.jsonld",
@@ -33,15 +33,36 @@ class Opds2ParserTest {
              "groups":[{"metadata":{"title":"eBooks Open Access & Public Domain","numberOfItems":3667231},
                         "links":[{"href":"https://archive.org/services/opds/catalog?type=browse&section=ebooks",
                                   "type":"application/opds+json","rel":"self"}],
-                        "publications":[${publicationJson("b30547234_0001")}]}]}
+                        "publications":[${publicationJson("b30547234_0001")}]},
+                       {"metadata":{"title":"Audiobooks & Music","numberOfItems":12000},
+                        "links":[{"href":"https://archive.org/services/opds/catalog?type=browse&section=audio",
+                                  "type":"application/opds+json","rel":"self"}]},
+                       {"metadata":{"title":"Texts","numberOfItems":99},
+                        "links":[{"href":"https://archive.org/services/opds/catalog?type=browse&section=texts",
+                                  "type":"application/opds+json","rel":"self"}]}]}
             """.trimIndent(),
         )
 
         assertEquals("Archive.org", feed.title)
         val sections = feed.entries.filter { !it.isPublication }
-        assertEquals(listOf("eBooks", "Audiobooks"), sections.map { it.title })
+        assertEquals(
+            listOf(
+                "eBooks",
+                "Audiobooks",
+                "eBooks Open Access & Public Domain",
+                "Audiobooks & Music",
+                "Texts",
+            ),
+            sections.map { it.title },
+        )
         assertTrue(sections.all { it.acquisitions.isEmpty() })
         assertEquals("https://archive.org/services/opds/catalog?type=navigation&nav_key=page_ebooks", sections[0].links.single().href)
+        // A group is a section too: its count is the blurb, its link the browse view.
+        assertEquals("3667231", sections[2].summary)
+        assertEquals(
+            "https://archive.org/services/opds/catalog?type=browse&section=ebooks",
+            sections[2].links.single().href,
+        )
 
         // The template survives paging-style href resolution with its braces.
         assertEquals("https://archive.org/services/opds/catalog{?query}&type=search", feed.searchLink?.href)
@@ -167,6 +188,53 @@ class Opds2ParserTest {
         assertTrue(book.acquisitions.isEmpty())
         assertTrue(book.isPublication)
         assertTrue(!feed.isNavigation)
+    }
+
+    @Test
+    fun `cover skips inline data images and still finds the real cover`() {
+        val feed = parse(
+            """
+            {"@context":"https://readium.org/webpub-manifest/context.jsonld","publications":[
+              {"metadata":{"title":"Inline"},
+               "images":[{"href":"data:image/png;base64,iVBORw0KGgo=","type":"image/png",
+                          "rel":"thumbnail"}]},
+              {"metadata":{"title":"Covered"},
+               "images":[{"href":"data:image/png;base64,iVBORw0KGgo=","type":"image/png"},
+                         {"href":"https://archive.org/download/x/__ia_thumb.jpg","type":"image/jpeg",
+                          "rel":"cover"}]},
+              {"metadata":{"title":"Uri rel"},
+               "images":[{"href":"https://h.test/first.jpg","type":"image/jpeg"},
+                         {"href":"https://h.test/cover.jpg","type":"image/jpeg",
+                          "rel":"http://opds-spec.org/image/cover"}]}]}
+            """.trimIndent(),
+        )
+
+        // A base64 thumbnail is markup, not a URL the image loader can fetch.
+        assertNull(feed.entries[0].coverUrl)
+        assertEquals("https://archive.org/download/x/__ia_thumb.jpg", feed.entries[1].coverUrl)
+        // OPDS 2 may spell the relation as a full URI.
+        assertEquals("https://h.test/cover.jpg", feed.entries[2].coverUrl)
+    }
+
+    @Test
+    fun `availability state never hides a publication`() {
+        val feed = parse(
+            """
+            {"@context":"https://readium.org/webpub-manifest/context.jsonld","publications":[
+              {"metadata":{"title":"Borrowed"},
+               "links":[{"href":"https://h.test/1.epub","type":"application/epub+zip",
+                         "rel":"http://opds-spec.org/acquisition/open-access",
+                         "properties":{"availability":{"state":"unavailable"}}}]},
+              {"metadata":{"title":"Reserved"},
+               "links":[{"href":"https://h.test/2.epub","type":"application/epub+zip",
+                         "rel":"http://opds-spec.org/acquisition/open-access",
+                         "properties":{"availability":{"state":"reserved"}}}]}]}
+            """.trimIndent(),
+        )
+
+        // The state is a label for the catalogue's own UI; we list every entry.
+        assertEquals(listOf("Borrowed", "Reserved"), feed.entries.map { it.title })
+        assertTrue(feed.entries.all { it.bestAcquisition()?.first == OpdsFormat.EPUB })
     }
 
     @Test

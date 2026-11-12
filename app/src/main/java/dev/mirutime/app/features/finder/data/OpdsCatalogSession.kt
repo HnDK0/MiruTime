@@ -7,9 +7,11 @@ import dev.mirutime.app.features.finder.domain.CatalogFacetGroup
 import dev.mirutime.app.features.finder.domain.CatalogSection
 import dev.mirutime.app.features.finder.domain.CatalogSortOption
 import dev.mirutime.app.features.finder.domain.dedupeCatalogBooks
+import dev.mirutime.app.features.opds.domain.OpdsFailure
 import dev.mirutime.app.features.opds.domain.OpdsPage
 import dev.mirutime.core.api.MiruError
 import dev.mirutime.core.api.Outcome
+import dev.mirutime.core.api.PluginError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
@@ -48,6 +50,9 @@ internal class OpdsCatalogSession(
     ) {
         val pages = linkedMapOf<Int, OpdsPage>()
         val current: OpdsPage get() = pages.getValue(pages.keys.last())
+
+        /** Feed URLs already fetched for this layer: `next` must never revisit one. */
+        val visited = mutableSetOf<String>()
     }
 
     private val layers = ArrayDeque<FeedLayer>()
@@ -78,15 +83,30 @@ internal class OpdsCatalogSession(
         if (!current.started || current.loading || !current.hasMore) return
         if (current.error != null || current.failure != null) return
         val layer = layers.lastOrNull() ?: return
-        val nextUrl = layer.current.nextUrl ?: return
+        val nextUrl = layer.current.nextUrl
+        // A catalogue may point `next` back at a page we already have: archive.org
+        // repeats page 1 as page 0. Asking again would loop or duplicate the list.
+        if (nextUrl == null || nextUrl == layer.url || nextUrl in layer.visited) {
+            mutableState.update { it.copy(hasMore = false) }
+            return
+        }
         val nextPage = layer.pages.keys.last() + 1
         val generation = beginLoad(clear = false)
         launchLoad(generation) {
-            when (val result = fetchFeed(nextUrl, layer.publicationFeed)) {
-                is Outcome.Err -> fail(generation, result.error)
+            // The OPDS seam re-throws a typed MiruError; normalise to the same
+            // shape the tests feed in, so paging has one error path.
+            val fetched = try {
+                fetchFeed(nextUrl, layer.publicationFeed)
+            } catch (failure: PluginRequestException) {
+                Outcome.Err(failure.error)
+            }
+            when (fetched) {
+                is Outcome.Err -> endOfList(generation, fetched.error)
                 is Outcome.Ok -> {
                     if (!isCurrent(generation)) return@launchLoad
-                    layer.pages[nextPage] = result.value
+                    layer.visited += nextUrl
+                    layer.visited += fetched.value.url
+                    layer.pages[nextPage] = fetched.value
                     mutableState.update { it.withFeed(layer) }
                 }
             }
@@ -241,7 +261,11 @@ internal class OpdsCatalogSession(
             publicationFeed = feed.books.isNotEmpty() ||
                 feed.nextUrl != null ||
                 feed.links.any { isPublicationLink(it.url) },
-        ).also { it.pages[1] = feed }.also { layers.addLast(it) }
+        ).also {
+            it.pages[1] = feed
+            it.visited += feed.url
+            layers.addLast(it)
+        }
 
     private fun beginLoad(clear: Boolean): Int {
         val generation = mutableState.value.generation + 1
@@ -291,6 +315,30 @@ internal class OpdsCatalogSession(
         mutableState.update {
             it.copy(loading = false, error = error::class.simpleName ?: "opds")
         }
+    }
+
+    /**
+     * Some catalogues answer the page past the last one with a server error;
+     * archive.org 500s a valid `last` page. When the user already reads books,
+     * that is the end of the list, not an error card over their place.
+     */
+    private fun endOfList(generation: Int, error: MiruError) {
+        if (!isCurrent(generation)) return
+        if (endsPaging(error) && mutableState.value.books.isNotEmpty()) {
+            mutableState.update { it.copy(loading = false, hasMore = false) }
+        } else {
+            fail(generation, error)
+        }
+    }
+
+    /** 5xx/429, or a body that is not a feed, past the end of a list. */
+    private fun endsPaging(error: MiruError): Boolean = when (error) {
+        is OpdsFailure.NotAFeed -> true
+        is OpdsFailure.Network -> error.status == 500 || error.status == 429
+        is PluginError.Network -> error.status == 500 || error.status == 429
+        // The OPDS seam reports a non-network failure by its class name.
+        is PluginError.ScriptError -> error.detail == NOT_A_FEED
+        else -> false
     }
 
     private fun fail(generation: Int, message: String) {
@@ -353,3 +401,6 @@ internal class OpdsCatalogSession(
     private fun isPublicationLink(url: String): Boolean =
         url.substringBefore('?').substringBefore('#').endsWith(".opds", ignoreCase = true)
 }
+
+// PluginError.ScriptError detail opdsPluginError() uses for OpdsFailure.NotAFeed.
+private const val NOT_A_FEED = "NotAFeed"

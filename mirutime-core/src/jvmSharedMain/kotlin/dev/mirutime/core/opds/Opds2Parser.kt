@@ -14,9 +14,13 @@ import kotlinx.serialization.json.intOrNull
  * the same [OpdsFeed] the Atom reader produces, so navigation, facets, paging,
  * search and the book cards need no JSON of their own.
  *
- * A `groups[]` preview is flattened into entries: a group's own title and links
- * are not navigable in our UI. Everything else (`navigation[]`, `publications[]`)
- * maps one to one.
+ * A `groups[]` entry is a browse view of its own: it becomes a section (its
+ * title, item count and link), and its publications are flattened into book
+ * entries as well. `navigation[]` and `publications[]` map one to one.
+ *
+ * `properties.availability.state` is a label, not a filter: a publication is
+ * listed whatever its state (Readium and Thorium do the same). We expose no
+ * state of our own, so nothing is hidden here.
  */
 object Opds2Parser {
 
@@ -31,8 +35,9 @@ object Opds2Parser {
         }.getOrNull()
         if (root !is JsonObject) return Outcome.Err(OpdsError.Malformed)
         val navigation = root.objects("navigation")
+        val groups = root.objects("groups")
         val publications = root.objects("publications") +
-            root.objects("groups").flatMap { it.objects("publications") }
+            groups.flatMap { it.objects("publications") }
         // No catalogue key and no manifest context: this is some other JSON
         // payload served under an OPDS URL, not a feed we can open.
         if (root[CONTEXT] == null && navigation.isEmpty() && publications.isEmpty()) {
@@ -46,6 +51,7 @@ object Opds2Parser {
                 baseUrl = baseUrl,
                 links = links,
                 entries = navigation.mapNotNull { navigationEntry(it, baseUrl) } +
+                    groups.mapNotNull { groupSection(it, baseUrl) } +
                     publications.mapNotNull { publication(it, baseUrl) },
                 facets = facets(root, baseUrl),
                 searchLink = links.firstOrNull { it.rel == "search" }
@@ -63,6 +69,27 @@ object Opds2Parser {
             title = title.trim(),
             author = null,
             summary = null,
+            id = null,
+            coverUrl = null,
+            links = listOf(link),
+        )
+    }
+
+    /**
+     * A `groups[]` entry names a browse view of its own in `links[]`: it is a
+     * section, with the group's item count as the section's blurb.
+     */
+    private fun groupSection(node: JsonObject, baseUrl: String): OpdsEntry? {
+        val metadata = node.obj("metadata") ?: return null
+        val title = metadata.string("title")?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        val link = node.objects("links")
+            .mapNotNull { link(it, baseUrl) }
+            .firstOrNull { "image" !in it.rel && it.type?.startsWith("image/") != true }
+            ?: return null
+        return OpdsEntry(
+            title = title,
+            author = null,
+            summary = metadata.int("numberOfItems")?.toString(),
             id = null,
             coverUrl = null,
             links = listOf(link),
@@ -115,15 +142,26 @@ object Opds2Parser {
         )
 
     /**
-     * The catalogue's own artwork: `images[]` first (`rel=cover`/`thumbnail`
-     * preferred), then a link that names itself as one.
+     * The catalogue's own artwork: `images[]` first (a thumbnail, then a cover,
+     * then whatever came first), then a link that names itself as one. A
+     * `data:` URL is inline markup, never something the image loader can fetch.
      */
     private fun cover(node: JsonObject, links: List<OpdsLink>, baseUrl: String): String? {
-        val images = node.objects("images").mapNotNull { link(it, baseUrl) }
-        val preferred = images.firstOrNull { "cover" in it.rel || "thumbnail" in it.rel }
+        val images = node.objects("images")
+            .mapNotNull { link(it, baseUrl) }
+            .filterNot { it.href.startsWith("data:", ignoreCase = true) }
+        val preferred = images.firstOrNull {
+            it.rel.substringAfterLast('/') == "thumbnail" || it.type == "image/thumbnail"
+        }
+            ?: images.firstOrNull {
+                it.rel.substringAfterLast('/') == "cover" || it.type == "image"
+            }
             ?: images.firstOrNull()
         return preferred?.href
-            ?: links.firstOrNull { "image" in it.rel || "thumbnail" in it.rel }?.href
+            ?: links.firstOrNull {
+                !it.href.startsWith("data:", ignoreCase = true) &&
+                    ("image" in it.rel || "thumbnail" in it.rel)
+            }?.href
     }
 
     /** `subject` entries are either plain strings or `{name}` objects. */

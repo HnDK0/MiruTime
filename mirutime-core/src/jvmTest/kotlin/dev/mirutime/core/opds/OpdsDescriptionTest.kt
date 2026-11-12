@@ -89,4 +89,55 @@ class OpdsDescriptionTest {
         )
         assertEquals("Настоящая аннотация.", parsed.summary)
     }
+
+    @Test
+    fun `gutenberg label block is dropped after real prose`() {
+        val cleaned = OpdsParser.cleanDescription(
+            """
+            A novel of manners and marriage.
+
+            Title: Pride and Prejudice
+            Author: Austen, Jane
+            Credits: Produced by John Doe and the Online Distributed Proofreading Team
+            Summary: The story of the Bennet family
+            Subject: Courtship -- Fiction
+            Category: Classics
+            Reading Level: General
+            Downloads: 12345
+            Ebook No.: 1342
+            LoCC: PR4034
+            Note: see the film adaptation
+            Alternate Title: First Impressions
+            Publisher: Penguin
+            Language: English
+            """.trimIndent(),
+        )
+
+        assertEquals("A novel of manners and marriage.", cleaned)
+    }
+
+    @Test
+    fun `library collation is dropped and the quoted prose kept`() {
+        val cleaned = OpdsParser.cleanDescription(
+            "xiv, 276 p. : 22 cm\n\"A passage quoted from the original.\"",
+        )
+
+        assertEquals("\"A passage quoted from the original.\"", cleaned)
+    }
+
+    @Test
+    fun `a sentence that opens with a label is prose, not metadata`() {
+        val sentence = "Note: this edition keeps the original spelling and punctuation."
+        assertEquals(sentence, OpdsParser.cleanDescription(sentence))
+
+        // Unpunctuated and long: a paragraph, however much it looks like a label.
+        val paragraph = "Note: " + "lorem ipsum ".repeat(12)
+        assertEquals(paragraph.trim(), OpdsParser.cleanDescription(paragraph))
+    }
+
+    @Test
+    fun `an annotation of nothing but labels is dropped`() {
+        assertNull(OpdsParser.cleanDescription("Title: X\nAuthor: Y\nLanguage: English"))
+        assertNull(OpdsParser.cleanDescription("xiv, 276 p. : 22 cm"))
+    }
 }

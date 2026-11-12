@@ -10,6 +10,7 @@ import dev.mirutime.app.features.opds.domain.OpdsBook
 import dev.mirutime.app.features.opds.domain.OpdsCatalogLink
 import dev.mirutime.app.features.opds.domain.OpdsFailure
 import dev.mirutime.app.features.opds.domain.OpdsPage
+import dev.mirutime.core.api.MiruError
 import dev.mirutime.core.api.Outcome
 import dev.mirutime.core.opds.OpdsFacet
 import dev.mirutime.core.opds.OpdsFacetGroup
@@ -101,6 +102,97 @@ class OpdsCatalogSessionTest {
         harness.session.requestNext()
         advanceUntilIdle()
         assertEquals(2, harness.requests.size)
+    }
+
+    @Test
+    fun `next pointing back at the current page ends the list without another fetch`() = runTest {
+        val harness = Harness(this)
+        harness.feeds[null] = feed(
+            url = "https://c.test/root",
+            books = listOf(book("One")),
+            next = "https://c.test/root",
+        )
+
+        harness.session.ensureLoaded()
+        advanceUntilIdle()
+        harness.session.requestNext()
+        advanceUntilIdle()
+
+        // archive.org repeats page 1 as page 0: asking again would loop or
+        // duplicate the cards the user already sees.
+        assertEquals(listOf<String?>(null), harness.requests)
+        assertEquals(listOf("One"), harness.titles)
+        assertFalse(harness.session.state.value.hasMore)
+    }
+
+    @Test
+    fun `an overlapping next page does not duplicate cards`() = runTest {
+        val harness = Harness(this)
+        harness.feeds[null] = feed(
+            url = "https://c.test/root",
+            books = listOf(book("One"), book("Two")),
+            next = "https://c.test/2",
+        )
+        // Page 2 repeats the last card of page 1, as archive.org does.
+        harness.feeds["https://c.test/2"] = feed(
+            url = "https://c.test/2",
+            books = listOf(book("Two"), book("Three")),
+        )
+
+        harness.session.ensureLoaded()
+        advanceUntilIdle()
+        harness.session.requestNext()
+        advanceUntilIdle()
+
+        assertEquals(listOf("One", "Two", "Three"), harness.titles)
+        assertEquals(2, harness.session.state.value.pagesLoaded)
+    }
+
+    @Test
+    fun `a 500 on the next page ends the list the user can already read`() = runTest {
+        val harness = Harness(this)
+        harness.feeds[null] = feed(
+            url = "https://c.test/root",
+            books = listOf(book("One")),
+            next = "https://c.test/2",
+        )
+        harness.fail("https://c.test/2", OpdsFailure.Network(500))
+
+        harness.session.ensureLoaded()
+        advanceUntilIdle()
+        harness.session.requestNext()
+        advanceUntilIdle()
+
+        // UI, not an error card over the books already shown.
+        assertEquals(listOf("One"), harness.titles)
+        assertNull(harness.session.state.value.error)
+        assertNull(harness.session.state.value.failure)
+        assertFalse(harness.session.state.value.hasMore)
+
+        // Any other failure keeps the retry state.
+        val other = Harness(this)
+        other.feeds[null] = feed(
+            url = "https://c.test/root",
+            books = listOf(book("One")),
+            next = "https://c.test/2",
+        )
+        other.fail("https://c.test/2", OpdsFailure.Network(503))
+        other.session.ensureLoaded()
+        advanceUntilIdle()
+        other.session.requestNext()
+        advanceUntilIdle()
+        assertNotNull(other.session.state.value.error)
+        assertTrue(other.session.state.value.hasMore)
+
+        // Nothing to read yet: a 500 is a real failure, not an empty page.
+        val empty = Harness(this)
+        empty.feeds[null] = feed(url = "https://c.test/root", next = "https://c.test/2")
+        empty.fail("https://c.test/2", OpdsFailure.Network(500))
+        empty.session.ensureLoaded()
+        advanceUntilIdle()
+        empty.session.requestNext()
+        advanceUntilIdle()
+        assertNotNull(empty.session.state.value.error)
     }
 
     @Test
@@ -203,7 +295,7 @@ class OpdsCatalogSessionTest {
             url = "https://c.test/root",
             books = listOf(book("Root")),
         )
-        harness.failing += "https://c.test/broken"
+        harness.fail("https://c.test/broken")
 
         harness.session.ensureLoaded()
         advanceUntilIdle()
@@ -223,7 +315,7 @@ class OpdsCatalogSessionTest {
             url = "https://c.test/root",
             books = listOf(book("Root")),
         )
-        harness.failing += "https://c.test/broken"
+        harness.fail("https://c.test/broken")
 
         harness.session.ensureLoaded()
         advanceUntilIdle()
@@ -233,7 +325,7 @@ class OpdsCatalogSessionTest {
 
         // The server recovers: Retry must go back to the failed URL, not
         // reload the parent layer the user already sees.
-        harness.failing.clear()
+        harness.failures.clear()
         harness.feeds["https://c.test/broken"] = feed(
             url = "https://c.test/broken",
             books = listOf(book("Recovered")),
@@ -330,8 +422,8 @@ class OpdsCatalogSessionTest {
         // A push that stays in flight while a newer load starts and fails.
         val gate = CompletableDeferred<Unit>()
         harness.gate = "https://c.test/slow" to gate
-        harness.failing += "https://c.test/slow"
-        harness.failing += "https://c.test/root"
+        harness.fail("https://c.test/slow")
+        harness.fail("https://c.test/root")
         harness.session.openSection("https://c.test/slow")
         advanceUntilIdle() // blocks on the gate
         harness.session.refresh()
@@ -339,7 +431,7 @@ class OpdsCatalogSessionTest {
         advanceUntilIdle()
 
         assertNotNull(harness.session.state.value.error)
-        harness.failing.clear()
+        harness.failures.clear()
         harness.gate = null
         harness.session.retry()
         advanceUntilIdle()
@@ -481,17 +573,22 @@ class OpdsCatalogSessionTest {
         val requests = mutableListOf<String?>()
         val modes = mutableListOf<Pair<String?, Boolean?>>()
         val feeds = mutableMapOf<String?, OpdsPage>()
-        val failing = mutableSetOf<String>()
+        val failures = mutableMapOf<String, MiruError>()
         var searchTemplate: String? = null
         var gate: Pair<String, CompletableDeferred<Unit>>? = null
+
+        fun fail(url: String, error: MiruError = OpdsFailure.Unknown("failed")) {
+            failures[url] = error
+        }
 
         val session = OpdsCatalogSession(
             fetchFeed = { url, includeLinks ->
                 requests += url
                 modes += url to includeLinks
                 gate?.let { (gated, deferred) -> if (url == gated) deferred.await() }
+                val failure = failures[url]
                 when {
-                    url in failing -> Outcome.Err(OpdsFailure.Unknown("failed"))
+                    failure != null -> Outcome.Err(failure)
                     else -> feeds[url]?.let { Outcome.Ok(it) }
                         ?: Outcome.Err(OpdsFailure.Unknown("no-feed"))
                 }

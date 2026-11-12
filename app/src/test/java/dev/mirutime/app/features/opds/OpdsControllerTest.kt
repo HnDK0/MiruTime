@@ -3,6 +3,7 @@ package dev.mirutime.app.features.opds
 import dev.mirutime.app.features.library.data.ImportOrigin
 import dev.mirutime.app.features.library.data.LocalImportPort
 import dev.mirutime.app.features.library.data.LocalImportResult
+import dev.mirutime.app.features.opds.data.ArchiveOrgFormats
 import dev.mirutime.app.features.opds.data.OpdsTransport
 import dev.mirutime.app.features.opds.data.OpdsControllerImpl
 import dev.mirutime.app.features.opds.data.OpdsCredentialStore
@@ -124,7 +125,12 @@ class OpdsControllerTest {
         val page = (controller.page(catalog.id, null) as Outcome.Ok).value
 
         assertEquals("Archive.org", page.title)
-        assertEquals(listOf("eBooks", "Audiobooks"), page.links.map { it.title })
+        assertEquals(
+            listOf("eBooks", "Audiobooks", "eBooks Open Access", "Audiobooks & Music", "Texts"),
+            page.links.map { it.title },
+        )
+        // A group is a section with its item count, not a book card.
+        assertEquals("3667231", page.links[2].subtitle)
         // Group previews never replace the sections a catalogue root is for.
         assertTrue(page.books.isEmpty())
         assertEquals(
@@ -631,6 +637,147 @@ class OpdsControllerTest {
         assertTrue(controller.catalogs.value.isEmpty())
     }
 
+    @Test
+    fun `archive book links are recognised by host, path and glob query`() {
+        assertEquals(
+            "item1",
+            ArchiveOrgFormats.isArchiveBookLink(
+                "https://archive.org/services/opds/book/item1?glob_pattern=*pdf",
+            ),
+        )
+        assertEquals(
+            "item1",
+            ArchiveOrgFormats.isArchiveBookLink(
+                "https://www.archive.org/services/opds/book/item1?glob_pattern=*epub",
+            ),
+        )
+        assertNull(ArchiveOrgFormats.isArchiveBookLink("https://archive.org/download/item1/item1.epub"))
+        assertNull(ArchiveOrgFormats.isArchiveBookLink("https://archive.org/services/opds/book/item1"))
+        assertNull(
+            ArchiveOrgFormats.isArchiveBookLink(
+                "https://evil.test/services/opds/book/item1?glob_pattern=*pdf",
+            ),
+        )
+    }
+
+    @Test
+    fun `archive pdf-only entry gains the epub its opds omits`() = runTest {
+        val transport = FakeTransport()
+        transport.respond(200, ARCHIVE_ENTRY_FEED, ARCHIVE_ENTRY)
+        transport.bodiesByUrl[ARCHIVE_EPUB_PROBE] = ARCHIVE_EPUB_ENVELOPE
+        val controller = controller(transport)
+        val catalog = (controller.add("c", ARCHIVE_ENTRY, "", "") as Outcome.Ok).value
+
+        val options = (controller.resolveEntry(catalog.url, ARCHIVE_ENTRY) as Outcome.Ok).value
+
+        val epub = options.first()
+        assertEquals(OpdsFormat.EPUB, epub.format)
+        assertEquals("EPUB", epub.label)
+        assertEquals("http://opds-spec.org/acquisition/open-access", epub.rel)
+        assertEquals("https://archive.org/download/item1/item1.epub", epub.url)
+        assertTrue(epub.isDownloadable)
+        // The catalogue's own pdf stays listed, with its reason.
+        assertEquals(OpdsUnavailableReason.UnsupportedType, options.last().unavailableReason)
+
+        // One feed + one probe; the detail page does not probe again.
+        assertEquals(2, transport.gets)
+        controller.resolveEntry(catalog.url, ARCHIVE_ENTRY)
+        assertEquals(2, transport.gets)
+    }
+
+    @Test
+    fun `add from an archive entry downloads the probed epub`() = runTest {
+        val transport = FakeTransport()
+        transport.respond(200, ARCHIVE_ENTRY_FEED, ARCHIVE_ENTRY)
+        transport.bodiesByUrl[ARCHIVE_EPUB_PROBE] = ARCHIVE_EPUB_ENVELOPE
+        val controller = controller(transport, importer = succeedingImport())
+        val catalog = (controller.add("c", ARCHIVE_ENTRY, "", "") as Outcome.Ok).value
+
+        val added = controller.addEntry(catalog.url, ARCHIVE_ENTRY, null, "Archive")
+
+        assertEquals(Outcome.Ok("local://new-book"), added)
+        assertEquals(1, transport.downloads)
+    }
+
+    @Test
+    fun `an archive probe that finds no epub leaves the list as served`() = runTest {
+        val transport = FakeTransport()
+        transport.respond(200, ARCHIVE_ENTRY_FEED, ARCHIVE_ENTRY)
+        // No match: the endpoint answers with an empty location.
+        transport.bodiesByUrl[ARCHIVE_EPUB_PROBE] = ARCHIVE_NO_EPUB
+        val controller = controller(transport)
+        val catalog = (controller.add("c", ARCHIVE_ENTRY, "", "") as Outcome.Ok).value
+
+        val options = (controller.resolveEntry(catalog.url, ARCHIVE_ENTRY) as Outcome.Ok).value
+
+        assertTrue(options.none { it.format == OpdsFormat.EPUB })
+        assertTrue(options.all { it.unavailableReason != null })
+    }
+
+    @Test
+    fun `an archive probe that resolves to a non-epub is ignored`() = runTest {
+        val transport = FakeTransport()
+        transport.respond(200, ARCHIVE_ENTRY_FEED, ARCHIVE_ENTRY)
+        transport.bodiesByUrl[ARCHIVE_EPUB_PROBE] = ARCHIVE_PDF_LOCATION
+        val controller = controller(transport)
+        val catalog = (controller.add("c", ARCHIVE_ENTRY, "", "") as Outcome.Ok).value
+
+        val options = (controller.resolveEntry(catalog.url, ARCHIVE_ENTRY) as Outcome.Ok).value
+
+        assertTrue(options.none { it.format == OpdsFormat.EPUB })
+    }
+
+    @Test
+    fun `a failed archive probe never fails the detail page`() = runTest {
+        val transport = FakeTransport()
+        transport.respond(200, ARCHIVE_ENTRY_FEED, ARCHIVE_ENTRY)
+        // A broken match: not even JSON.
+        transport.bodiesByUrl[ARCHIVE_EPUB_PROBE] = "<html>bad gateway</html>"
+        val controller = controller(transport)
+        val catalog = (controller.add("c", ARCHIVE_ENTRY, "", "") as Outcome.Ok).value
+
+        val options = (controller.resolveEntry(catalog.url, ARCHIVE_ENTRY) as Outcome.Ok).value
+
+        assertTrue(options.none { it.format == OpdsFormat.EPUB })
+        assertTrue(options.isNotEmpty())
+    }
+
+    @Test
+    fun `an archive entry resolved from its listing page gains the epub too`() = runTest {
+        val transport = FakeTransport()
+        val pageUrl = "https://archive.org/services/opds/catalog?type=browse&section=ebooks"
+        transport.bodiesByUrl[pageUrl] = ARCHIVE_LISTING_PAGE
+        transport.bodiesByUrl[ARCHIVE_EPUB_PROBE] = ARCHIVE_EPUB_ENVELOPE
+        val dao = FakeDao()
+        val controller = controller(transport, dao = dao)
+        val catalog = (controller.add("c", ARCHIVE_ENTRY, "", "") as Outcome.Ok).value
+        dao.putEntry(catalog.url, ARCHIVE_ENTRY, "[]", feedUrl = pageUrl)
+
+        val options = (controller.resolveEntry(catalog.url, ARCHIVE_ENTRY) as Outcome.Ok).value
+
+        assertEquals(OpdsFormat.EPUB, options.first().format)
+        // Written back, so the next visit does not resolve again.
+        assertTrue(
+            dao.entries[catalog.url to ARCHIVE_ENTRY]?.formatsJson
+                ?.contains("item1.epub") == true,
+        )
+    }
+
+    @Test
+    fun `catalogue cards never probe the archive book endpoint`() = runTest {
+        val transport = FakeTransport()
+        transport.respond(200, ARCHIVE_LISTING_PAGE, ARCHIVE_ENTRY)
+        transport.bodiesByUrl[ARCHIVE_EPUB_PROBE] = ARCHIVE_EPUB_ENVELOPE
+        val controller = controller(transport)
+        val catalog = (controller.add("c", ARCHIVE_ENTRY, "", "") as Outcome.Ok).value
+
+        val page = (controller.page(catalog.id, null) as Outcome.Ok).value
+
+        // One request per page: a card is cheap, the probe belongs to the detail.
+        assertEquals(1, transport.gets)
+        assertTrue(page.books.single().options.none { it.format == OpdsFormat.EPUB })
+    }
+
     private fun succeedingImport(): LocalImportPort = object : LocalImportPort {
         override suspend fun import(file: File, origin: ImportOrigin?): LocalImportResult =
             LocalImportResult.Success(
@@ -929,10 +1076,18 @@ private val OPDS2_ROOT = """
                    {"href":"https://final.test/opds?nav_key=page_audiobooks","title":"Audiobooks",
                     "type":"application/opds+json","rel":"collection"}],
      "groups":[{"metadata":{"title":"eBooks Open Access","numberOfItems":3667231},
+                "links":[{"href":"https://final.test/opds?group=ebooks",
+                          "type":"application/opds+json","rel":"self"}],
                 "publications":[{"metadata":{"title":"Preview","identifier":"https://final.test/details/p"},
                                  "links":[{"href":"https://final.test/details/p&view=theater",
                                            "type":"text/html",
-                                           "rel":"http://opds-spec.org/acquisition/sample"}]}]}]}
+                                           "rel":"http://opds-spec.org/acquisition/sample"}]}]},
+               {"metadata":{"title":"Audiobooks & Music","numberOfItems":12000},
+                "links":[{"href":"https://final.test/opds?group=audio",
+                          "type":"application/opds+json","rel":"self"}]},
+               {"metadata":{"title":"Texts","numberOfItems":99},
+                "links":[{"href":"https://final.test/opds?group=texts",
+                          "type":"application/opds+json","rel":"self"}]}]}
 """.trimIndent()
 
 private val OPDS2_PUBLICATIONS = """
@@ -972,4 +1127,45 @@ private val CACHED_OPTIONS = """
       "rel":"http://opds-spec.org/acquisition","reason":null},
      {"format":"EPUB","url":"https://final.test/opds/root/books/1-sample.epub",
       "rel":"http://opds-spec.org/acquisition/sample","reason":"Sample"}]
+""".trimIndent()
+
+// archive.org serves a text item with only a pdf link; the epub lives behind
+// the book endpoint, which its own OPDS never mentions.
+private const val ARCHIVE_ENTRY = "https://archive.org/details/item1"
+private const val ARCHIVE_EPUB_PROBE =
+    "https://archive.org/services/opds/book/item1?glob_pattern=*epub"
+private const val ARCHIVE_EPUB_ENVELOPE =
+    """{"status_code":302,"_headers":{"location":"https://archive.org/download/item1/item1.epub"}}"""
+private const val ARCHIVE_NO_EPUB = """{"status_code":302,"_headers":{"location":"[]"}}"""
+private const val ARCHIVE_PDF_LOCATION =
+    """{"status_code":302,"_headers":{"location":"https://archive.org/download/item1/item1.pdf"}}"""
+
+private val ARCHIVE_ENTRY_FEED = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <feed xmlns="http://www.w3.org/2005/Atom">
+      <title>Publication</title>
+      <entry>
+        <id>https://archive.org/details/item1</id>
+        <title>Archive Book</title>
+        <link rel="http://opds-spec.org/image/thumbnail"
+              href="https://archive.org/download/item1/__ia_thumb.jpg"/>
+        <link rel="http://opds-spec.org/acquisition/open-access"
+              href="https://archive.org/services/opds/book/item1?glob_pattern=*pdf"
+              type="application/pdf"/>
+      </entry>
+    </feed>
+""".trimIndent()
+
+private val ARCHIVE_LISTING_PAGE = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <feed xmlns="http://www.w3.org/2005/Atom">
+      <title>eBooks</title>
+      <entry>
+        <id>https://archive.org/details/item1</id>
+        <title>Archive Book</title>
+        <link rel="http://opds-spec.org/acquisition/open-access"
+              href="https://archive.org/services/opds/book/item1?glob_pattern=*pdf"
+              type="application/pdf"/>
+      </entry>
+    </feed>
 """.trimIndent()
