@@ -44,4 +44,6 @@ interface PluginSource {
     suspend fun filters(): Outcome<List<Map<String, String>>>
 
     suspend fun settingsSchema(): Outcome<List<Map<String, String>>>
+
+    fun close() {}
 }

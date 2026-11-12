@@ -1,5 +1,6 @@
 package dev.mirutime.core.network
 
+import dev.mirutime.core.network.cache.platformSynchronized
 import dev.mirutime.core.network.cf.CfOptions
 
 // One normalization for EVERY per-host key: HostOptionsRegistry entries,
@@ -20,33 +21,40 @@ internal fun normalizeHost(raw: String): String =
 class HostOptionsRegistry {
     private data class Entry<T>(val owner: String, val value: T)
 
+    private val lock = Any()
     private val cfByHost = mutableMapOf<String, Entry<CfOptions>>()
     private val uaByHost = mutableMapOf<String, Entry<String>>()
     private val refererByHost = mutableMapOf<String, Entry<String>>()
 
-    fun setCfOptions(host: String, owner: String, options: CfOptions) {
+    fun setCfOptions(host: String, owner: String, options: CfOptions): Unit = platformSynchronized(lock) {
         cfByHost[host] = Entry(owner, options)
     }
 
-    fun cfOptions(host: String): CfOptions? = cfByHost[host]?.value
+    fun cfOptions(host: String): CfOptions? = platformSynchronized(lock) {
+        cfByHost[host]?.value
+    }
 
-    fun setUserAgent(host: String, owner: String, userAgent: String) {
+    fun setUserAgent(host: String, owner: String, userAgent: String): Unit = platformSynchronized(lock) {
         uaByHost[host] = Entry(owner, userAgent)
     }
 
-    fun userAgent(host: String): String? = uaByHost[host]?.value
+    fun userAgent(host: String): String? = platformSynchronized(lock) {
+        uaByHost[host]?.value
+    }
 
     // Per-host Referer override from a plugin's `referer` global (NoveLA:
     // SourceInterface.referer, used for hotlink-protected covers). Read side
     // wiring lives with the engine lane; the value is the raw configured string.
-    fun setReferer(host: String, owner: String, referer: String) {
+    fun setReferer(host: String, owner: String, referer: String): Unit = platformSynchronized(lock) {
         refererByHost[host] = Entry(owner, referer)
     }
 
-    fun referer(host: String): String? = refererByHost[host]?.value
+    fun referer(host: String): String? = platformSynchronized(lock) {
+        refererByHost[host]?.value
+    }
 
     // No-op when the entry belongs to a different owner.
-    fun clear(host: String, owner: String) {
+    fun clear(host: String, owner: String): Unit = platformSynchronized(lock) {
         if (cfByHost[host]?.owner == owner) cfByHost.remove(host)
         if (uaByHost[host]?.owner == owner) uaByHost.remove(host)
         if (refererByHost[host]?.owner == owner) refererByHost.remove(host)

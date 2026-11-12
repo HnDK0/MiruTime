@@ -63,7 +63,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 
 // Adapts a sandboxed LuaSession to the PluginSource contract.
@@ -106,6 +108,7 @@ class LuaPluginSource(
     private val callExecutor: ExecutorService = Executors.newSingleThreadExecutor { task ->
         Thread(task, "lua-${metadata.id}").apply { isDaemon = true }
     },
+    private val onClose: () -> Unit = {},
 ) : PluginSource {
 
     private val mutex = Mutex()
@@ -472,6 +475,11 @@ class LuaPluginSource(
         toFilterMaps(callOrErr("getSettingsSchema", emptyList()))
     }
 
+    override fun close() {
+        runCatching { callExecutor.shutdownNow() }
+        runCatching { onClose() }
+    }
+
     // ── plumbing ─────────────────────────────────────────────────────────────
 
     // Ethalon precedent (withContext(Dispatchers.IO) around every call):
@@ -487,11 +495,16 @@ class LuaPluginSource(
             val future = callExecutor.submit(Callable { runBlocking { block() } })
             val timeout = callTimeoutMs.takeIf { it > 0 } ?: 90_000
             try {
-                future.get(timeout, TimeUnit.MILLISECONDS)
+                runInterruptible {
+                    future.get(timeout, TimeUnit.MILLISECONDS)
+                }
             } catch (e: TimeoutException) {
                 timedOut.set(true)
                 future.cancel(true)
                 throw LuaCallTimeoutException(metadata.id)
+            } catch (e: CancellationException) {
+                future.cancel(true)
+                throw e
             } catch (e: ExecutionException) {
                 throw e.cause ?: e
             }
@@ -949,24 +962,32 @@ class LuaPluginSourceFactory(
         try {
             val loaded = loadExecutor.submit(Callable {
                 globals.load(descriptor.script, "@${metadata.id}").call()
+                registerLoadTimeOptions(session, metadata)
             })
             val timeout = callTimeoutMs.takeIf { it > 0 } ?: 90_000
             loaded.get(timeout, TimeUnit.MILLISECONDS)
         } catch (e: TimeoutException) {
+            client.close()
             throw LuaCallTimeoutException(metadata.id)
+        } catch (e: ExecutionException) {
+            client.close()
+            throw e.cause ?: e
+        } catch (e: Throwable) {
+            client.close()
+            throw e
         } finally {
             loadExecutor.shutdownNow()
         }
-        registerLoadTimeOptions(session, metadata)
         return LuaPluginSource(
-            session,
-            metadata,
-            getMemo,
-            forceNetwork,
-            failureFlag,
-            logger,
-            callContext,
-            callTimeoutMs,
+            session = session,
+            metadata = metadata,
+            getMemo = getMemo,
+            forceNetwork = forceNetwork,
+            failureFlag = failureFlag,
+            logger = logger,
+            callContext = callContext,
+            callTimeoutMs = callTimeoutMs,
+            onClose = client::close,
         )
     }
 

@@ -802,9 +802,9 @@ class PluginHttpClient(
     // body that ignores them; charset is unused because we store raw bytes.
     private fun cacheKeyFor(sourceId: String, method: String, url: String, headers: Map<String, String>): CacheKey? {
         if (cache == null || !method.equals("GET", ignoreCase = true)) return null
+        val host = runCatching { normalizeHost(Url(url).host) }.getOrDefault("")
         val effective = headers + mapOf(
-            HttpHeaders.UserAgent to requestBuilder.resolveUserAgent(runCatching { normalizeHost(Url(url).host) }
-                .getOrDefault("")),
+            HttpHeaders.UserAgent to effectiveUserAgent(host, headers),
             HttpHeaders.AcceptEncoding to ACCEPT_ENCODING,
         )
         return CacheKey.from("GET", url, null, sourceId, effective)
@@ -838,7 +838,7 @@ class PluginHttpClient(
                 // A GET carries no body; Ktor's own EmptyContent is the null
                 // object for a non-null OutgoingContent slot.
                 body = EmptyContent,
-                executionContext = Job(),
+                executionContext = Job().apply { complete() },
                 attributes = Attributes(),
             ),
             HttpResponseData(
@@ -851,6 +851,10 @@ class PluginHttpClient(
             ),
         )
         return call.response
+    }
+
+    fun close() {
+        runCatching { client.close() }
     }
 }
 

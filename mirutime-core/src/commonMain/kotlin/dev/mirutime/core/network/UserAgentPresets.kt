@@ -1,5 +1,7 @@
 package dev.mirutime.core.network
 
+import dev.mirutime.core.network.cache.platformSynchronized
+
 // Browser User-Agent presets, ported verbatim from NoveLA
 // networking/.../interceptors/UserAgentPresets.kt (UAPresets). A plugin selects
 // a preset by name (Lua global getUserAgentPreset) or by its alias; the engine
@@ -58,6 +60,7 @@ object UserAgentPresets {
 // serialized (plugin-management path, not the per-request hot path) — the same
 // ceiling as HostOptionsRegistry.
 object PluginUserAgentRegistry {
+    private val lock = Any()
     private val sourcePresets = mutableMapOf<String, String>()
     private val hostPresets = mutableMapOf<String, String>()
     // App-wide SCRAPER_USER_AGENT (Settings -> Network), supplied live by the
@@ -66,26 +69,28 @@ object PluginUserAgentRegistry {
     @Volatile
     private var appUserAgentProvider: (() -> String?)? = null
 
-    fun register(sourceId: String, presetName: String) {
+    fun register(sourceId: String, presetName: String): Unit = platformSynchronized(lock) {
         sourcePresets[sourceId] = presetName
     }
 
-    fun getPreset(sourceId: String): String? = sourcePresets[sourceId]
+    fun getPreset(sourceId: String): String? = platformSynchronized(lock) {
+        sourcePresets[sourceId]
+    }
 
-    fun registerHost(host: String, presetName: String) {
+    fun registerHost(host: String, presetName: String): Unit = platformSynchronized(lock) {
         hostPresets[normalizeHost(host)] = presetName
     }
 
     // Exact host first, then each parent domain ("a.b.example" -> "b.example") —
     // a preset registered for a registrable domain covers its subdomains.
-    fun getPresetForHost(requestHost: String): String? {
+    fun getPresetForHost(requestHost: String): String? = platformSynchronized(lock) {
         val host = normalizeHost(requestHost)
-        hostPresets[host]?.let { return it }
+        hostPresets[host]?.let { return@platformSynchronized it }
         val parts = host.split('.')
         for (i in 1 until parts.size - 1) {
-            hostPresets[parts.subList(i, parts.size).joinToString(".")]?.let { return it }
+            hostPresets[parts.subList(i, parts.size).joinToString(".")]?.let { return@platformSynchronized it }
         }
-        return null
+        null
     }
 
     fun resolveUAString(presetName: String): String? = UserAgentPresets.resolve(presetName)
@@ -113,7 +118,7 @@ object PluginUserAgentRegistry {
         appUserAgentProvider?.invoke()?.trim()
             ?.takeIf { ua -> ua.isNotEmpty() && ua.all { it.code in 0x20..0x7E } }
 
-    fun clear() {
+    fun clear(): Unit = platformSynchronized(lock) {
         sourcePresets.clear()
         hostPresets.clear()
         appUserAgentProvider = null

@@ -39,31 +39,32 @@ class ResponseCache(
     private val ttlMs: Long = 15 * 60 * 1000,
     private val clock: () -> Long = { currentTimeMillis() },
 ) {
+    private val lock = Any()
     // LinkedHashMap keeps insertion order; re-insert on access = LRU touch.
     private val entries = LinkedHashMap<CacheKey, CachedResponse>()
     private var totalBytes: Long = 0
 
-    fun get(key: CacheKey): CachedResponse? {
-        val entry = entries[key] ?: return null
+    fun get(key: CacheKey): CachedResponse? = platformSynchronized(lock) {
+        val entry = entries[key] ?: return@platformSynchronized null
         if (clock() - entry.storedAt >= ttlMs) {
             removeEntry(key, entry)
-            return null
+            return@platformSynchronized null
         }
         // LRU touch: move to the most-recent position.
         entries.remove(key)
         entries[key] = entry
-        return entry
+        entry
     }
 
-    fun put(key: CacheKey, response: CachedResponse) {
-        if (response.body.size.toLong() > maxBytes) return
+    fun put(key: CacheKey, response: CachedResponse): Unit = platformSynchronized(lock) {
+        if (response.body.size.toLong() > maxBytes) return@platformSynchronized
         entries.remove(key)?.let { totalBytes -= it.body.size.toLong() }
         entries[key] = response
         totalBytes += response.body.size.toLong()
         evictIfNeeded()
     }
 
-    fun invalidateBySource(sourceId: String) {
+    fun invalidateBySource(sourceId: String): Unit = platformSynchronized(lock) {
         val iterator = entries.entries.iterator()
         while (iterator.hasNext()) {
             val e = iterator.next()
@@ -74,7 +75,7 @@ class ResponseCache(
         }
     }
 
-    fun clear() {
+    fun clear(): Unit = platformSynchronized(lock) {
         entries.clear()
         totalBytes = 0
     }

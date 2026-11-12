@@ -137,6 +137,16 @@ class PluginRegistryTest {
     }
 
     @Test
+    fun `named user agent preset resolves to full browser user agent string`() {
+        val handle = registry().install(descriptor(ua = "Chrome Desktop"))
+        val ua = hostOptions.userAgent("site.example")
+        assertNotNull(ua)
+        assertTrue(ua.startsWith("Mozilla/5.0"), "expected resolved UA, got $ua")
+        handle.dispose()
+        assertNull(hostOptions.userAgent("site.example"))
+    }
+
+    @Test
     fun `host mapping keys on normalized host without www, port or path`() {
         val handle = registry().install(
             descriptor(baseUrl = "https://www.Site.Example:8080/x", cf = cfOptions),

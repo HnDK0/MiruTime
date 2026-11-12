@@ -1,6 +1,7 @@
 package dev.mirutime.core.api
 
 import dev.mirutime.core.network.HostOptionsRegistry
+import dev.mirutime.core.network.UserAgentPresets
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -46,6 +47,7 @@ class PluginHandle internal constructor(
         if (isDisposed) return
         isDisposed = true
         hostOptions.clear(host, descriptor.metadata.id)
+        runCatching { source?.close() }
     }
 }
 
@@ -93,7 +95,9 @@ class PluginRegistry(
         // A failed install registers nothing, so its dispose is a no-op.
         val owner = descriptor.metadata.id
         descriptor.metadata.cfOptions?.let { hostOptions.setCfOptions(host, owner, it) }
-        descriptor.metadata.userAgentPreset?.let { hostOptions.setUserAgent(host, owner, it) }
+        descriptor.metadata.userAgentPreset?.let {
+            hostOptions.setUserAgent(host, owner, UserAgentPresets.resolve(it) ?: it)
+        }
         return PluginHandle(descriptor, source, state, hostOptions, host)
     }
 
