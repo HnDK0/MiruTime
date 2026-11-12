@@ -44,8 +44,31 @@ object LibraryMigrations {
         migrateV9ToV10(connection)
     }
 
+    /**
+     * Schema v11: additive OPDS catalog table. Credentials stay out of the
+     * database so they never ride the backup export.
+     */
+    val MIGRATION_10_11: Migration = Migration(10, 11) { connection ->
+        migrateV10ToV11(connection)
+    }
+
+    /**
+     * Schema v12: catalogue provenance on local files plus the rendered-entry
+     * cache. Purely additive: no existing row is rewritten.
+     */
+    val MIGRATION_11_12: Migration = Migration(11, 12) { connection ->
+        migrateV11ToV12(connection)
+    }
+
     val ALL: Array<Migration> =
-        arrayOf(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+        arrayOf(
+            MIGRATION_6_7,
+            MIGRATION_7_8,
+            MIGRATION_8_9,
+            MIGRATION_9_10,
+            MIGRATION_10_11,
+            MIGRATION_11_12,
+        )
 }
 
 /**
@@ -127,6 +150,8 @@ private fun migrateBackupSteps(connection: SQLiteConnection, fromVersion: Int) {
     if (fromVersion < 8) migrateV7ToV8(connection)
     if (fromVersion < 9) migrateV8ToV9(connection)
     if (fromVersion < 10) migrateV9ToV10(connection)
+    if (fromVersion < 11) migrateV10ToV11(connection)
+    if (fromVersion < 12) migrateV11ToV12(connection)
 }
 
 private fun migrateV6ToV7(connection: SQLiteConnection) {
@@ -297,16 +322,77 @@ private fun migrateV9ToV10(connection: SQLiteConnection) {
 }
 
 /**
+ * v11 byte-for-byte matches [LibraryMigrations.MIGRATION_10_11]: one additive
+ * table, no data rewrite.
+ */
+private fun migrateV10ToV11(connection: SQLiteConnection) {
+    connection.exec(
+        "CREATE TABLE IF NOT EXISTS opds_catalogs (" +
+            "id TEXT NOT NULL, " +
+            "name TEXT NOT NULL, " +
+            "url TEXT NOT NULL, " +
+            "addedAt INTEGER NOT NULL, " +
+            "PRIMARY KEY(id))",
+    )
+}
+
+/**
+ * v12 byte-for-byte matches [LibraryMigrations.MIGRATION_11_12]: three additive
+ * `local_book_files` columns, their lookup index, and the new entry table.
+ *
+ * Column-guarded because a downgraded test/snapshot file can already carry the
+ * columns while still reporting v11.
+ */
+private fun migrateV11ToV12(connection: SQLiteConnection) {
+    val columns = connection.columns("local_book_files")
+    ORIGIN_COLUMNS.forEach { column ->
+        if (column !in columns) {
+            connection.exec(
+                "ALTER TABLE local_book_files ADD COLUMN $column TEXT NOT NULL DEFAULT ''",
+            )
+        }
+    }
+    connection.exec(
+        "CREATE INDEX IF NOT EXISTS index_local_book_files_origin_catalog_url_origin_entry_url " +
+            "ON local_book_files (origin_catalog_url, origin_entry_url)",
+    )
+    connection.exec(
+        "CREATE TABLE IF NOT EXISTS opds_entries (" +
+            "catalogUrl TEXT NOT NULL, " +
+            "entryUrl TEXT NOT NULL, " +
+            "feed_url TEXT NOT NULL DEFAULT '', " +
+            "title TEXT NOT NULL, " +
+            "author TEXT NOT NULL, " +
+            "description TEXT NOT NULL, " +
+            "coverUrl TEXT, " +
+            "formatsJson TEXT NOT NULL, " +
+            "updatedAt INTEGER NOT NULL, " +
+            "PRIMARY KEY(catalogUrl, entryUrl))",
+    )
+    // Same guard as the origin columns: a pre-release v12 file may already
+    // carry the table without the column.
+    if ("feed_url" !in connection.columns("opds_entries")) {
+        connection.exec(
+            "ALTER TABLE opds_entries ADD COLUMN feed_url TEXT NOT NULL DEFAULT ''",
+        )
+    }
+    connection.exec(
+        "CREATE INDEX IF NOT EXISTS index_opds_entries_catalogUrl_updatedAt " +
+            "ON opds_entries (catalogUrl, updatedAt)",
+    )
+}
+
+/**
  * Room refuses to open a migrated file whose `room_master_table` still carries
  * an older hash. The live import opens the staged database through Room, so the
- * migrator publishes the current identity itself. `10.json` is the source of
+ * migrator publishes the current identity itself. `12.json` is the source of
  * truth.
  */
 private fun updateRoomIdentity(connection: SQLiteConnection) {
     if (!connection.tableExists("room_master_table")) return
     connection.exec(
         "INSERT OR REPLACE INTO room_master_table (id, identity_hash) " +
-            "VALUES (42, '$V10_IDENTITY_HASH')",
+            "VALUES (42, '$V12_IDENTITY_HASH')",
     )
 }
 
@@ -359,10 +445,35 @@ private fun verifyRestoredDatabase(connection: SQLiteConnection, expectedVersion
             error("Migrated database is missing index $index on $table")
         }
     }
+    REQUIRED_V11_TABLES.forEach { table ->
+        if (!connection.tableExists(table)) {
+            error("Migrated database is missing table $table")
+        }
+    }
+    REQUIRED_V12_TABLES.forEach { table ->
+        if (!connection.tableExists(table)) {
+            error("Migrated database is missing table $table")
+        }
+    }
+    REQUIRED_V12_COLUMNS.forEach { (table, columns) ->
+        val actual = connection.columns(table)
+        columns.forEach { column ->
+            if (column !in actual) {
+                error("Migrated database is missing column $table.$column")
+            }
+        }
+    }
+    REQUIRED_V12_INDEXES.forEach { (index, table) ->
+        if (!connection.indexExists(index, table)) {
+            error("Migrated database is missing index $index on $table")
+        }
+    }
 }
 
 private const val V9_IDENTITY_HASH = "117dd4519b1602322a7e187aa9956185"
 private const val V10_IDENTITY_HASH = "5290005f22d81a551a46b9dd80932d07"
+private const val V11_IDENTITY_HASH = "a2fd3b84ea24a48d3ef9e35e589a2271"
+private const val V12_IDENTITY_HASH = "0eb1c3b620a09fa57dfa6c2adfb95bb0"
 
 private val REQUIRED_V7_TABLES = listOf(
     "books",
@@ -400,6 +511,26 @@ private val REQUIRED_V10_TABLES = listOf("history")
 
 private val REQUIRED_V10_INDEXES = mapOf(
     "index_history_readAt" to "history",
+)
+
+private val REQUIRED_V11_TABLES = listOf("opds_catalogs")
+
+private val REQUIRED_V12_TABLES = listOf("opds_entries")
+
+private val ORIGIN_COLUMNS = listOf(
+    "origin_catalog_url",
+    "origin_entry_url",
+    "origin_catalog_name",
+)
+
+private val REQUIRED_V12_COLUMNS = mapOf(
+    "local_book_files" to ORIGIN_COLUMNS,
+    "opds_entries" to listOf("feed_url"),
+)
+
+private val REQUIRED_V12_INDEXES = mapOf(
+    "index_local_book_files_origin_catalog_url_origin_entry_url" to "local_book_files",
+    "index_opds_entries_catalogUrl_updatedAt" to "opds_entries",
 )
 
 private fun SQLiteConnection.exec(sql: String) {

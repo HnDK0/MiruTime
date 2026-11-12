@@ -200,6 +200,10 @@ fun MiruShell(
     val pluginBookProvider = remember(context) {
         (context.applicationContext as dev.mirutime.app.MiruApp).pluginBookProvider
     }
+    val opdsController = remember(context) {
+        (context.applicationContext as dev.mirutime.app.MiruApp).opdsController
+    }
+    val opdsCatalogs by opdsController.catalogs.collectAsState()
     val downloadEngine = remember(context) {
         (context.applicationContext as dev.mirutime.app.MiruApp).downloadEngine
     }
@@ -346,6 +350,9 @@ fun MiruShell(
     // Registered by the web screen so the shared header back button can walk
     // the WebView history before leaving the route.
     var webViewBackAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    // Catalogue screens with an internal stack (OPDS feeds) register here so the
+    // header back pops the feed before it leaves the route.
+    var catalogBackAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     // Live page URL for the header subtitle; the route argument is only the
     // starting point, in-page links and history move it.
     var webViewCurrentUrl by remember { mutableStateOf("") }
@@ -412,15 +419,18 @@ fun MiruShell(
             // Source catalogue: header shows the source name.
             val sourceId = entry?.arguments?.getString("sourceId")?.let(Uri::decode)
             val sourceName = sourceId?.let { id ->
-                sourceDisplayName(
-                    id = id,
-                    pluginName = { pluginId ->
-                        (context.applicationContext as dev.mirutime.app.MiruApp)
-                            .pluginGraph.installed.value.firstOrNull { it.id == pluginId }?.name
-                    },
-                    localBooks = stringResource(R.string.finder_local_books_title),
-                    localManga = stringResource(R.string.finder_local_manga_title),
-                )
+                // OPDS catalogs are app rows, not plugins: resolve the saved name.
+                dev.mirutime.app.features.finder.domain.OpdsSources.catalogIdOf(id)
+                    ?.let { catalogId -> opdsCatalogs.firstOrNull { it.id == catalogId }?.name }
+                    ?: sourceDisplayName(
+                        id = id,
+                        pluginName = { pluginId ->
+                            (context.applicationContext as dev.mirutime.app.MiruApp)
+                                .pluginGraph.installed.value.firstOrNull { it.id == pluginId }?.name
+                        },
+                        localBooks = stringResource(R.string.finder_local_books_title),
+                        localManga = stringResource(R.string.finder_local_manga_title),
+                    )
             }
             val onGlobalSearch = route == "finder/search"
             val onManageExt = route == "finder/extensions"
@@ -476,11 +486,8 @@ fun MiruShell(
                     },
                     isMainScreen = tab != null,
                     onBack = {
-                        if (onWebView) {
-                            webViewBackAction?.invoke() ?: navController.popBackStack()
-                        } else {
-                            navController.popBackStack()
-                        }
+                        val internal = catalogBackAction ?: if (onWebView) webViewBackAction else null
+                        if (internal != null) internal() else navController.popBackStack()
                     },
                     onTheme = { themeSheetOpen = true },
                     onExtras = { extrasSheetOpen = true },
@@ -591,6 +598,7 @@ fun MiruShell(
                 FinderScreen(
                     contentPadding = padding,
                     provider = pluginProvider,
+                    opdsController = opdsController,
                     refreshKey = dataRevision,
                     onSourceOpen = { id ->
                         navController.navigate("finder/source/${Uri.encode(id)}")
@@ -748,6 +756,7 @@ fun MiruShell(
                         )
                     },
                     onLibraryChanged = onLibraryChanged,
+                    onBackAction = { catalogBackAction = it },
                     onSolveCf = { challenge ->
                         val graph = (context.applicationContext as dev.mirutime.app.MiruApp)
                             .pluginGraph
@@ -850,6 +859,21 @@ fun MiruShell(
                     migration = migrationGraph,
                     onOpenBook = { targetUrl ->
                         navController.navigate("book/${Uri.encode(targetUrl)}")
+                    },
+                    // OPDS entries without cached metadata fall back to the
+                    // catalogue they came from.
+                    onOpenCatalog = { catalogUrl ->
+                        val wanted = dev.mirutime.app.features.opds.data.canonicalCatalogUrl(catalogUrl)
+                        val catalog = opdsCatalogs.firstOrNull {
+                            dev.mirutime.app.features.opds.data.canonicalCatalogUrl(it.url) == wanted
+                        }
+                        if (catalog != null) {
+                            navController.navigate(
+                                "finder/source/${Uri.encode(
+                                    dev.mirutime.app.features.finder.domain.OpdsSources.idOf(catalog.id),
+                                )}",
+                            )
+                        }
                     },
                     onOpenReader = { url, index, restore ->
                         MiruLog.event(

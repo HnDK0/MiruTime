@@ -71,6 +71,23 @@ class CatalogFiltersTest {
     }
 
     @Test
+    fun `disabled sort keeps the feed order while still filtering`() {
+        val books = listOf(
+            book("u1", "Zed", ongoing = true),
+            book("u2", "alpha"),
+            book("u3", "Mid"),
+        )
+
+        val result = applyCatalogFilters(
+            books = books,
+            filters = CatalogFilters(sort = CatalogSort.Title, descending = false, ongoingOnly = true),
+            sortEnabled = false,
+        )
+
+        assertEquals(listOf("Zed"), result.map { it.title })
+    }
+
+    @Test
     fun `popular preserves provider order descending and reverses ascending`() {
         val books = listOf(book("u1", "A"), book("u2", "B"), book("u3", "C"))
 

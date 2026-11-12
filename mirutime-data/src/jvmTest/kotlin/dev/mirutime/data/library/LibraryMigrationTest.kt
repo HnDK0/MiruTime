@@ -91,7 +91,7 @@ class LibraryMigrationTest {
         val migrated = buildLibraryDatabase(libraryDatabaseBuilder(file))
         try {
             val repository = LibraryRepository(migrated.libraryDao())
-            assertEquals(10, LibrarySchemaVersion)
+            assertEquals(12, LibrarySchemaVersion)
             assertEquals("https://migrate.test/book", repository.book(bookId)?.url)
             assertEquals(chapterId, repository.chapters(bookId).single().chapterId)
 
@@ -223,7 +223,7 @@ class LibraryMigrationTest {
         }
 
         BundledSQLiteDriver().open(file.absolutePath).use { connection ->
-            assertEquals(10, connection.long("PRAGMA user_version").toInt())
+            assertEquals(12, connection.long("PRAGMA user_version").toInt())
             assertEquals(5, connection.long("SELECT COUNT(*) FROM books").toInt())
             assertEquals(5003, connection.long("SELECT COUNT(*) FROM chapters").toInt())
             listOf(
@@ -415,7 +415,7 @@ class LibraryMigrationTest {
         }
 
         BundledSQLiteDriver().open(file.absolutePath).use { connection ->
-            assertEquals(10, connection.long("PRAGMA user_version").toInt())
+            assertEquals(12, connection.long("PRAGMA user_version").toInt())
             assertEquals(1, connection.long("SELECT COUNT(*) FROM video_progress").toInt())
             assertTrue(connection.indexExists("index_video_progress_bookId", "video_progress"))
         }
@@ -455,8 +455,125 @@ class LibraryMigrationTest {
         }
 
         BundledSQLiteDriver().open(file.absolutePath).use { connection ->
-            assertEquals(10, connection.long("PRAGMA user_version").toInt())
+            assertEquals(12, connection.long("PRAGMA user_version").toInt())
             assertEquals(0, connection.long("SELECT COUNT(*) FROM video_progress").toInt())
+        }
+    }
+
+    @Test
+    fun `migration 11 to 12 keeps files readable and adds catalogue identity`() = runTest {
+        val file = File(tempDir(), "migrate-v11.db")
+        var bookId: Long
+
+        val created = buildLibraryDatabase(libraryDatabaseBuilder(file))
+        try {
+            val repository = LibraryRepository(created.libraryDao())
+            bookId = repository.saveBook(book("https://v11.test/book"))
+            repository.saveLocalBookFile(
+                LocalBookFileEntity(
+                    bookId = bookId,
+                    uri = "content://v11/book.epub",
+                    displayName = "book.epub",
+                    format = "EPUB",
+                    mime = null,
+                    sizeBytes = 42,
+                    sha256 = "sha-v11",
+                    copyPath = "local_books/local-books/sha-v11.epub",
+                    importedAt = 1L,
+                ),
+            )
+        } finally {
+            created.close()
+        }
+
+        downgradeToV11(file)
+
+        val migrated = buildLibraryDatabase(libraryDatabaseBuilder(file))
+        try {
+            val repository = LibraryRepository(migrated.libraryDao())
+            val original = repository.localBookFile(bookId)
+            assertNotNull(original)
+            assertEquals("content://v11/book.epub", original?.uri)
+            // A pre-v12 file has no provenance: empty, never invented.
+            assertEquals("", original?.originCatalogUrl)
+            assertEquals("", original?.originEntryUrl)
+            assertEquals("", original?.originCatalogName)
+
+            repository.upsertOpdsEntries(
+                listOf(
+                    OpdsEntryEntity(
+                        catalogUrl = "https://opds.test/root",
+                        entryUrl = "https://opds.test/book/1",
+                        feedUrl = "https://opds.test/root?page=1",
+                        title = "Catalogue Book",
+                        author = "Jane",
+                        description = "Blurb",
+                        coverUrl = null,
+                        formatsJson = "[]",
+                        updatedAt = 1L,
+                    ),
+                ),
+            )
+            assertEquals(
+                "Catalogue Book",
+                repository.opdsEntry("https://opds.test/root", "https://opds.test/book/1")?.title,
+            )
+            // The row remembers the feed page it was seen in; an old cache row
+            // (no feed) reads back as an empty URL.
+            assertEquals(
+                "https://opds.test/root?page=1",
+                repository.opdsEntry("https://opds.test/root", "https://opds.test/book/1")?.feedUrl,
+            )
+            repository.deleteOpdsEntries("https://opds.test/root")
+            assertNull(repository.opdsEntry("https://opds.test/root", "https://opds.test/book/1"))
+        } finally {
+            migrated.close()
+        }
+
+        BundledSQLiteDriver().open(file.absolutePath).use { connection ->
+            assertEquals(12, connection.long("PRAGMA user_version").toInt())
+            assertTrue(connection.columns("local_book_files").contains("origin_catalog_url"))
+            assertTrue(connection.columns("opds_entries").contains("feed_url"))
+            assertTrue(connection.indexExists("index_opds_entries_catalogUrl_updatedAt", "opds_entries"))
+            assertEquals(1, connection.long("SELECT COUNT(*) FROM books").toInt())
+        }
+    }
+
+    @Test
+    fun `backup migrator upgrades a real v11 snapshot and adds the entry cache`() = runTest {
+        val file = File(tempDir(), "backup-v11.db")
+        var bookId: Long
+
+        val created = buildLibraryDatabase(libraryDatabaseBuilder(file))
+        try {
+            val repository = LibraryRepository(created.libraryDao())
+            bookId = repository.saveBook(book("https://backup-v11.test/book"))
+        } finally {
+            created.close()
+        }
+
+        downgradeToV11(file)
+
+        migrateBackupDatabase(file.absolutePath, fromVersion = 11)
+
+        val migrated = buildLibraryDatabase(libraryDatabaseBuilder(file))
+        try {
+            val repository = LibraryRepository(migrated.libraryDao())
+            assertEquals("https://backup-v11.test/book", repository.book(bookId)?.url)
+            assertEquals(emptyList<OpdsEntryEntity>(), repository.opdsEntries("https://x.test", emptyList()).toList())
+            assertTrue(
+                repository.originMembership(
+                    "https://opds.test/root",
+                    listOf("https://opds.test/book/1"),
+                ).isEmpty(),
+            )
+        } finally {
+            migrated.close()
+        }
+
+        BundledSQLiteDriver().open(file.absolutePath).use { connection ->
+            assertEquals(12, connection.long("PRAGMA user_version").toInt())
+            assertEquals(0, connection.long("SELECT COUNT(*) FROM opds_entries").toInt())
         }
     }
 
@@ -517,7 +634,7 @@ class LibraryMigrationTest {
         }
 
         BundledSQLiteDriver().open(file.absolutePath).use { connection ->
-            assertEquals(10, connection.long("PRAGMA user_version").toInt())
+            assertEquals(12, connection.long("PRAGMA user_version").toInt())
             // The list row was deleted, but the backfill/index remain valid and
             // the book itself is intact.
             assertEquals(0, connection.long("SELECT COUNT(*) FROM history").toInt())
@@ -553,6 +670,23 @@ class LibraryMigrationTest {
         BundledSQLiteDriver().open(file.absolutePath).use { connection ->
             assertEquals(99, connection.long("PRAGMA user_version").toInt())
             assertEquals(1, connection.long("SELECT COUNT(*) FROM books").toInt())
+        }
+    }
+
+    private fun downgradeToV11(file: File) {
+        BundledSQLiteDriver().open(file.absolutePath).use { connection ->
+            connection.exec("DROP INDEX index_opds_entries_catalogUrl_updatedAt")
+            connection.exec("DROP TABLE opds_entries")
+            connection.exec("DROP INDEX index_local_book_files_origin_catalog_url_origin_entry_url")
+            connection.exec("ALTER TABLE local_book_files DROP COLUMN origin_catalog_url")
+            connection.exec("ALTER TABLE local_book_files DROP COLUMN origin_entry_url")
+            connection.exec("ALTER TABLE local_book_files DROP COLUMN origin_catalog_name")
+            connection.exec("PRAGMA user_version = 11")
+            // A genuine v11 file carried the v11 hash published in 11.json.
+            connection.exec(
+                "UPDATE room_master_table SET identity_hash = " +
+                    "'a2fd3b84ea24a48d3ef9e35e589a2271' WHERE id = 42",
+            )
         }
     }
 

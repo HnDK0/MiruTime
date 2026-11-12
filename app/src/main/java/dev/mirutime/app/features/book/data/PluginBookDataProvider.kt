@@ -14,10 +14,17 @@ import dev.mirutime.app.features.finder.data.localFileChapterUrl
 import dev.mirutime.app.features.finder.data.localFileDocumentUri
 import dev.mirutime.app.features.finder.data.resolveCoverUrl
 import dev.mirutime.app.features.finder.data.toAppType
+import dev.mirutime.app.features.finder.domain.OpdsSources
+import dev.mirutime.app.features.opds.domain.OpdsAddPort
+import dev.mirutime.app.features.opds.data.OpdsEntryOptions
+import dev.mirutime.app.features.opds.data.canonicalCatalogUrl
+import dev.mirutime.app.features.book.domain.BookActionKind
+import dev.mirutime.app.features.book.domain.BookDownloadOption
 import dev.mirutime.app.features.downloads.data.DownloadFileStore
 import dev.mirutime.app.features.library.data.BookCoverStore
 import dev.mirutime.app.features.library.data.DirectSafParserVersion
 import dev.mirutime.app.features.library.data.LocalBookProvider
+import dev.mirutime.app.features.library.data.LocalBooksInstallId
 import dev.mirutime.app.features.library.data.LocalMangaInstallId
 import dev.mirutime.app.features.library.data.resolveStoredCover
 import dev.mirutime.app.features.library.domain.ContentType
@@ -43,7 +50,9 @@ import dev.mirutime.data.library.ChapterSeed
 import dev.mirutime.data.library.LibraryBookFiles
 import dev.mirutime.data.library.BookWriteLocks
 import dev.mirutime.data.library.LibraryRepository
+import dev.mirutime.data.library.bookKeyInstallId
 import dev.mirutime.data.library.bookKeyUrl
+import dev.mirutime.data.library.decodeLibraryBookKey
 import dev.mirutime.data.library.libraryBookKey
 import dev.mirutime.data.library.LocalBookFileEntity
 import dev.mirutime.data.library.TagEntity
@@ -105,6 +114,9 @@ class PluginBookDataProvider(
         graphOrNull?.source(id)
     },
     private val bookLocks: BookWriteLocks = BookWriteLocks(),
+    // Catalogue add/resolve for an entry that is not a library row yet. Narrow
+    // on purpose: the book layer never sees the finder or the OPDS controller.
+    private val opds: OpdsAddPort? = null,
 ) : BookDataProvider {
     private val graph: PluginGraph
         get() = requireNotNull(graphOrNull) { "plugin graph is not configured" }
@@ -118,6 +130,15 @@ class PluginBookDataProvider(
     // Library cards already resolve through this map, so the book page and the
     // shell header must use the same name instead of the raw install id.
     private suspend fun sourceLabel(id: String, fallback: String = id): String {
+        // An OPDS source id is `opds:<catalogId>`: the display name is the
+        // catalog row, not an installed plugin.
+        OpdsSources.catalogIdOf(id)?.let { catalogId ->
+            library?.opdsCatalogs()
+                ?.firstOrNull { it.id == catalogId }
+                ?.name
+                ?.takeIf { it.isNotBlank() }
+                ?.let { return it }
+        }
         val live = graphOrNull?.installed?.value.orEmpty()
         // A cold start can open a cached library row before bootstrap has
         // published the installed list; wait for that scan once so the page
@@ -184,10 +205,115 @@ class PluginBookDataProvider(
 
     override suspend fun book(bookUrl: String): BookDetails? =
         when {
+            isOpdsBook(bookUrl) -> loadOpdsBook(bookUrl)
             isLocalFileBook(realUrl(bookUrl)) -> loadLocalSafBook(bookUrl)
             LocalBookProvider.isLocalBook(realUrl(bookUrl)) -> loadLocalBook(bookUrl)
             else -> loadBook(bookUrl, persist = false)
         }
+
+    private fun isOpdsBook(bookKey: String): Boolean =
+        bookKeyInstallId(bookKey)?.let { OpdsSources.catalogIdOf(it) != null } == true
+
+    /**
+     * A catalogue entry that is not a library row yet. Everything shown comes
+     * from `opds_entries`; only an entry with no stored options needs one extra
+     * feed. Membership decides the primary action, never a guess.
+     */
+    private suspend fun loadOpdsBook(bookKey: String): BookDetails? {
+        val catalogId = bookKeyInstallId(bookKey)?.let(OpdsSources::catalogIdOf) ?: return null
+        val entryUrl = realUrl(bookKey)
+        val repo = library ?: return null
+        details[bookKey]?.let { return it }
+        val catalog = runCatching { repo.opdsCatalogs() }.getOrNull()
+            ?.firstOrNull { it.id == catalogId }
+            ?: return null
+        val entry = runCatching { repo.opdsEntry(catalog.url, entryUrl) }.getOrNull()
+        val membership = runCatching {
+            repo.originMembership(canonicalCatalogUrl(catalog.url), listOf(entryUrl))[entryUrl]
+        }.getOrNull()
+        var options = entry?.formatsJson?.let(OpdsEntryOptions::decode).orEmpty()
+        if (options.isEmpty()) {
+            // Indirect publication (Gutenberg): the acquisition lives one feed
+            // down. A failure here leaves the catalogue link, not an empty page.
+            (opds?.resolveEntry(catalog.url, entryUrl) as? Outcome.Ok)?.let { options = it.value }
+        }
+        val downloadable = options.filter { it.isDownloadable }
+        val action = when {
+            membership != null -> BookActionKind.OpenLibrary
+            downloadable.isEmpty() -> BookActionKind.OpenCatalog
+            else -> BookActionKind.AddToLibrary
+        }
+        val built = BookDetails(
+            bookUrl = bookKey,
+            title = entry?.title?.takeIf { it.isNotBlank() } ?: entryUrl,
+            source = catalog.name.ifBlank { hostOf(entryUrl) },
+            installId = OpdsSources.idOf(catalog.id),
+            author = entry?.author?.takeIf { it.isNotBlank() } ?: "Unknown",
+            originLanguage = null,
+            contentType = ContentType.Novel,
+            rating = 0f,
+            ongoing = false,
+            updatedLabel = "",
+            totalChapters = 0,
+            readCount = 0,
+            readMinutes = 0,
+            ttsMinutes = 0,
+            inLibrary = membership != null,
+            shelfId = "reading",
+            genres = emptyList(),
+            description = entry?.description.orEmpty(),
+            sourceUrl = entryUrl,
+            authUrl = null,
+            chapters = emptyList(),
+            reviews = emptyList(),
+            coverUrl = entry?.coverUrl,
+            action = action,
+            downloadOptions = options.map { option ->
+                BookDownloadOption(
+                    key = option.key,
+                    format = option.label,
+                    url = option.url,
+                    isDefault = option == downloadable.firstOrNull(),
+                    unavailableReason = option.unavailableReason?.name,
+                )
+            },
+            libraryBookKey = membership,
+            originCatalogUrl = catalog.url,
+        )
+        details[bookKey] = built
+        MiruLog.d(
+            "opds",
+            "event=opds_book_entry options=${options.size} action=${action.name}",
+        )
+        return built
+    }
+
+    /**
+     * Explicit add: the catalogue lane downloads and imports, this provider only
+     * maps the returned local URL onto the library key the reader opens. The
+     * format decides the install id (CBZ -> manga), so it is read back from the
+     * row instead of guessed.
+     */
+    override suspend fun addOpdsBook(bookUrl: String, optionKey: String?): Outcome<String> {
+        val identity = decodeLibraryBookKey(bookUrl)
+        val catalogId = identity?.installId?.let(OpdsSources::catalogIdOf)
+            ?: return Outcome.Err(PluginError.ScriptError("not an OPDS entry"))
+        val port = opds ?: return Outcome.Err(PluginError.ScriptError("OPDS is not configured"))
+        val repo = library ?: return Outcome.Err(PluginError.ScriptError("library is not configured"))
+        val catalog = runCatching { repo.opdsCatalogs() }.getOrNull()
+            ?.firstOrNull { it.id == catalogId }
+            ?: return Outcome.Err(PluginError.ScriptError("unknown catalog"))
+        val localUrl = when (val added = port.addEntry(catalog.url, identity.url, optionKey, catalog.name)) {
+            is Outcome.Err -> return added
+            is Outcome.Ok -> added.value
+        }
+        // The entry now IS a library row: force the page to reload it.
+        details.remove(bookUrl)
+        val installId = runCatching { repo.book(localUrl) }.getOrNull()?.installId
+            ?: LocalBooksInstallId
+        MiruLog.d("opds", "event=opds_add option=${optionKey != null}")
+        return Outcome.Ok(libraryBookKey(installId, localUrl))
+    }
 
     // Repair path for a dead/rotated cover (Hitomi rotates CDN tokens, a site
     // may replace a 404). Writes only book_covers.remoteUrl + the local file —
@@ -588,6 +714,10 @@ class PluginBookDataProvider(
         val adapter = local ?: return null
         val meta = adapter.book(realUrl(bookUrl)) ?: return null
         val row = library?.book(bookUrl)
+        // Imported-from-catalogue books keep their catalogue name: the library
+        // row and the chip must read "Flibusta", not "local-books".
+        val origin = row?.let { library?.localBookFile(it.bookId) }
+        val originName = origin?.originCatalogName?.takeIf { it.isNotBlank() }
         val chapterCount = adapter.chapters(realUrl(bookUrl))?.size ?: row?.totalChapters ?: 0
         val title = meta.title.trim().ifBlank { row?.title ?: "Untitled" }
         val author = meta.author?.trim().takeUnless { it.isNullOrBlank() }
@@ -600,7 +730,7 @@ class PluginBookDataProvider(
         val built = BookDetails(
             bookUrl = bookUrl,
             title = title,
-            source = row?.installId ?: "local",
+            source = originName ?: row?.installId ?: "local",
             installId = row?.installId ?: "local",
             author = author,
             originLanguage = row?.originLanguage,
@@ -624,6 +754,7 @@ class PluginBookDataProvider(
             authUrl = null,
             chapters = emptyList(),
             reviews = emptyList(),
+            originCatalogUrl = origin?.originCatalogUrl?.takeIf { it.isNotBlank() },
             coverUrl = coverUrl,
             subtitle = displaySubtitle(
                 subtitle = row?.subtitle,

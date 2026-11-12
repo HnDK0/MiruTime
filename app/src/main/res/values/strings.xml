@@ -1735,4 +1735,39 @@
     <string name="updates_remaining_m_fmt">%1$dm</string>
     <string name="dash_load_error">Couldn\'t load dashboard data</string>
     <string name="dash_retry">Retry</string>
+
+    <!-- OPDS catalogs -->
+    <string name="opds_entry">OPDS catalogs</string>
+    <string name="opds_add_title">New catalog</string>
+    <string name="opds_add_desc">Paste the catalog address. The title is optional: the server host is used by default.</string>
+    <string name="opds_field_url">Catalog address</string>
+    <string name="opds_field_url_hint">https://example.com/opds</string>
+    <string name="opds_field_name">Title</string>
+    <string name="opds_field_name_hint">Optional</string>
+    <string name="opds_field_login">Login</string>
+    <string name="opds_field_password">Password</string>
+    <string name="opds_add_submit">Add</string>
+    <string name="opds_add_invalid_url">Enter an http:// or https:// address</string>
+    <string name="opds_add_failed">Couldn\'t add the catalog</string>
+    <string name="opds_err_needs_login">The server asks for a login and password.</string>
+    <string name="opds_err_digest">This Calibre server uses Digest auth. Start it with --auth-mode basic or connect over HTTPS.</string>
+    <string name="opds_err_forbidden">The server refused access to this catalog.</string>
+    <string name="opds_err_network_fmt">The server answered HTTP %1$d.</string>
+    <string name="opds_err_network">Couldn\'t reach the catalog.</string>
+    <string name="opds_err_not_feed">This address is not an OPDS catalog.</string>
+    <string name="opds_err_json">This catalog serves OPDS 2 (JSON), which is not supported yet.</string>
+    <string name="opds_err_malformed">The catalog sent data that could not be read.</string>
+    <string name="opds_err_too_large_fmt">The file is larger than %1$d MB — download it manually.</string>
+    <string name="opds_open_failed">Couldn\'t add the book</string>
+    <string name="opds_no_format">No EPUB, FB2 or CBZ file — nothing to open.</string>
+    <string name="opds_opening_book">Adding to the library…</string>
+    <string name="opds_add_to_library">Add to library</string>
+    <string name="opds_open">Open</string>
+    <string name="opds_open_catalog">Open catalog</string>
+    <string name="opds_no_details">Details unavailable — open the catalog</string>
+    <string name="opds_delete_title">Remove catalog?</string>
+    <string name="opds_delete_desc_fmt">“%1$s” will disappear from the list. Downloaded books stay in the library.</string>
+    <string name="opds_delete_confirm">Remove</string>
+    <string name="opds_sections_hint">Pick a section</string>
+    <string name="opds_sort_label">Sort</string>
 </resources>

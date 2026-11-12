@@ -47,6 +47,7 @@ import dev.mirutime.app.features.finder.data.LocalSafBookSource
 import dev.mirutime.app.features.finder.data.LocalSafCache
 import dev.mirutime.app.features.finder.data.LocalSafRegistry
 import dev.mirutime.app.features.finder.data.LocalSourceFolders
+import dev.mirutime.app.features.finder.data.opdsPageToCatalogBooks
 import dev.mirutime.app.features.library.data.BookCoverStore
 import dev.mirutime.app.features.library.data.LibraryBookRefreshPort
 import dev.mirutime.app.features.library.data.LibraryUpdateScheduler
@@ -57,6 +58,9 @@ import dev.mirutime.app.features.migration.data.BookMigrationTargets
 import dev.mirutime.app.features.migration.data.DownloadFileStoreMigrationFiles
 import dev.mirutime.app.features.migration.data.MigrationSearch
 import dev.mirutime.app.features.migration.data.MigrationSourceGate
+import dev.mirutime.app.features.opds.data.AndroidOpdsTransport
+import dev.mirutime.app.features.opds.data.OpdsControllerImpl
+import dev.mirutime.app.features.opds.data.OpdsCredentialStore
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.settings.data.BackupRestoreService
 import dev.mirutime.app.features.settings.data.BackupService
@@ -195,6 +199,8 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             chapterFiles = downloadFiles,
             onBookRemoved = { bookUrl -> removeVideoDownloads(setOf(bookUrl)) },
             bookLocks = bookWriteLocks,
+            // Catalogue add for an entry that is not a library row yet.
+            opds = opdsController,
         )
     }
     // One Finder provider shared by the Finder tab and migration search; it
@@ -211,6 +217,7 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             registry = localSafRegistry,
             settingsStore = settingsStore,
             bookProvider = pluginBookProvider,
+            opds = opdsController,
         )
     }
     // One catalogue visit outlives its composable: an in-flight page keeps
@@ -220,6 +227,9 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             page = finderProvider::page,
             localSnapshot = finderProvider::localCatalogSnapshot,
             localPage = finderProvider::localCatalogPage,
+            opdsFeed = finderProvider::opdsFeed,
+            opdsSearch = finderProvider::opdsSearchUrl,
+            opdsBooks = ::opdsPageToCatalogBooks,
         )
     }
     // Migration writes DB rows and app-private files; per-novel settings live
@@ -298,6 +308,20 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             fileSystem = localFileSystem,
             baseDir = filesDir,
             coverStore = coverStore,
+        )
+    }
+    // OPDS catalogs: rows in the library DB, credentials in noBackupFilesDir,
+    // downloads through the plugin graph and the same local importer as SAF.
+    private val opdsTransport by lazy { AndroidOpdsTransport(pluginGraph) }
+    val opdsController by lazy {
+        OpdsControllerImpl(
+            library = libraryRepository,
+            credentials = OpdsCredentialStore.android(this),
+            transport = opdsTransport,
+            importer = localBookImporter,
+            cacheDir = cacheDir,
+            registerHost = pluginGraph::registerOpdsCatalogHost,
+            clearHost = pluginGraph::clearOpdsCatalogHost,
         )
     }
     val readerGraph: ReaderGraph by lazy {

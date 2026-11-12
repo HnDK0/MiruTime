@@ -23,6 +23,7 @@ import dev.mirutime.app.features.finder.domain.LinkResolution
 import dev.mirutime.app.features.finder.domain.LocalBook
 import dev.mirutime.app.features.finder.domain.LocalCatalogFolder
 import dev.mirutime.app.features.finder.domain.LocalSources
+import dev.mirutime.app.features.finder.domain.OpdsSources
 import dev.mirutime.app.features.finder.domain.PluginExtension
 import dev.mirutime.app.features.finder.domain.PluginFileInstall
 import dev.mirutime.app.features.finder.domain.PluginFilter
@@ -35,21 +36,30 @@ import dev.mirutime.app.features.finder.domain.applyCatalogFilters
 import dev.mirutime.app.features.finder.domain.applyMembership
 import dev.mirutime.app.features.library.data.BookCoverStore
 import dev.mirutime.app.features.library.data.ImportSummary
+import dev.mirutime.app.features.library.data.LocalBooksInstallId
+import dev.mirutime.app.features.library.data.LocalMangaInstallId
 import dev.mirutime.app.features.library.data.LocalBookImporter
 import dev.mirutime.app.features.library.data.LocalBookProvider
 import dev.mirutime.app.features.library.data.LocalBooksInstallId
 import dev.mirutime.app.features.library.data.LocalImportResult
-import dev.mirutime.app.features.library.data.LocalMangaInstallId
 import dev.mirutime.app.features.library.data.PickedImportFile
 import dev.mirutime.app.features.library.data.resolveStoredCover
 import dev.mirutime.app.features.library.data.summarizeImports
 import dev.mirutime.app.features.library.domain.ContentType
+import dev.mirutime.app.features.opds.data.OpdsEntryOptions
+import dev.mirutime.app.features.opds.data.canonicalCatalogUrl
+import dev.mirutime.app.features.opds.domain.OpdsController
+import dev.mirutime.app.features.opds.domain.OpdsFailure
+import dev.mirutime.app.features.opds.domain.OpdsPage
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.settings.data.SettingsStore
 import dev.mirutime.data.library.LibraryMembership
+import dev.mirutime.data.library.OpdsEntryEntity
 import dev.mirutime.data.library.LibraryRepository
+import dev.mirutime.data.library.libraryBookKey
 import dev.mirutime.core.api.CatalogPage as CoreCatalogPage
 import dev.mirutime.core.api.ContentType as CoreContentType
+import dev.mirutime.core.api.MiruError
 import dev.mirutime.core.api.Outcome
 import dev.mirutime.app.core.PluginRequestException
 import dev.mirutime.app.core.buildPluginErrorReport
@@ -58,6 +68,7 @@ import dev.mirutime.core.api.PluginSource
 import dev.mirutime.core.api.getOrNull
 import dev.mirutime.core.installer.IndexEntry
 import java.net.URI
+import java.net.URLEncoder
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.cancellation.CancellationException
@@ -72,6 +83,15 @@ private const val TAG = "MiruTime.Finder"
 // A broken catalogue cover can fail on every visible tile at once. Keep the
 // automatic repair to one source round-trip per URL per window.
 private const val CATALOG_COVER_REPAIR_COOLDOWN_MS = 30_000L
+
+// OPDS feeds kept for card taps: the tap only needs the feed it came from.
+private const val MAX_OPDS_PAGES = 6
+// Rendered entries cached per catalog: the book page and add read this table,
+// so it is a recent-visits cache, not an archive of the catalog.
+private const val MAX_OPDS_ENTRIES = 200
+private const val SEARCH_TERMS = "{searchTerms}"
+private const val OPENSEARCH_DESCRIPTION_TYPE = "application/opensearchdescription+xml"
+private const val OPENSEARCH_ATOM_TYPE = "application/atom+xml"
 
 // Optimistic pin write: AppSettings flips first so the screen updates
 // immediately; the store write is awaited only to detect a failed commit and
@@ -116,11 +136,22 @@ class PluginFinderDataProvider(
     // Real membership writer (add/remove through the book data layer). Kept
     // nullable for previews/tests that only read the catalogue.
     private val bookProvider: BookDataProvider? = null,
+    // Saved OPDS catalogs ride the ordinary catalogue pipeline. Nullable for
+    // tests/previews that have no OPDS lane.
+    private val opds: OpdsController? = null,
 ) : FinderDataProvider {
     // One filters() call per source per app session: Lua evaluators are
     // expensive, and the schema cannot change until the plugin is reloaded.
     private val filterSchemas = PluginFilterSchemaCache()
     private val catalogCoverRefreshAt = ConcurrentHashMap<String, Long>()
+
+    // Pages loaded per OPDS source, newest last. A card is opened by its
+    // acquisition URL, so the feed that produced it has to stay reachable.
+    private val opdsPages = ConcurrentHashMap<String, List<OpdsPage>>()
+
+    // Resolved OpenSearch search templates per catalog + description document:
+    // the description is a static document, re-fetching it per search is waste.
+    private val opdsSearchTemplates = ConcurrentHashMap<String, String>()
 
     override suspend fun sources(): List<CatalogSource> {
         // Local built-ins keep working (Finder routes source.local to the local
@@ -138,7 +169,25 @@ class PluginFinderDataProvider(
             library?.libraryBookCount(plugin.id)?.let { plugin.id to it }
         }.toMap()
         val plugins = mapSources(installed, AppSettings.pinnedSources, counts)
-        return (local + plugins).distinctBy { it.id }
+        // Saved OPDS catalogs are ordinary Browse rows. refresh() re-reads the
+        // catalog rows from storage; it is a DB read, not a network call.
+        opds?.refresh()
+        val opdsSources = opds?.catalogs?.value.orEmpty().map { catalog ->
+            CatalogSource(
+                id = OpdsSources.idOf(catalog.id),
+                name = catalog.name,
+                language = "",
+                type = ContentType.Novel,
+                version = "OPDS",
+                pinned = OpdsSources.idOf(catalog.id) in AppSettings.pinnedSources,
+                local = false,
+                // Imported entries of THIS catalog, not the whole local library.
+                libraryCount = library?.localBookCountByOrigin(
+                    canonicalCatalogUrl(catalog.url),
+                ) ?: 0,
+            )
+        }
+        return (local + plugins + opdsSources).distinctBy { it.id }
     }
 
     override suspend fun togglePin(sourceId: String): Boolean {
@@ -159,6 +208,12 @@ class PluginFinderDataProvider(
                 localCatalogPage(localBooksFromDb(kind), filters, page)
             }
             return pageResult.withMembership()
+        }
+        OpdsSources.catalogIdOf(sourceId)?.let {
+            // The catalogue screen pages OPDS through OpdsCatalogSession; this
+            // branch is the one-shot path (global search, other callers): one
+            // query, no feed stack.
+            return opdsQueryPage(sourceId, filters)
         }
         val source = graph.source(sourceId) ?: run {
             MiruCoreLogger.w(TAG, "catalog '$sourceId': plugin not loaded")
@@ -207,6 +262,176 @@ class PluginFinderDataProvider(
         return CatalogPage(books = withMembership(books), hasMore = ok.hasNext)
     }
 
+    // One-shot OPDS query: the catalog root, or the feed's search results for a
+    // non-blank query. Feed paging belongs to OpdsCatalogSession.
+    private suspend fun opdsQueryPage(sourceId: String, filters: CatalogFilters): CatalogPage {
+        val query = filters.query.trim()
+        val feed = if (query.isEmpty()) {
+            opdsFeedOrThrow(sourceId, null, "catalog")
+        } else {
+            val root = opdsFeedOrThrow(sourceId, null, "search")
+            val template = when (val resolved = opdsSearchUrl(sourceId, root.url)) {
+                is Outcome.Ok -> resolved.value
+                is Outcome.Err -> throw PluginRequestException(
+                    opdsPluginError(resolved.error),
+                    sourceId = sourceId,
+                    operation = "search",
+                )
+            } ?: return CatalogPage(emptyList(), hasMore = false)
+            opdsFeedOrThrow(sourceId, substituteSearchTerms(template, query), "search")
+        }
+        val books = applyCatalogFilters(
+            books = opdsPageToCatalogBooks(sourceId, feed),
+            filters = filters,
+            // One feed page carries no dates: keep the server order.
+            sourceOrderIsLatest = false,
+            // A non-blank query already went through the feed's search.
+            queryAlreadyApplied = query.isNotEmpty(),
+            // The feed declares its own order (sort links); never re-rank it.
+            sortEnabled = false,
+        )
+        MiruCoreLogger.d(TAG, "opds '$sourceId': ${feed.books.size} feed books -> ${books.size} mapped")
+        return CatalogPage(books = withMembership(books), hasMore = feed.nextUrl != null)
+    }
+
+    /**
+     * One feed page for [OpdsCatalogSession]. Null [url] opens the catalog root;
+     * the page is remembered so a card tap can still find its download entry.
+     * [includeLinks] is the session layer's publication-feed flag (null on a
+     * feed's first page, where the page itself answers it).
+     */
+    suspend fun opdsFeed(
+        sourceId: String,
+        url: String?,
+        includeLinks: Boolean? = null,
+    ): Outcome<OpdsPage> {
+        val catalogId = OpdsSources.catalogIdOf(sourceId)
+            ?: return Outcome.Err(OpdsFailure.Unknown("not-opds-source"))
+        val controller = opds ?: return Outcome.Err(OpdsFailure.Unknown("opds-unavailable"))
+        val catalog = controller.catalogs.value.firstOrNull { it.id == catalogId }
+            ?: return Outcome.Err(OpdsFailure.Unknown("unknown-catalog"))
+        return when (val result = controller.page(catalogId, url)) {
+            is Outcome.Err -> result
+            is Outcome.Ok -> {
+                val page = result.value.withMembership(catalog.url, includeLinks)
+                rememberOpdsPage(sourceId, page)
+                // One batch per rendered page: the entry cache is what a later
+                // book page and an explicit add read, so it never re-fetches.
+                cacheOpdsEntries(catalog.url, page, includeLinks)
+                Outcome.Ok(page)
+            }
+        }
+    }
+
+    /**
+     * Entry URL -> library key for everything on the page, in one join. A card
+     * uses it to open the imported book instead of downloading the entry again.
+     */
+    private suspend fun OpdsPage.withMembership(
+        catalogUrl: String,
+        includeLinks: Boolean?,
+    ): OpdsPage {
+        val urls = entryUrls(includeLinks)
+        val repo = library ?: return this
+        val membership = runCatching {
+            repo.originMembership(canonicalCatalogUrl(catalogUrl), urls)
+        }.getOrDefault(emptyMap())
+        return if (membership.isEmpty()) this else copy(membership = membership)
+    }
+
+    // Best effort: a cache write must never fail the feed the user is reading.
+    private suspend fun cacheOpdsEntries(
+        catalogUrl: String,
+        page: OpdsPage,
+        includeLinks: Boolean?,
+    ) {
+        val repo = library ?: return
+        val entries = opdsEntryRows(catalogUrl, page, includeLinks, System.currentTimeMillis())
+        if (entries.isEmpty()) return
+        runCatching {
+            withContext(Dispatchers.IO) {
+                repo.upsertOpdsEntries(entries)
+                repo.pruneOpdsEntries(catalogUrl, MAX_OPDS_ENTRIES)
+            }
+        }.onFailure { error ->
+            MiruCoreLogger.w(TAG, "opds entry cache write failed: ${error::class.simpleName}")
+        }
+    }
+
+    /**
+     * Search template for [feedUrl] (`{searchTerms}` left for the caller to
+     * fill), or null when the feed offers no usable search. A link pointing at
+     * an OpenSearch description is fetched and its Atom template resolved
+     * against that document's URL.
+     */
+    suspend fun opdsSearchUrl(sourceId: String, feedUrl: String): Outcome<String?> {
+        val catalogId = OpdsSources.catalogIdOf(sourceId)
+            ?: return Outcome.Err(OpdsFailure.Unknown("not-opds-source"))
+        val controller = opds ?: return Outcome.Err(OpdsFailure.Unknown("opds-unavailable"))
+        val feed = opdsPages[sourceId].orEmpty().firstOrNull { it.url == feedUrl }
+            ?: when (val loaded = opdsFeed(sourceId, feedUrl)) {
+                is Outcome.Err -> return loaded
+                is Outcome.Ok -> loaded.value
+            }
+        val link = feed.searchLink ?: return Outcome.Ok(null)
+        if (SEARCH_TERMS in link.href) return Outcome.Ok(link.href)
+        if (link.type?.startsWith(OPENSEARCH_DESCRIPTION_TYPE) != true) return Outcome.Ok(null)
+        val cacheKey = "$catalogId|${link.href}"
+        opdsSearchTemplates[cacheKey]?.let { return Outcome.Ok(it) }
+        val document = when (val text = controller.text(catalogId, link.href)) {
+            is Outcome.Err -> return text
+            is Outcome.Ok -> text.value
+        }
+        val template = opensearchTemplate(document) ?: return Outcome.Ok(null)
+        val resolved = resolveUrlAgainst(link.href, template)
+        opdsSearchTemplates[cacheKey] = resolved
+        return Outcome.Ok(resolved)
+    }
+
+    private suspend fun opdsFeedOrThrow(sourceId: String, url: String?, operation: String): OpdsPage =
+        when (val result = opdsFeed(sourceId, url)) {
+            is Outcome.Ok -> result.value
+            is Outcome.Err -> throw PluginRequestException(
+                opdsPluginError(result.error),
+                sourceId = sourceId,
+                operation = operation,
+            )
+        }
+
+    // Newest page last, capped: a tap only needs the feed it came from.
+    private fun rememberOpdsPage(sourceId: String, page: OpdsPage) {
+        opdsPages[sourceId] = (opdsPages[sourceId].orEmpty().filterNot { it.url == page.url } + page)
+            .takeLast(MAX_OPDS_PAGES)
+    }
+
+    override suspend fun openOpdsBook(sourceId: String, bookUrl: String): Outcome<String> {
+        val catalogId = OpdsSources.catalogIdOf(sourceId)
+            ?: return Outcome.Err(OpdsFailure.Unknown("not-opds-source"))
+        val controller = opds ?: return Outcome.Err(OpdsFailure.Unknown("opds-unavailable"))
+        val catalog = controller.catalogs.value.firstOrNull { it.id == catalogId }
+            ?: return Outcome.Err(OpdsFailure.Unknown("unknown-catalog"))
+        // Same path as an explicit add: the importer writes catalogue
+        // provenance, so the card becomes "in library" on the next page load.
+        val localUrl = when (val added = controller.addEntry(catalog.url, bookUrl, null, catalog.name)) {
+            is Outcome.Err -> return added
+            is Outcome.Ok -> added.value
+        }
+        val installId = library?.book(localUrl)?.installId ?: LocalBooksInstallId
+        return Outcome.Ok(libraryBookKey(installId, localUrl))
+    }
+
+    override suspend fun removeOpdsCatalog(sourceId: String) {
+        val catalogId = OpdsSources.catalogIdOf(sourceId) ?: return
+        val controller = opds ?: return
+        val url = controller.catalogs.value.firstOrNull { it.id == catalogId }?.url
+        controller.remove(catalogId)
+        opdsPages.remove(sourceId)
+        opdsSearchTemplates.keys.removeAll { it.startsWith("$catalogId|") }
+        // remove() already clears its own host entry; this also covers a stale
+        // catalog row that had no credentials registered.
+        if (url != null) graph.clearOpdsCatalogHost(catalogId, url)
+    }
+
     // Legacy genre chips are not a plugin schema. Kept for the current filter
     // sheet until the per-source plugin UI lands; it intentionally returns
     // nothing instead of library tags.
@@ -215,11 +440,19 @@ class PluginFinderDataProvider(
     override suspend fun supportsSearchFilters(sourceId: String): Boolean =
         !LocalSources.isLocal(sourceId) && graph.source(sourceId)?.supportsSearchFilters == true
 
+    // An OPDS feed has no plugin filter schema and no client sort: the screen
+    // keeps its filter/sort entry points hidden for it.
+    override suspend fun supportsFilters(sourceId: String): Boolean =
+        OpdsSources.catalogIdOf(sourceId) == null
+
     override suspend fun sourceLanguage(sourceId: String): String? =
         if (LocalSources.isLocal(sourceId)) null else graph.source(sourceId)?.metadata?.language
 
     override suspend fun filterSchema(sourceId: String): Outcome<List<PluginFilter>> {
         if (LocalSources.isLocal(sourceId)) return Outcome.Ok(emptyList())
+        // OPDS feeds expose no plugin filter schema; an empty schema is honest,
+        // an error would block the filter sheet for a working source.
+        if (OpdsSources.catalogIdOf(sourceId) != null) return Outcome.Ok(emptyList())
         return loadFilterSchema(sourceId, graph.source(sourceId), filterSchemas)
     }
 
@@ -233,6 +466,11 @@ class PluginFinderDataProvider(
                 localSearch(localBooksFromDb(kind), query)
             }
             return withMembership(books)
+        }
+        OpdsSources.catalogIdOf(sourceId)?.let {
+            val books = opdsQueryPage(sourceId, CatalogFilters(query = query)).books.take(40)
+            recordBooks(sourceId, books)
+            return books
         }
         val source = graph.source(sourceId)
             ?: throw PluginRequestException(
@@ -1013,9 +1251,156 @@ internal fun mapCatalogPage(
     return books
 }
 
+// The one classification of a feed's links: on a publication feed they are
+// entries (Gutenberg search results), on a navigation feed they are sections.
+// [includeLinks] is the session layer's flag; null means "first page", where the
+// page itself answers it.
+internal fun OpdsPage.linksArePublications(includeLinks: Boolean?): Boolean =
+    includeLinks ?: (books.isNotEmpty() || nextUrl != null)
+
+/** Entry URLs on the page whose library membership the cards need. */
+internal fun OpdsPage.entryUrls(includeLinks: Boolean?): List<String> =
+    (books.mapNotNull { it.entryUrl } +
+        if (linksArePublications(includeLinks)) links.map { it.url } else emptyList())
+        .distinct()
+
+/** What the entry cache remembers about one feed page, in one pass. */
+internal fun opdsEntryRows(
+    catalogUrl: String,
+    page: OpdsPage,
+    includeLinks: Boolean?,
+    now: Long,
+): List<OpdsEntryEntity> {
+    val direct = page.books.mapNotNull { book ->
+        val entryUrl = book.entryUrl ?: return@mapNotNull null
+        OpdsEntryEntity(
+            catalogUrl = catalogUrl,
+            entryUrl = entryUrl,
+            // The page the entry was listed in: a cache miss re-resolves
+            // the entry from here, never from the entry URL itself.
+            feedUrl = page.url,
+            title = book.title,
+            author = book.author.orEmpty(),
+            description = book.summary.orEmpty(),
+            coverUrl = book.coverUrl,
+            formatsJson = OpdsEntryOptions.encode(book.options),
+            updatedAt = now,
+        )
+    }
+    // A publication feed lists entries as links to their own feed: those still
+    // need metadata for the detail page, formats resolve on demand.
+    val indirect = if (page.linksArePublications(includeLinks)) {
+        page.links.map { link ->
+            OpdsEntryEntity(
+                catalogUrl = catalogUrl,
+                entryUrl = link.url,
+                feedUrl = page.url,
+                title = link.title,
+                author = link.author.orEmpty(),
+                description = link.subtitle.orEmpty(),
+                coverUrl = link.coverUrl,
+                formatsJson = "[]",
+                updatedAt = now,
+            )
+        }
+    } else {
+        emptyList()
+    }
+    return (direct + indirect).distinctBy { it.entryUrl }
+}
+
+// One feed page -> catalogue cards. Navigation entries never reach
+// OpdsPage.books (the controller keeps them in links), so only publications
+// map here. An entry with no supported acquisition still appears: its card is
+// informative, just not openable.
+//
+// The card is keyed by the entry URL, not the file URL: that is the identity
+// `opds_entries` and `local_book_files.origin_entry_url` both use, so a card
+// can find the book it was already added as.
+internal fun opdsPageToCatalogBooks(
+    sourceId: String,
+    page: OpdsPage,
+    /**
+     * True for a result feed: its links are publications even on the last page,
+     * where `nextUrl` is already null.
+     */
+    includeLinks: Boolean = page.nextUrl != null,
+): List<CatalogBook> {
+    val direct = page.books.mapIndexed { index, book ->
+        val entryUrl = book.entryUrl
+        CatalogBook(
+            bookUrl = entryUrl ?: book.downloadUrl ?: book.coverUrl
+                ?: "$sourceId#${page.url}#$index",
+            installId = sourceId,
+            title = book.title,
+            rating = 0f,
+            chapters = 0,
+            genres = book.categories,
+            ongoing = false,
+            coverUrl = book.coverUrl,
+            localFormat = book.format?.name,
+            notImported = true,
+            libraryBookKey = entryUrl?.let { page.membership[it] },
+        )
+    }
+    // A paged feed lists publications as links to their own feed (Gutenberg's
+    // search results carry no acquisition links). They are books, not sections;
+    // the detail step resolves the acquisition one feed down.
+    if (!includeLinks) return direct
+    val indirect = page.links.map { link ->
+        CatalogBook(
+            bookUrl = link.url,
+            installId = sourceId,
+            title = link.title,
+            rating = 0f,
+            chapters = 0,
+            genres = emptyList(),
+            ongoing = false,
+            coverUrl = link.coverUrl,
+            localFormat = null,
+            notImported = true,
+            libraryBookKey = page.membership[link.url],
+        )
+    }
+    return direct + indirect
+}
+
+// Mirrors the page/sort filters onto the PluginError vocabulary the screen
+// already renders. Class names and HTTP status only: never a URL or title.
+internal fun opdsPluginError(error: MiruError): PluginError = when (error) {
+    is OpdsFailure.Network -> PluginError.Network("opds", status = error.status)
+    is OpdsFailure.TooLarge -> PluginError.ResponseTooLarge(error.limitMb.toLong() * 1024 * 1024)
+    else -> PluginError.ScriptError(error::class.simpleName ?: "opds")
+}
+
+internal fun substituteSearchTerms(template: String, query: String): String =
+    template.replace(SEARCH_TERMS, URLEncoder.encode(query, "UTF-8"))
+
+// OpenSearch 1.1 description: `<Url type="application/atom+xml" template="..."/>`.
+// Only attributes matter here, so this stays regex-based and dependency-free.
+internal fun opensearchTemplate(document: String): String? =
+    OSD_URL_ELEMENT.findAll(document).firstNotNullOfOrNull { element ->
+        val type = OSD_TYPE_ATTRIBUTE.find(element.value)?.groupValues?.get(1).orEmpty()
+        OSD_TEMPLATE_ATTRIBUTE.find(element.value)?.groupValues?.get(1)
+            ?.replace("&amp;", "&")
+            ?.takeIf { type.startsWith(OPENSEARCH_ATOM_TYPE) && SEARCH_TERMS in it }
+    }
+
+private val OSD_URL_ELEMENT = Regex("""<Url\b[^>]*>""", RegexOption.IGNORE_CASE)
+private val OSD_TYPE_ATTRIBUTE = Regex("""\btype\s*=\s*["']([^"']*)["']""", RegexOption.IGNORE_CASE)
+private val OSD_TEMPLATE_ATTRIBUTE = Regex("""\btemplate\s*=\s*["']([^"']*)["']""", RegexOption.IGNORE_CASE)
+
+// A description may live on another host than the catalog, so a relative
+// template resolves against the document itself. The token survives the URI
+// parse, which rejects a literal `{searchTerms}`.
+internal fun resolveUrlAgainst(documentUrl: String, template: String): String {
+    val marked = template.replace(SEARCH_TERMS, "miru-search-terms")
+    val resolved = runCatching { URI(documentUrl).resolve(marked).toString() }.getOrDefault(marked)
+    return resolved.replace("miru-search-terms", SEARCH_TERMS)
+}
+
 // A plugin may declare a cover as an absolute URL, a protocol-relative
-// address ("//cdn...") or a path relative to its base URL. Resolve it once
-// here so the image loader only ever sees an absolute address; blank stays
+// address ("//cdn...") or a path relative to its base URL. Resolve it once// here so the image loader only ever sees an absolute address; blank stays
 // null and an unresolvable relative URL (no base) passes through untouched.
 internal fun resolveCoverUrl(raw: String?, baseUrl: String): String? {
     val cover = raw?.trim().orEmpty()

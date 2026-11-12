@@ -93,6 +93,15 @@ data class BookDetails(
     // Plugin-provided or first alt title; shown under the display title in the
     // shell header. Null means "no second name".
     val subtitle: String? = null,
+    // OPDS: the primary action for a catalogue entry that is not a library row.
+    // Null keeps every existing book on the chapter/continue logic.
+    val action: BookActionKind? = null,
+    // OPDS: downloadable formats, default first. Empty for every other source.
+    val downloadOptions: List<BookDownloadOption> = emptyList(),
+    // OPDS: local book key when this entry is already in the library.
+    val libraryBookKey: String? = null,
+    // OPDS: catalogue that owns this entry (for labels and re-adds).
+    val originCatalogUrl: String? = null,
 ) {
     val unreadCount: Int get() = (totalChapters - readCount).coerceAtLeast(0)
     // Match ReaderOpenResolver: reopen the saved/last-read chapter while it is
@@ -143,7 +152,19 @@ fun continueChapterTitle(
  * metadata, so "Read again"/"Continue · Ch. N" must never be derived from an
  * empty list (which used to fall back to chapter 1).
  */
-enum class BookActionKind { LoadingChapters, NoChapters, Start, Continue, ReadAgain }
+enum class BookActionKind { LoadingChapters, NoChapters, Start, Continue, ReadAgain, AddToLibrary, OpenLibrary, OpenCatalog }
+
+/** One OPDS acquisition the detail page can add; [key] is stable per option. */
+data class BookDownloadOption(
+    val key: String,
+    val format: String,
+    val url: String,
+    val isDefault: Boolean = false,
+    /** Non-null for sample/buy/borrow/subscribe: shown, not downloadable. */
+    val unavailableReason: String? = null,
+) {
+    val isDownloadable: Boolean get() = unavailableReason == null
+}
 
 data class BookActionState(
     val kind: BookActionKind,

@@ -1382,6 +1382,71 @@ interface LibraryDao {
     @Query("SELECT * FROM import_jobs ORDER BY createdAt")
     suspend fun importJobs(): List<ImportJobEntity>
 
+    @Query("SELECT * FROM opds_catalogs ORDER BY addedAt")
+    suspend fun opdsCatalogs(): List<OpdsCatalogEntity>
+
+    @Upsert
+    suspend fun upsertOpdsCatalog(catalog: OpdsCatalogEntity)
+
+    @Query("DELETE FROM opds_catalogs WHERE id = :id")
+    suspend fun deleteOpdsCatalogRow(id: String)
+
+    @Upsert
+    suspend fun upsertOpdsEntries(entries: List<OpdsEntryEntity>)
+
+    @Query("DELETE FROM opds_entries WHERE catalogUrl = :catalogUrl")
+    suspend fun deleteOpdsEntries(catalogUrl: String)
+
+    @Query("SELECT * FROM opds_entries WHERE catalogUrl = :catalogUrl AND entryUrl = :entryUrl")
+    suspend fun opdsEntry(catalogUrl: String, entryUrl: String): OpdsEntryEntity?
+
+    @Query("SELECT * FROM opds_entries WHERE catalogUrl = :catalogUrl AND entryUrl IN (:entryUrls)")
+    suspend fun opdsEntries(catalogUrl: String, entryUrls: List<String>): List<OpdsEntryEntity>
+
+    // Bounded cache: a feed page is cheap to re-fetch, an unbounded table is not.
+    @Query(
+        "DELETE FROM opds_entries WHERE catalogUrl = :catalogUrl AND entryUrl NOT IN " +
+            "(SELECT entryUrl FROM opds_entries WHERE catalogUrl = :catalogUrl " +
+            "ORDER BY updatedAt DESC LIMIT :keep)",
+    )
+    suspend fun pruneOpdsEntries(catalogUrl: String, keep: Int)
+
+    @Query(
+        "SELECT * FROM local_book_files WHERE origin_catalog_url = :catalogUrl " +
+            "AND origin_entry_url IN (:entryUrls)",
+    )
+    suspend fun localBookFilesByOrigin(
+        catalogUrl: String,
+        entryUrls: List<String>,
+    ): List<LocalBookFileEntity>
+
+    // Entry URL -> the book it was imported as. One join, no per-entry query.
+    @Query(
+        "SELECT f.origin_entry_url AS originEntryUrl, b.installId AS installId, b.url AS url " +
+            "FROM local_book_files f JOIN books b ON b.bookId = f.bookId " +
+            // The catalogue URL is canonicalized on write; rtrim keeps rows
+            // imported before that rule matching after the user edits the form.
+            "WHERE rtrim(f.origin_catalog_url, '/') = rtrim(:catalogUrl, '/') " +
+            "AND f.origin_entry_url IN (:entryUrls)",
+    )
+    suspend fun localBookOriginRows(
+        catalogUrl: String,
+        entryUrls: List<String>,
+    ): List<LocalBookOriginRow>
+
+    @Query(
+        "SELECT COUNT(*) FROM local_book_files " +
+            "WHERE rtrim(origin_catalog_url, '/') = rtrim(:catalogUrl, '/')",
+    )
+    suspend fun localBookCountByOrigin(catalogUrl: String): Int
+
+    // Catalogue display name per imported book, for the library card label.
+    @Query(
+        "SELECT `bookId`, `origin_catalog_name` AS originCatalogName FROM local_book_files " +
+            "WHERE bookId IN (:bookIds) AND origin_catalog_name != ''",
+    )
+    suspend fun localBookOriginNames(bookIds: List<Long>): List<LocalBookOriginNameRow>
+
     @Upsert
     suspend fun upsertChapterTranslation(translation: ChapterTranslationEntity): Long
 

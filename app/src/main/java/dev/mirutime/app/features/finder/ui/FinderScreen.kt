@@ -1,7 +1,10 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package dev.mirutime.app.features.finder.ui
 
 import android.widget.Toast
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,19 +59,24 @@ import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
 import dev.mirutime.uikit.SkeletonBar
+import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.uikit.miruCardElevation
 import dev.mirutime.uikit.miruCardSurface
 import dev.mirutime.app.features.finder.data.FinderDataProvider
 import dev.mirutime.app.features.finder.domain.BrowseFilters
 import dev.mirutime.app.features.finder.domain.CatalogSource
 import dev.mirutime.app.features.finder.domain.LocalSources
+import dev.mirutime.app.features.finder.domain.OpdsSources
 import dev.mirutime.app.features.finder.domain.applyBrowse
 import dev.mirutime.app.features.finder.domain.supportsPluginTranslation
 import dev.mirutime.app.features.finder.domain.withPin
 import dev.mirutime.app.features.library.data.PickedImportFile
 import dev.mirutime.app.features.library.ui.ImportSheet
+import dev.mirutime.app.features.opds.domain.OpdsController
+import dev.mirutime.app.features.opds.ui.OpdsAddCatalogSheet
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.settings.ui.PluginTranslationSheet
+import dev.mirutime.core.log.MiruLog
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.launch
 
@@ -89,6 +97,9 @@ private val BottomFloatClearance = 48.dp
 fun FinderScreen(
     contentPadding: PaddingValues,
     provider: FinderDataProvider,
+    // Adding a catalog is the only OPDS surface: saved catalogs are ordinary
+    // sources in the list below, so there is no separate OPDS screen.
+    opdsController: OpdsController,
     onSourceOpen: (String) -> Unit = {},
     onLocalOpen: (kind: String) -> Unit = {},
     onSearchOpen: () -> Unit = {},
@@ -106,6 +117,8 @@ fun FinderScreen(
     var sheet by remember { mutableStateOf<BrowseSheetKind?>(null) }
     var importOpen by remember { mutableStateOf(false) }
     var linkOpen by remember { mutableStateOf(false) }
+    var opdsAddOpen by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<CatalogSource?>(null) }
     var translationFor by remember { mutableStateOf<CatalogSource?>(null) }
     var pinningSourceId by remember { mutableStateOf<String?>(null) }
 
@@ -148,6 +161,14 @@ fun FinderScreen(
                     modifier = Modifier.weight(1f),
                 )
             }
+        }
+        item(key = "opds") {
+            BigActionButton(
+                icon = Icons.Filled.Language,
+                label = stringResource(R.string.opds_entry),
+                onClick = { opdsAddOpen = true },
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
         item(key = "browse") {
             MiruSectionCard(
@@ -237,6 +258,12 @@ fun FinderScreen(
                                     onSourceOpen(source.id)
                                 }
                             },
+                            // An OPDS row is a saved catalog: long-press forgets it.
+                            onLongClick = if (OpdsSources.catalogIdOf(source.id) != null) {
+                                { pendingDelete = source }
+                            } else {
+                                null
+                            },
                             onTranslation = { translationFor = source },
                         )
                     }
@@ -288,6 +315,47 @@ fun FinderScreen(
             name = source.name,
             onClose = { translationFor = null },
         )
+    }
+    if (opdsAddOpen) {
+        OpdsAddCatalogSheet(
+            controller = opdsController,
+            onClose = { opdsAddOpen = false },
+            // The catalog is now a source row: show it where the user landed.
+            onAdded = {
+                opdsAddOpen = false
+                scope.launch { reload() }
+            },
+        )
+    }
+    pendingDelete?.let { source ->
+        AppBottomSheet(
+            title = stringResource(R.string.opds_delete_title),
+            description = stringResource(R.string.opds_delete_desc_fmt, source.name),
+            onClose = { pendingDelete = null },
+            closeLabel = stringResource(R.string.st_cancel),
+            doneLabel = stringResource(R.string.opds_delete_confirm),
+            doneDanger = true,
+            onDone = {
+                pendingDelete = null
+                scope.launch {
+                    try {
+                        provider.removeOpdsCatalog(source.id)
+                        reload()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        MiruLog.w(
+                            "opds",
+                            "catalog remove failed source=${MiruLog.idHash(source.id)} " +
+                                "error=${e.javaClass.simpleName}",
+                        )
+                    }
+                }
+            },
+        ) {
+            // No body: the title names the catalog and the description says
+            // what happens to it; a body line would just repeat the name.
+        }
     }
     if (linkOpen) {
         AddByLinkSheet(
@@ -343,20 +411,24 @@ internal fun toastImported(
 
 // Source row: icon, name (+ small pin glyph), "EN · 3 in library · Novels"
 // (local: "N files · EPUB, FB2"), translation shortcut on the right (plugins only).
+// An OPDS row also reacts to a long press (forget the saved catalog).
 @Composable
 private fun SourceRow(
     source: CatalogSource,
     onOpen: () -> Unit,
     onTranslation: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val extra = LocalMiruExtraColors.current
     val translating = AppSettings.pluginTranslation[source.id]?.enabled == true
-    val canTranslate = !source.local && supportsPluginTranslation(source.type)
+    val canTranslate = !source.local &&
+        OpdsSources.catalogIdOf(source.id) == null &&
+        supportsPluginTranslation(source.type)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onOpen)
+            .combinedClickable(role = Role.Button, onClick = onOpen, onLongClick = onLongClick)
             .defaultMinSize(minHeight = MiruSize.Row)
             .padding(
                 start = MiruSpace.L,

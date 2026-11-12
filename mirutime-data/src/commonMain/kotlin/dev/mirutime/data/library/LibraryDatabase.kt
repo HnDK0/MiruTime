@@ -7,7 +7,7 @@ import androidx.room3.RoomDatabaseConstructor
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import kotlinx.coroutines.Dispatchers
 
-const val LibrarySchemaVersion = 10
+const val LibrarySchemaVersion = 12
 
 /**
  * Oldest backup schema the restore path accepts. v6 archives are migrated to
@@ -35,6 +35,8 @@ const val MinimumRestorableBackupSchemaVersion = 6
         ChapterPageEntity::class,
         LocalBookFileEntity::class,
         ImportJobEntity::class,
+        OpdsCatalogEntity::class,
+        OpdsEntryEntity::class,
         ChapterTranslationEntity::class,
         TranslationBlockEntity::class,
         BookTranslationEntity::class,

@@ -168,6 +168,14 @@ interface BookDataProvider {
     /** Deletes persisted chapter translations for the selected indexes. */
     suspend fun deleteChapterTranslations(bookUrl: String, chapterIndexes: Set<Int>): Int = 0
 
+    /**
+     * OPDS only: adds a catalogue entry to the library and returns the local
+     * book key the reader opens. [optionKey] picks a download option; null takes
+     * the entry's default. Providers without a catalogue keep the typed error.
+     */
+    suspend fun addOpdsBook(bookUrl: String, optionKey: String?): Outcome<String> =
+        Outcome.Err(PluginError.ScriptError("OPDS is not supported by this provider"))
+
     /** Default: loop single writes; DB-backed providers override with one UPDATE. */
     suspend fun markChaptersRead(bookUrl: String, chapterIndexes: Set<Int>, read: Boolean) {
         chapterIndexes.forEach { markChapterRead(bookUrl, it, read) }

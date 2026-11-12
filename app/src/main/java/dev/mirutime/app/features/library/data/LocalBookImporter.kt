@@ -59,12 +59,26 @@ internal enum class LocalImportFormat(
     val isManga: Boolean get() = this == CBZ
 
     companion object {
+        // OPDS/Calibre catalogs hand out fb2 both zipped and as XML, under
+        // several unregistered media types; the reader sniffs the archive
+        // itself, so both map to FB2.
+        private val FB2_MIME = setOf(
+            "application/x-fictionbook+xml",
+            "application/x-fictionbook",
+            "application/fb2+zip",
+            "application/x-fb2+zip",
+            "application/fb2",
+            "text/fb2+xml",
+        )
+
         fun forFile(fileName: String, mime: String? = null): LocalImportFormat? {
-            val extension = fileName.substringAfterLast('.', "").lowercase()
+            val name = fileName.lowercase()
+            if (name.endsWith(".fb2.zip")) return FB2
+            val extension = name.substringAfterLast('.', "")
             entries.firstOrNull { it.extension == extension }?.let { return it }
-            return when (mime?.lowercase()) {
+            return when (mime?.substringBefore(';')?.trim()?.lowercase()) {
                 "application/epub+zip" -> EPUB
-                "application/x-fictionbook+xml", "application/x-fictionbook" -> FB2
+                in FB2_MIME -> FB2
                 "application/vnd.comicbook+zip", "application/x-cbz" -> CBZ
                 else -> null
             }
@@ -187,6 +201,68 @@ internal fun localImportMembership(
     inLibrary = addToLibrary,
     addedToLibraryAt = timestamp.takeIf { addToLibrary },
 )
+
+/**
+ * Catalogue provenance for an OPDS import. [sourceFileUrl] is the acquisition
+ * URL the copy came from: the temp file it was downloaded into is deleted.
+ */
+data class ImportOrigin(
+    val catalogUrl: String,
+    val catalogName: String,
+    val entryUrl: String,
+    /** Source URL for `local_book_files.uri`, not the deleted temp path. */
+    val sourceFileUrl: String,
+)
+
+// The file row is pure data; keeping its construction testable is what lets the
+// catalogue provenance be asserted without an Android Context.
+internal fun localBookFileEntity(
+    bookId: Long,
+    uri: String,
+    displayName: String,
+    format: LocalImportFormat,
+    mime: String?,
+    size: Long,
+    sha256: String,
+    target: String,
+    timestamp: Long,
+    origin: ImportOrigin?,
+): LocalBookFileEntity = LocalBookFileEntity(
+    bookId = bookId,
+    // A catalogue row keeps the acquisition URL: the temp file the import
+    // copied from is deleted.
+    uri = origin?.sourceFileUrl ?: uri,
+    displayName = displayName,
+    format = format.format,
+    mime = mime,
+    sizeBytes = size,
+    sha256 = sha256,
+    copyPath = target,
+    importedAt = timestamp,
+    originCatalogUrl = origin?.catalogUrl.orEmpty(),
+    originEntryUrl = origin?.entryUrl.orEmpty(),
+    originCatalogName = origin?.catalogName.orEmpty(),
+)
+
+/**
+ * Same bytes, added again from a catalogue: the newest add wins, so the library
+ * card and the "in library" badge point at the entry the user actually used.
+ * A row imported from a device file keeps its own SAF [uri]: only a row that
+ * already came from a catalogue switches to the newest acquisition URL.
+ */
+internal fun LocalBookFileEntity.withOrigin(origin: ImportOrigin): LocalBookFileEntity = copy(
+    uri = if (originCatalogUrl.isNotBlank()) origin.sourceFileUrl else uri,
+    originCatalogUrl = origin.catalogUrl,
+    originEntryUrl = origin.entryUrl,
+    originCatalogName = origin.catalogName,
+)
+
+/** The one import call the catalogue lane needs; a fake implements it in tests. */
+interface LocalImportPort {
+    suspend fun import(file: java.io.File, origin: ImportOrigin?): LocalImportResult
+}
+
+private data class PersistedBook(val bookId: Long, val title: String)
 
 sealed class LocalImportResult {
     data class Success(
@@ -320,10 +396,27 @@ class LocalBookImporter(
     private val now: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val maxBytes: Long = MAX_IMPORT_BYTES,
-) {
+) : LocalImportPort {
     private val resolver = context.applicationContext.contentResolver
 
-    suspend fun import(uri: Uri, addToLibrary: Boolean = true): LocalImportResult {
+    /** Catalogue entry point: a download is always an explicit library add. */
+    override suspend fun import(file: java.io.File, origin: ImportOrigin?): LocalImportResult =
+        import(Uri.fromFile(file), addToLibrary = true, origin = origin)
+
+    suspend fun import(
+        uri: Uri,
+        addToLibrary: Boolean = true,
+        origin: ImportOrigin? = null,
+    ): LocalImportResult = importWithOrigin(uri, addToLibrary, origin)
+
+    // D8 (AGP 9.4) crashes with ArrayIndexOutOfBounds on this one large suspend
+    // method once the origin parameter is added; the body lives in a separate
+    // signature so the dexer keeps two small methods.
+    private suspend fun importWithOrigin(
+        uri: Uri,
+        addToLibrary: Boolean,
+        origin: ImportOrigin?,
+    ): LocalImportResult {
         val displayName = displayName(uri)
         val mime = runCatching { resolver.getType(uri) }.getOrNull()
         val format = LocalImportFormat.forFile(displayName, mime)
@@ -356,6 +449,9 @@ class LocalBookImporter(
                 if (addToLibrary && !existingBook.inLibrary) {
                     library.addToLibrary(existingBook.bookId, now())
                 }
+                if (origin != null && existing != null) {
+                    library.saveLocalBookFile(existing.withOrigin(origin))
+                }
                 temp.delete()
                 update(job, progress = 1.0, status = "COMPLETE")
                 return LocalImportResult.Success(
@@ -377,88 +473,28 @@ class LocalBookImporter(
             val timestamp = now()
             val bookUrl = "local://${newId()}"
             val fallbackTitle = displayName.substringBeforeLast('.').ifBlank { "Untitled" }
-            val title: String
-            when (format) {
-                LocalImportFormat.EPUB -> EpubFileReader(file).use { reader ->
-                    title = reader.title.trim().ifBlank { fallbackTitle }
-                    val author = reader.author?.trim().orEmpty()
-                    val bookId = saveBook(
-                        format = format,
-                        bookUrl = bookUrl,
-                        title = title,
-                        author = author,
-                        description = reader.description.orEmpty(),
-                        genres = emptyList(),
-                        timestamp = timestamp,
-                        inLibrary = addToLibrary,
-                    )
-                    createdBookId = bookId
-                    saveFileRow(bookId, uri, displayName, format, mime, size, sha256, target, timestamp)
-                    val count = persistTextChapters(
-                        bookId = bookId,
-                        bookUrl = bookUrl,
-                        bookDir = bookDir,
-                        timestamp = timestamp,
-                    ) { consumer -> reader.forEachChapter(consumer) }
-                    library.updateTotalChapters(bookId, count)
-                    storeCover(bookId, reader.coverBytes)
-                }
-                LocalImportFormat.FB2 -> Fb2FileReader(file).let { reader ->
-                    title = reader.book.title.trim().ifBlank { fallbackTitle }
-                    val author = reader.book.author?.trim().orEmpty()
-                    val bookId = saveBook(
-                        format = format,
-                        bookUrl = bookUrl,
-                        title = title,
-                        author = author,
-                        description = reader.book.description.orEmpty(),
-                        genres = emptyList(),
-                        timestamp = timestamp,
-                        inLibrary = addToLibrary,
-                    )
-                    createdBookId = bookId
-                    saveFileRow(bookId, uri, displayName, format, mime, size, sha256, target, timestamp)
-                    val count = persistTextChapters(
-                        bookId = bookId,
-                        bookUrl = bookUrl,
-                        bookDir = bookDir,
-                        timestamp = timestamp,
-                    ) { consumer -> reader.forEachChapter(consumer) }
-                    library.updateTotalChapters(bookId, count)
-                    storeCover(bookId, reader.book.coverBytes)
-                }
-                LocalImportFormat.CBZ -> CbzFileReader(file).use { reader ->
-                    title = reader.title.trim().ifBlank { fallbackTitle }
-                    val bookId = saveBook(
-                        format = format,
-                        bookUrl = bookUrl,
-                        title = title,
-                        author = "Unknown",
-                        description = reader.description.orEmpty(),
-                        genres = emptyList(),
-                        timestamp = timestamp,
-                        inLibrary = addToLibrary,
-                    )
-                    createdBookId = bookId
-                    saveFileRow(bookId, uri, displayName, format, mime, size, sha256, target, timestamp)
-                    val staged = persistCbzPages(
-                        bookId = bookId,
-                        bookUrl = bookUrl,
-                        bookDir = bookDir,
-                        title = title,
-                        reader = reader,
-                        timestamp = timestamp,
-                    )
-                    library.updateTotalChapters(bookId, 1)
-                    // The first natural page is the CBZ cover.
-                    storeCover(bookId, staged.coverBytes)
-                }
-            }
+            val persisted = persistBook(
+                format = format,
+                file = file,
+                bookUrl = bookUrl,
+                fallbackTitle = fallbackTitle,
+                uri = uri,
+                displayName = displayName,
+                mime = mime,
+                size = size,
+                sha256 = sha256,
+                target = target,
+                bookDir = bookDir,
+                timestamp = timestamp,
+                addToLibrary = addToLibrary,
+                origin = origin,
+            )
+            createdBookId = persisted.bookId
             update(job, progress = 1.0, status = "COMPLETE")
             return LocalImportResult.Success(
-                bookId = createdBookId ?: 0L,
+                bookId = persisted.bookId,
                 bookUrl = bookUrl,
-                title = title,
+                title = persisted.title,
                 duplicate = false,
             )
         } catch (e: CancellationException) {
@@ -474,6 +510,103 @@ class LocalBookImporter(
             return LocalImportResult.Failure(message)
         } finally {
             if (temp.exists()) temp.delete()
+        }
+    }
+
+    // Kept out of importWithOrigin: D8 (AGP 9.4) fails on that one large
+    // suspend method, and the three parser branches are the bulk of it.
+    private suspend fun persistBook(
+        format: LocalImportFormat,
+        file: File,
+        bookUrl: String,
+        fallbackTitle: String,
+        uri: Uri,
+        displayName: String,
+        mime: String?,
+        size: Long,
+        sha256: String,
+        target: String,
+        bookDir: String,
+        timestamp: Long,
+        addToLibrary: Boolean,
+        origin: ImportOrigin?,
+    ): PersistedBook = when (format) {
+        LocalImportFormat.EPUB -> EpubFileReader(file).use { reader ->
+            val title = reader.title.trim().ifBlank { fallbackTitle }
+            val bookId = saveBook(
+                format = format,
+                bookUrl = bookUrl,
+                title = title,
+                author = reader.author?.trim().orEmpty(),
+                description = reader.description.orEmpty(),
+                genres = emptyList(),
+                timestamp = timestamp,
+                inLibrary = addToLibrary,
+                origin = origin,
+            )
+            saveFileRow(bookId, uri, displayName, format, mime, size, sha256, target, timestamp, origin)
+            val count = persistTextChapters(
+                bookId = bookId,
+                bookUrl = bookUrl,
+                bookDir = bookDir,
+                timestamp = timestamp,
+            ) { consumer -> reader.forEachChapter(consumer) }
+            library.updateTotalChapters(bookId, count)
+            storeCover(bookId, reader.coverBytes)
+            PersistedBook(bookId, title)
+        }
+
+        LocalImportFormat.FB2 -> Fb2FileReader(file).let { reader ->
+            val title = reader.book.title.trim().ifBlank { fallbackTitle }
+            val bookId = saveBook(
+                format = format,
+                bookUrl = bookUrl,
+                title = title,
+                author = reader.book.author?.trim().orEmpty(),
+                description = reader.book.description.orEmpty(),
+                genres = emptyList(),
+                timestamp = timestamp,
+                inLibrary = addToLibrary,
+                origin = origin,
+            )
+            saveFileRow(bookId, uri, displayName, format, mime, size, sha256, target, timestamp, origin)
+            val count = persistTextChapters(
+                bookId = bookId,
+                bookUrl = bookUrl,
+                bookDir = bookDir,
+                timestamp = timestamp,
+            ) { consumer -> reader.forEachChapter(consumer) }
+            library.updateTotalChapters(bookId, count)
+            storeCover(bookId, reader.book.coverBytes)
+            PersistedBook(bookId, title)
+        }
+
+        LocalImportFormat.CBZ -> CbzFileReader(file).use { reader ->
+            val title = reader.title.trim().ifBlank { fallbackTitle }
+            val bookId = saveBook(
+                format = format,
+                bookUrl = bookUrl,
+                title = title,
+                author = "Unknown",
+                description = reader.description.orEmpty(),
+                genres = emptyList(),
+                timestamp = timestamp,
+                inLibrary = addToLibrary,
+                origin = origin,
+            )
+            saveFileRow(bookId, uri, displayName, format, mime, size, sha256, target, timestamp, origin)
+            val staged = persistCbzPages(
+                bookId = bookId,
+                bookUrl = bookUrl,
+                bookDir = bookDir,
+                title = title,
+                reader = reader,
+                timestamp = timestamp,
+            )
+            library.updateTotalChapters(bookId, 1)
+            // The first natural page is the CBZ cover.
+            storeCover(bookId, staged.coverBytes)
+            PersistedBook(bookId, title)
         }
     }
 
@@ -523,6 +656,7 @@ class LocalBookImporter(
         genres: List<String>,
         timestamp: Long,
         inLibrary: Boolean,
+        origin: ImportOrigin?,
     ): Long = library.saveBook(
         BookEntity(
             installId = format.installId,
@@ -548,7 +682,7 @@ class LocalBookImporter(
             authorRaw = author,
             authorsJson = JSONArray(listOfNotNull(author.takeIf { it.isNotBlank() })).toString(),
             description = description,
-            metadataSource = "LOCAL",
+            metadataSource = if (origin != null) "OPDS" else "LOCAL",
             metadataUpdatedAt = timestamp,
         ),
     )
@@ -563,18 +697,20 @@ class LocalBookImporter(
         sha256: String,
         target: String,
         timestamp: Long,
+        origin: ImportOrigin?,
     ) {
         library.saveLocalBookFile(
-            LocalBookFileEntity(
+            localBookFileEntity(
                 bookId = bookId,
                 uri = uri.toString(),
                 displayName = displayName,
-                format = format.format,
+                format = format,
                 mime = mime,
-                sizeBytes = size,
+                size = size,
                 sha256 = sha256,
-                copyPath = target,
-                importedAt = timestamp,
+                target = target,
+                timestamp = timestamp,
+                origin = origin,
             ),
         )
     }

@@ -3,6 +3,7 @@
 package dev.mirutime.app.features.finder.ui
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +26,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tune
@@ -69,7 +71,11 @@ import dev.mirutime.app.core.catalogBookKey
 import dev.mirutime.app.core.buildPluginErrorReport
 import dev.mirutime.app.core.PluginRequestException
 import dev.mirutime.uikit.CoverInset
+import dev.mirutime.uikit.ChipOption
+import dev.mirutime.uikit.ChipRow
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.MiruActionRow
+import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.app.design.components.BookCover
@@ -82,9 +88,11 @@ import dev.mirutime.uikit.MiruSearchBar
 import dev.mirutime.app.features.book.data.MembershipResult
 import dev.mirutime.app.features.finder.data.CatalogSessionRegistry
 import dev.mirutime.app.features.finder.data.FinderDataProvider
+import dev.mirutime.app.features.finder.data.OpdsCatalogSession
 import dev.mirutime.app.features.finder.domain.CatalogBook
 import dev.mirutime.app.features.finder.domain.CatalogFilters
 import dev.mirutime.app.features.finder.domain.LocalSources
+import dev.mirutime.app.features.finder.domain.OpdsSources
 import dev.mirutime.app.features.finder.domain.PluginFilter
 import dev.mirutime.app.features.finder.domain.shouldShowSearchLanguageHint
 import dev.mirutime.app.features.finder.domain.isWebUrl
@@ -133,6 +141,8 @@ internal fun SourceCatalogScreen(
     // Fired once per committed membership write so the shell can drop cached
     // snapshots and bump its data revision (library counts/badges).
     onLibraryChanged: () -> Unit = {},
+    // Exposes the screen's internal back (OPDS feed stack) to the shell header.
+    onBackAction: ((() -> Unit)?) -> Unit = {},
     // Query carried over from the global search ("open this catalogue").
     initialQuery: String = "",
     // Solve a CF challenge for the request that failed, then retry. Supplied
@@ -144,6 +154,10 @@ internal fun SourceCatalogScreen(
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val isLocal = LocalSources.isLocal(sourceId)
+    // OPDS catalogs ride the same screen as plugins but are not plugins: they
+    // navigate feeds (sections/facets/sort/search) instead of filtering one
+    // listing, and the server order is authoritative.
+    val isOpds = OpdsSources.catalogIdOf(sourceId) != null
     val siteUrl = if (isLocal) "" else provider.baseUrl(sourceId).trim()
     // Plugin genres are meaningless for a folder scan: a local source offers
     // its real formats only. Plugin sources have no app-owned genre list at
@@ -156,10 +170,16 @@ internal fun SourceCatalogScreen(
     // query and only moves after the debounce window.
     // Applied filters survive the book round-trip (rememberSaveable is restored
     // per back-stack entry), so returning keeps the filtered results instead of
-    // resetting to the default listing (FR-077).
-    var filters by rememberSaveable(sourceId, initialQuery, stateSaver = CatalogFiltersSaver) {
-        mutableStateOf(CatalogFilters(query = initialQuery))
+    // resetting to the default listing (FR-077). OPDS persists nothing here: a
+    // query never becomes a filter, the open feed lives in the session.
+    val filtersState = if (isOpds) {
+        remember(sourceId, initialQuery) { mutableStateOf(CatalogFilters(query = initialQuery)) }
+    } else {
+        rememberSaveable(sourceId, initialQuery, stateSaver = CatalogFiltersSaver) {
+            mutableStateOf(CatalogFilters(query = initialQuery))
+        }
     }
+    var filters by filtersState
     // The field follows the applied/restored query, so returning from a book
     // shows the typed query that produced the results, not just the route query.
     var input by rememberSaveable(sourceId, initialQuery) { mutableStateOf(filters.query) }
@@ -178,6 +198,11 @@ internal fun SourceCatalogScreen(
     // The session owns paging beyond the composition: opening a book does not
     // cancel the page that is already in flight.
     val session = remember(sourceId, filters) { sessions.get(sourceId, filters) }
+    // Feed navigation is the only thing an OPDS session adds to the contract.
+    val opdsSession = session as? OpdsCatalogSession
+    // True while the visible layer is a search result, so clearing the field
+    // returns to the feed the search was run from instead of popping a section.
+    var opdsSearchLayer by remember(sourceId) { mutableStateOf(false) }
     val pageState by session.state.collectAsState()
     val books = pageState.books
     val loading = pageState.loading
@@ -379,10 +404,24 @@ internal fun SourceCatalogScreen(
         }
     }
 
+    // A plugin card opens its book page by URL. An OPDS card opens what the
+    // entry already is: its library row when the provider says it is there,
+    // otherwise the detail page, which owns the format pick and the add. No
+    // download or import ever starts from the grid.
+    fun openBook(book: CatalogBook) {
+        session.deactivate()
+        onBookOpen(book.libraryBookKey ?: book.bookKey)
+    }
+
     val loadMore: () -> Unit = { session.requestNext() }
 
     // One retry path for both a typed plugin failure and a generic error.
     fun retryList() {
+        // OPDS: the failed request is a feed of the current stack, not a query.
+        if (isOpds) {
+            session.retry()
+            return
+        }
         debouncer.cancel()
         if (input != filters.query) {
             // Flush a typed query: restart the list on it.
@@ -390,6 +429,34 @@ internal fun SourceCatalogScreen(
         } else {
             session.retry()
         }
+    }
+
+    // OPDS navigation: every link the server sends is opened as the next feed.
+    fun opdsGoBack() {
+        // Leaving a search layer also drops the text that produced it, so the
+        // field never looks like an active filter on a plain feed.
+        if (opdsSearchLayer) input = ""
+        opdsSearchLayer = false
+        opdsSession?.goBack()
+    }
+
+    // System back walks the OPDS feed stack first; only the root leaves the screen.
+    BackHandler(enabled = isOpds && pageState.canGoBack) { opdsGoBack() }
+    // The shell header uses the same step, so there is one back affordance.
+    val internalBack: (() -> Unit)? = if (isOpds && pageState.canGoBack) ::opdsGoBack else null
+    LaunchedEffect(internalBack) { onBackAction(internalBack) }
+    DisposableEffect(Unit) { onDispose { onBackAction(null) } }
+
+    // Enter runs the typed text as a server search; an empty submit just closes
+    // the search layer it opened.
+    fun opdsSearch() {
+        val text = input.trim()
+        if (text.isEmpty()) {
+            if (opdsSearchLayer) opdsGoBack()
+            return
+        }
+        opdsSession?.search(text)
+        opdsSearchLayer = true
     }
 
     // Auto-pagination: close to the end of the grid -> next page.
@@ -453,71 +520,166 @@ internal fun SourceCatalogScreen(
         horizontalArrangement = Arrangement.spacedBy(MiruSpace.CardGap),
         verticalArrangement = Arrangement.spacedBy(MiruSpace.CardGap),
     ) {
-        item(key = "search", span = { GridItemSpan(maxLineSpan) }) {
-            Column {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-                ) {
-                    MiruSearchBar(
-                        value = input,
-                        onValueChange = { text ->
-                            if (text.isEmpty()) {
-                                // Clear button (and backspace-to-empty): apply now.
+        // Header, top to bottom: search, back, sections, facets, sort. Every row
+        // is its own full-span item so a later pass can count them in the scroll
+        // index (P1 leaves the book-index math untouched).
+        val showSearch = !isOpds || pageState.searchAvailable
+        if (showSearch) {
+            item(key = "search", span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                    ) {
+                        MiruSearchBar(
+                            value = input,
+                            onValueChange = { text ->
+                                if (isOpds) {
+                                    // OPDS: the field is a command, run on submit.
+                                    input = text
+                                } else if (text.isEmpty()) {
+                                    // Clear button (and backspace-to-empty): apply now.
+                                    input = ""
+                                    debouncer.applyNow("")
+                                } else {
+                                    input = text
+                                    debouncer.onInput(text, filters.query)
+                                }
+                            },
+                            onClear = {
                                 input = ""
-                                debouncer.applyNow("")
-                            } else {
-                                input = text
-                                debouncer.onInput(text, filters.query)
+                                if (isOpds) {
+                                    if (opdsSearchLayer) opdsGoBack()
+                                } else {
+                                    debouncer.applyNow("")
+                                }
+                            },
+                            placeholder = stringResource(R.string.finder_search_hint),
+                            // IME Search is an explicit submit: apply now, drop timer.
+                            onSearch = { if (isOpds) opdsSearch() else debouncer.applyNow(input) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        // OPDS keeps no app filters: the feed's own facets and
+                        // sort links are the only controls it offers. It still
+                        // needs an explicit reload for a live feed.
+                        if (isOpds) {
+                            MiruRoundIconButton(
+                                icon = Icons.Filled.Refresh,
+                                contentDescription = stringResource(R.string.finder_local_refresh_cd),
+                                onClick = { opdsSession?.refresh(force = true) },
+                            )
+                        }
+                        if (!isOpds) {
+                            MiruRoundIconButton(
+                                icon = Icons.Filled.Tune,
+                                contentDescription = stringResource(R.string.finder_cd_filters),
+                                onClick = { sheetOpen = true },
+                                badgeCount = if (isLocal) {
+                                    filters.activeFilterCount
+                                } else {
+                                    filters.pluginActiveFilterCount(schema)
+                                },
+                            )
+                            // Local: refresh the live scan or open folder management.
+                            if (isLocal) {
+                                MiruRoundIconButton(
+                                    icon = Icons.Filled.Refresh,
+                                    contentDescription = stringResource(R.string.finder_local_refresh_cd),
+                                    onClick = { reloadTick++; session.refresh(force = true) },
+                                )
+                                MiruRoundIconButton(
+                                    icon = Icons.Filled.Folder,
+                                    contentDescription = stringResource(R.string.finder_local_manage),
+                                    onClick = { foldersOpen = true },
+                                )
+                            } else if (siteUrl.isNotBlank()) {
+                                MiruRoundIconButton(
+                                    icon = Icons.Outlined.Public,
+                                    contentDescription = stringResource(R.string.webview_open_site),
+                                    onClick = { onSiteOpen(siteUrl) },
+                                )
                             }
-                        },
-                        onClear = {
-                            input = ""
-                            debouncer.applyNow("")
-                        },
-                        placeholder = stringResource(R.string.finder_search_hint),
-                        // IME Search is an explicit submit: apply now, drop timer.
-                        onSearch = { debouncer.applyNow(input) },
-                        modifier = Modifier.weight(1f),
-                    )
-                    MiruRoundIconButton(
-                        icon = Icons.Filled.Tune,
-                        contentDescription = stringResource(R.string.finder_cd_filters),
-                        onClick = { sheetOpen = true },
-                        badgeCount = if (isLocal) {
-                            filters.activeFilterCount
-                        } else {
-                            filters.pluginActiveFilterCount(schema)
-                        },
-                    )
-                    // Local: refresh the live scan or open folder management.
-                    if (isLocal) {
-                        MiruRoundIconButton(
-                            icon = Icons.Filled.Refresh,
-                            contentDescription = stringResource(R.string.finder_local_refresh_cd),
-                            onClick = { reloadTick++; session.refresh(force = true) },
-                        )
-                        MiruRoundIconButton(
-                            icon = Icons.Filled.Folder,
-                            contentDescription = stringResource(R.string.finder_local_manage),
-                            onClick = { foldersOpen = true },
-                        )
-                    } else if (siteUrl.isNotBlank()) {
-                        MiruRoundIconButton(
-                            icon = Icons.Outlined.Public,
-                            contentDescription = stringResource(R.string.webview_open_site),
-                            onClick = { onSiteOpen(siteUrl) },
+                        }
+                    }
+                    // 69shuba searches GBK: the user must type Chinese.
+                    if (!isOpds && shouldShowSearchLanguageHint(sourceLanguage, input)) {
+                        Text(
+                            text = stringResource(R.string.finder_search_language_hint_zh),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = LocalMiruExtraColors.current.muted,
+                            modifier = Modifier.padding(top = MiruSpace.Xs),
                         )
                     }
                 }
-                // 69shuba searches GBK: the user must type Chinese.
-                if (shouldShowSearchLanguageHint(sourceLanguage, input)) {
-                    Text(
-                        text = stringResource(R.string.finder_search_language_hint_zh),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = LocalMiruExtraColors.current.muted,
-                        modifier = Modifier.padding(top = MiruSpace.Xs),
-                    )
+            }
+        }
+        if (isOpds) {
+            pageState.sections.forEachIndexed { index, section ->
+                item(key = "section:$index", span = { GridItemSpan(maxLineSpan) }) {
+                    MiruCard(contentPadding = PaddingValues(0.dp)) {
+                        MiruActionRow(
+                            icon = Icons.Filled.MenuBook,
+                            title = section.title,
+                            subtitle = section.subtitle.orEmpty(),
+                            onClick = {
+                                opdsSearchLayer = false
+                                opdsSession?.openSection(section.url)
+                            },
+                        )
+                    }
+                }
+            }
+            pageState.facets.forEachIndexed { index, group ->
+                if (group.options.isNotEmpty()) {
+                    item(key = "facet:$index", span = { GridItemSpan(maxLineSpan) }) {
+                        Column {
+                            Text(
+                                text = group.label,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = LocalMiruExtraColors.current.muted,
+                            )
+                            ChipRow(
+                                options = group.options.map { option ->
+                                    ChipOption(
+                                        id = option.href,
+                                        label = option.count?.let { "${option.label} ($it)" }
+                                            ?: option.label,
+                                    )
+                                },
+                                selectedIds = group.options.filter { it.active }.map { it.href }.toSet(),
+                                onToggle = { href ->
+                                    opdsSearchLayer = false
+                                    opdsSession?.openFacet(href)
+                                },
+                                contentPadding = PaddingValues(0.dp),
+                                modifier = Modifier.padding(top = MiruSpace.Xs),
+                            )
+                        }
+                    }
+                }
+            }
+            if (pageState.sortOptions.isNotEmpty()) {
+                item(key = "sort", span = { GridItemSpan(maxLineSpan) }) {
+                    Column {
+                        Text(
+                            text = stringResource(R.string.opds_sort_label),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = LocalMiruExtraColors.current.muted,
+                        )
+                        ChipRow(
+                            options = pageState.sortOptions.map { ChipOption(it.href, it.label) },
+                            selectedIds = pageState.sortOptions
+                                .filter { it.active }
+                                .map { it.href }
+                                .toSet(),
+                            onToggle = { href ->
+                                opdsSearchLayer = false
+                                opdsSession?.openSort(href)
+                            },
+                            contentPadding = PaddingValues(0.dp),
+                            modifier = Modifier.padding(top = MiruSpace.Xs),
+                        )
+                    }
                 }
             }
         }
@@ -528,7 +690,7 @@ internal fun SourceCatalogScreen(
                     book = shown,
                     importing = false,
                     error = null,
-                    onClick = { session.deactivate(); onBookOpen(book.bookKey) },
+                    onClick = { openBook(book) },
                     onLongClick = { toggleMembership(book) },
                     inLibrary = book.inLibrary,
                     kind = if (LocalSources.kindOf(sourceId) == "manga") {
@@ -546,8 +708,10 @@ internal fun SourceCatalogScreen(
                     style = catalogStyle,
                     compactInfo = true,
                     showTypeChip = false,
-                    onOpen = { session.deactivate(); onBookOpen(book.bookKey) },
-                    onLongPress = { toggleMembership(book) },
+                    onOpen = { openBook(book) },
+                    // A catalogue entry has no membership write: a long-press
+                    // does exactly what a tap does.
+                    onLongPress = { if (isOpds) openBook(book) else toggleMembership(book) },
                     membership = book.badge?.toMiruBadge(),
                     onRetry = {
                         provider.refreshCatalogCover(sourceId, book.bookUrl)?.also { fresh ->
@@ -613,10 +777,21 @@ internal fun SourceCatalogScreen(
                         modifier = Modifier.size(28.dp),
                     )
                 }
-                books.isEmpty() -> if (isLocal && filters == CatalogFilters() && input.isBlank()) {
-                    LocalCatalogEmptyState(onManageFolders = { foldersOpen = true })
-                } else {
-                    EmptyState(
+                books.isEmpty() -> when {
+                    // A navigation feed: the sections above ARE the content, and
+                    // there is no filter to reset.
+                    pageState.sectionsOnly -> Text(
+                        text = stringResource(R.string.opds_sections_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalMiruExtraColors.current.muted,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = MiruSpace.L),
+                    )
+                    isLocal && filters == CatalogFilters() && input.isBlank() ->
+                        LocalCatalogEmptyState(onManageFolders = { foldersOpen = true })
+                    else -> EmptyState(
                         canReset = filters != CatalogFilters(),
                         onReset = {
                             debouncer.cancel()

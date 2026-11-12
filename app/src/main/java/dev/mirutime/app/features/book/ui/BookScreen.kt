@@ -172,6 +172,7 @@ import dev.mirutime.app.features.book.data.epubFileName
 import dev.mirutime.app.features.book.domain.BookActionKind
 import dev.mirutime.app.features.book.domain.BookChapter
 import dev.mirutime.app.features.book.domain.BookDetails
+import dev.mirutime.app.features.book.domain.BookDownloadOption
 import dev.mirutime.app.features.book.domain.BookReview
 import dev.mirutime.app.features.book.domain.ChapterFilter
 import dev.mirutime.app.features.book.domain.bookActionState
@@ -188,6 +189,8 @@ import dev.mirutime.app.features.library.data.LibraryDataProvider
 import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.app.features.library.domain.Shelf
 import dev.mirutime.app.features.migration.ui.MigrationBookSheet
+import dev.mirutime.app.features.opds.domain.OpdsFailure
+import dev.mirutime.app.features.opds.ui.opdsFailureText
 import dev.mirutime.app.features.reader.data.toReaderBook
 import dev.mirutime.app.features.reader.document.chapterKey
 import dev.mirutime.feature.reader.ReaderOpenResolver
@@ -216,6 +219,7 @@ import dev.mirutime.app.features.video.domain.pendingVariantProbes
 import dev.mirutime.app.features.video.domain.videoDownloadDecision
 import dev.mirutime.app.features.video.domain.videoVariantKey
 import dev.mirutime.app.features.video.ui.VideoVariantSheet
+import dev.mirutime.core.api.MiruError
 import dev.mirutime.core.api.Outcome
 import dev.mirutime.core.api.PluginError
 import dev.mirutime.core.api.VideoStream
@@ -226,6 +230,7 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.NonCancellable
@@ -353,6 +358,8 @@ internal fun BookScreen(
     migration: MigrationGraph? = null,
     // Opens a migrated target book from the sheet.
     onOpenBook: (bookUrl: String) -> Unit = {},
+    // OPDS: opens the catalogue that owns the entry (catalog URL from the feed).
+    onOpenCatalog: (catalogUrl: String) -> Unit = {},
 ) {
     val seededBook = remember(bookUrl) { BookPageSnapshotStore.get(bookUrl) }
     var book by remember(bookUrl) { mutableStateOf(seededBook) }
@@ -507,6 +514,14 @@ internal fun BookScreen(
     var membershipTarget by remember { mutableStateOf<Boolean?>(null) }
     var confirmedInLibrary by remember { mutableStateOf<Boolean?>(null) }
     val membershipIntents = remember(bookUrl) { Channel<Boolean>(Channel.CONFLATED) }
+
+    // OPDS catalogue entry: adding downloads one file and imports it, which is
+    // a single cancellable job — there is no membership toggle and no download
+    // queue here. The chosen format survives a step out of the page.
+    var opdsAdding by remember(bookUrl) { mutableStateOf(false) }
+    var opdsAddJob by remember(bookUrl) { mutableStateOf<Job?>(null) }
+    var opdsAddFailure by remember(bookUrl) { mutableStateOf<MiruError?>(null) }
+    var opdsOptionKey by rememberSaveable(bookUrl) { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -1211,6 +1226,62 @@ internal fun BookScreen(
         mutableStateOf<ChapterDeleteFailure?>(null)
     }
 
+    // The format the CTA sends: the user's pick, else the feed's default
+    // acquisition, else the first option the server will actually hand over.
+    val opdsOptions = current?.downloadOptions.orEmpty()
+    val opdsSelected = opdsSelectedOption(opdsOptions, opdsOptionKey)
+    // OPDS: the feed decides what the page's primary action is. Every other
+    // book keeps the chapter/continue page untouched.
+    val catalogEntry = current?.action != null
+
+    // One add at a time: the same slot turns into progress, Cancel stops it and
+    // a late answer from a cancelled job cannot open a book.
+    fun addOpdsBook() {
+        if (opdsAdding) return
+        val optionKey = opdsSelected?.key
+        opdsAddFailure = null
+        opdsAdding = true
+        opdsAddJob = ioScope.launch {
+            try {
+                when (val result = provider.addOpdsBook(bookUrl, optionKey)) {
+                    is Outcome.Ok -> {
+                        MiruLog.event(
+                            "book",
+                            "opds-add",
+                            "book" to MiruLog.idHash(bookUrl),
+                            "ok" to true,
+                        )
+                        onOpenBook(result.value)
+                    }
+                    is Outcome.Err -> {
+                        MiruLog.event(
+                            "book",
+                            "opds-add",
+                            "book" to MiruLog.idHash(bookUrl),
+                            "ok" to false,
+                            "error" to result.error::class.simpleName,
+                        )
+                        opdsAddFailure = result.error
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                MiruLog.event(
+                    "book",
+                    "opds-add",
+                    "book" to MiruLog.idHash(bookUrl),
+                    "ok" to false,
+                    "error" to failure.javaClass.simpleName,
+                )
+                opdsAddFailure = OpdsFailure.Unknown(failure.javaClass.simpleName)
+            } finally {
+                opdsAdding = false
+                opdsAddJob = null
+            }
+        }
+    }
+
     fun enqueueVideoChapters(indexes: Set<Int>, onDone: (() -> Unit)? = null) {
         val manager = videoDownloads
         val repository = videoRepository
@@ -1571,6 +1642,10 @@ internal fun BookScreen(
                     onOpenSource = { sourcePanelOpen = true },
                     onToggleLibrary = { requestMembership(!current.inLibrary) },
                     membershipPending = membershipPending,
+                    // A catalogue entry has no shelf and no membership write:
+                    // its only action is the one the feed advertises.
+                    catalogEntry = catalogEntry,
+                    onOpenCatalog = { current.originCatalogUrl?.let(onOpenCatalog) },
                 )
             }
             coverFailure?.let { report ->
@@ -1593,14 +1668,33 @@ internal fun BookScreen(
                     )
                 }
             }
-            item {
-                StatStrip(
-                    book = current,
-                    chaptersLoading = chaptersLoading,
-                    downloadedOverride = if (isVideoBook) videoCompletedCount else null,
-                )
+            // Statistics, shelf, chapters and downloads all describe a library
+            // row: a catalogue entry has none of them.
+            if (!catalogEntry) {
+                item {
+                    StatStrip(
+                        book = current,
+                        chaptersLoading = chaptersLoading,
+                        downloadedOverride = if (isVideoBook) videoCompletedCount else null,
+                    )
+                }
             }
             item {
+                val opdsAction = current.action
+                if (opdsAction != null) {
+                    OpdsActions(
+                        action = opdsAction,
+                        options = opdsOptions,
+                        selected = opdsSelected,
+                        adding = opdsAdding,
+                        onSelect = { option -> opdsOptionKey = option.key },
+                        onAdd = ::addOpdsBook,
+                        onOpenLibrary = { current.libraryBookKey?.let(onOpenBook) },
+                        onOpenCatalog = { current.originCatalogUrl?.let(onOpenCatalog) },
+                        onCancel = { opdsAddJob?.cancel() },
+                    )
+                    return@item
+                }
                 // The CTA label must use the same saved position as the tap.
                 // `book.continueChapter` is null until chapters/progress
                 // settle, so a saved index is the source of truth here.
@@ -1660,7 +1754,7 @@ internal fun BookScreen(
                     onToggleTools = { toolsExpanded = !toolsExpanded },
                 )
             }
-            if (downloadQueueState != null && downloadBookId != null) {
+            if (!catalogEntry && downloadQueueState != null && downloadBookId != null) {
                 item {
                     DownloadQueueNotice(
                         state = downloadQueueState,
@@ -1682,7 +1776,7 @@ internal fun BookScreen(
                     VideoDownloadPausedNotice(onResume = ::resumeVideoDownloads)
                 }
             }
-            if (toolsExpanded) {
+            if (toolsExpanded && !catalogEntry) {
                 item {
                     ToolsSection(
                         translatorOn = AppSettings.novelTranslation[current.bookUrl]?.enabled == true,
@@ -1708,8 +1802,22 @@ internal fun BookScreen(
                     )
                 }
             }
-            item { AboutSection(description = metadataEntry?.description ?: current.description) }
-            chaptersFailure?.let { report ->
+            if (current.action == BookActionKind.OpenCatalog) {
+                // The catalogue only lists the entry: there is nothing to
+                // describe, and the catalogue itself is one tap away.
+                item(key = "opds-no-details") {
+                    Text(
+                        text = stringResource(R.string.opds_no_details),
+                        style = MiruCardType.Meta,
+                        color = LocalMiruExtraColors.current.muted,
+                    )
+                }
+            } else {
+                item {
+                    AboutSection(description = metadataEntry?.description ?: current.description)
+                }
+            }
+            if (!catalogEntry) chaptersFailure?.let { report ->
                 item(key = "chapters-error") {
                     PluginErrorState(
                         title = report.title
@@ -1725,7 +1833,7 @@ internal fun BookScreen(
                     )
                 }
             }
-            item {
+            if (!catalogEntry) item {
                 if (chaptersLoading && current.chapters.isEmpty()) {
                     ChaptersSkeleton()
                 } else if (showChaptersSection(current.chapters, chaptersFailure)) {
@@ -2061,6 +2169,25 @@ internal fun BookScreen(
             }
         }
 
+        // A failed add is not a toast: the reason and Retry stay on the page
+        // and the chosen format is still there to retry with.
+        opdsAddFailure?.let { failure ->
+            AppBottomSheet(
+                title = stringResource(R.string.opds_open_failed),
+                description = current.title,
+                onClose = { opdsAddFailure = null },
+                closeLabel = stringResource(R.string.st_cancel),
+            ) {
+                PluginErrorState(
+                    title = "",
+                    message = opdsFailureText(failure, R.string.opds_open_failed),
+                    onRetry = {
+                        opdsAddFailure = null
+                        addOpdsBook()
+                    },
+                )
+            }
+        }
         if (sourcePanelOpen) {
             SourcePanel(
                 book = current,
@@ -2410,6 +2537,10 @@ private fun AnnounceCard(
     onOpenSource: () -> Unit,
     onToggleLibrary: () -> Unit,
     membershipPending: Boolean,
+    // An OPDS entry is not a library row yet: no shelf, no membership toggle,
+    // and the chip names the catalogue instead of a plugin.
+    catalogEntry: Boolean = false,
+    onOpenCatalog: () -> Unit = {},
 ) {
     val extra = LocalMiruExtraColors.current
     val context = LocalContext.current
@@ -2447,8 +2578,12 @@ private fun AnnounceCard(
             )
             Column(modifier = Modifier.weight(1f)) {
                 MiruSourceChip(
-                    text = "${book.source} · $pluginLabel",
-                    onClick = onOpenSource,
+                    text = if (book.installId.startsWith("opds:") || book.originCatalogUrl != null) {
+                        book.source
+                    } else {
+                        "${book.source} · $pluginLabel"
+                    },
+                    onClick = if (catalogEntry) onOpenCatalog else onOpenSource,
                     contentAlignment = Alignment.TopStart,
                 )
                 Text(
@@ -2532,57 +2667,59 @@ private fun AnnounceCard(
                 items(book.genres, key = { it }) { genre -> MiruTag(label = genre) }
             }
         }
-        Spacer(modifier = Modifier.height(MiruSpace.M))
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-        Spacer(modifier = Modifier.height(MiruSpace.S))
-        val shelfButton: @Composable (Modifier) -> Unit = { modifier ->
-            MiruCompactButton(
-                icon = Icons.Filled.DriveFileMove,
-                label = shelf,
-                enabled = book.inLibrary,
-                onClick = onShelfClick,
-                modifier = modifier,
-                trailing = {
-                    Icon(
-                        imageVector = Icons.Filled.ArrowDropDown,
-                        contentDescription = null,
-                        tint = extra.accent,
-                        modifier = Modifier.size(MiruSize.IconSmall),
-                    )
-                },
-            )
-        }
-        val libraryButton: @Composable (Modifier) -> Unit = { modifier ->
-            MiruCompactButton(
-                icon = if (book.inLibrary) {
-                    Icons.Filled.BookmarkAdded
-                } else {
-                    Icons.Filled.BookmarkBorder
-                },
-                label = stringResource(
-                    if (book.inLibrary) {
-                        R.string.book_cd_in_library
-                    } else {
-                        R.string.book_cd_add_library
+        if (!catalogEntry) {
+            Spacer(modifier = Modifier.height(MiruSpace.M))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+            Spacer(modifier = Modifier.height(MiruSpace.S))
+            val shelfButton: @Composable (Modifier) -> Unit = { modifier ->
+                MiruCompactButton(
+                    icon = Icons.Filled.DriveFileMove,
+                    label = shelf,
+                    enabled = book.inLibrary,
+                    onClick = onShelfClick,
+                    modifier = modifier,
+                    trailing = {
+                        Icon(
+                            imageVector = Icons.Filled.ArrowDropDown,
+                            contentDescription = null,
+                            tint = extra.accent,
+                            modifier = Modifier.size(MiruSize.IconSmall),
+                        )
                     },
-                ),
-                selected = book.inLibrary,
-                busy = membershipPending,
-                busyDescription = stringResource(R.string.book_library_pending),
-                onClick = onToggleLibrary,
-                modifier = modifier,
-            )
-        }
-        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-            if (largeText || maxWidth < MiruSize.NarrowContent) {
-                Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                    shelfButton(Modifier.fillMaxWidth())
-                    libraryButton(Modifier.fillMaxWidth())
-                }
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                    shelfButton(Modifier.weight(1f))
-                    libraryButton(Modifier.weight(1f))
+                )
+            }
+            val libraryButton: @Composable (Modifier) -> Unit = { modifier ->
+                MiruCompactButton(
+                    icon = if (book.inLibrary) {
+                        Icons.Filled.BookmarkAdded
+                    } else {
+                        Icons.Filled.BookmarkBorder
+                    },
+                    label = stringResource(
+                        if (book.inLibrary) {
+                            R.string.book_cd_in_library
+                        } else {
+                            R.string.book_cd_add_library
+                        },
+                    ),
+                    selected = book.inLibrary,
+                    busy = membershipPending,
+                    busyDescription = stringResource(R.string.book_library_pending),
+                    onClick = onToggleLibrary,
+                    modifier = modifier,
+                )
+            }
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                if (largeText || maxWidth < MiruSize.NarrowContent) {
+                    Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                        shelfButton(Modifier.fillMaxWidth())
+                        libraryButton(Modifier.fillMaxWidth())
+                    }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                        shelfButton(Modifier.weight(1f))
+                        libraryButton(Modifier.weight(1f))
+                    }
                 }
             }
         }
@@ -2769,6 +2906,118 @@ private fun StatStrip(
     }
 }
 
+// The acquisition the CTA sends to the provider: a still-downloadable pick
+// wins, then the feed's default, then the first option the server will hand
+// over. Null leaves the choice to the provider (no options, or all of them
+// sample/buy-only — the add then fails with its own reason).
+internal fun opdsSelectedOption(
+    options: List<BookDownloadOption>,
+    selectedKey: String?,
+): BookDownloadOption? =
+    options.firstOrNull { it.key == selectedKey }?.takeIf { it.isDownloadable }
+        ?: options.firstOrNull { it.isDefault && it.isDownloadable }
+        ?: options.firstOrNull { it.isDownloadable }
+
+// OPDS: the page's only action. The feed's acquisitions sit right above it —
+// a rail of formats when there is a real choice, one plain label otherwise —
+// and an option the server will not hand over keeps its reason under it.
+@Composable
+private fun OpdsActions(
+    action: BookActionKind,
+    options: List<BookDownloadOption>,
+    selected: BookDownloadOption?,
+    adding: Boolean,
+    onSelect: (BookDownloadOption) -> Unit,
+    onAdd: () -> Unit,
+    onOpenLibrary: () -> Unit,
+    onOpenCatalog: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val extra = LocalMiruExtraColors.current
+    val downloadable = remember(options) { options.filter { it.isDownloadable } }
+    val label = when (action) {
+        BookActionKind.AddToLibrary -> stringResource(R.string.opds_add_to_library)
+        BookActionKind.OpenLibrary -> stringResource(R.string.opds_open)
+        else -> stringResource(R.string.opds_open_catalog)
+    }
+    val onClick = when (action) {
+        BookActionKind.AddToLibrary -> onAdd
+        BookActionKind.OpenLibrary -> onOpenLibrary
+        else -> onOpenCatalog
+    }
+    val leadingIcon = when (action) {
+        BookActionKind.AddToLibrary -> Icons.Filled.BookmarkBorder
+        BookActionKind.OpenLibrary -> Icons.Filled.PlayArrow
+        else -> Icons.Filled.Public
+    }
+    Column {
+        if (options.isNotEmpty()) {
+            if (downloadable.size > 1) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                ) {
+                    options.forEach { option ->
+                        MiruFilterChip(
+                            selected = option.key == selected?.key,
+                            onClick = { onSelect(option) },
+                            label = option.format,
+                            enabled = option.isDownloadable,
+                        )
+                    }
+                }
+            } else {
+                // One usable file is not a choice: a plain label, no selector.
+                downloadable.firstOrNull()?.let { option ->
+                    Text(
+                        text = option.format,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+            options.forEach { option ->
+                val reason = option.unavailableReason ?: return@forEach
+                Text(
+                    text = "${option.format} · $reason",
+                    style = MiruCardType.Meta,
+                    color = extra.muted,
+                )
+            }
+            Spacer(modifier = Modifier.height(MiruSpace.S))
+        }
+        // The same 48dp pill in both states keeps the page from jumping while
+        // the file is being added; Cancel sits beside it, never below it.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+        ) {
+            MiruButton(
+                onClick = onClick,
+                style = MiruButtonStyle.InversePrimary,
+                enabled = !adding,
+                busy = adding,
+                busyDescription = label,
+                leadingIcon = leadingIcon,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    text = if (adding) stringResource(R.string.opds_opening_book) else label,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (adding) {
+                MiruButton(onClick = onCancel, style = MiruButtonStyle.Text) {
+                    Text(stringResource(R.string.st_cancel), maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
 // Continue / Start / Read again as the page's loudest action: one
 // full-width inverse pill (same ink pair as the sheet footers). Under it a
 // pair of plate pills — download-all first (left), then the library toggle
@@ -2835,6 +3084,11 @@ private fun ActionRow(
         } ?: chapterIndex?.let {
             stringResource(R.string.book_continue_fmt, it)
         } ?: stringResource(R.string.book_no_chapters)
+        // Catalogue entries never reach this row (the page swaps in the OPDS
+        // action block); the labels only keep the enum mapping total.
+        BookActionKind.AddToLibrary -> stringResource(R.string.opds_add_to_library)
+        BookActionKind.OpenLibrary -> stringResource(R.string.opds_open)
+        BookActionKind.OpenCatalog -> stringResource(R.string.opds_open_catalog)
     }
     Column {
         MiruButton(

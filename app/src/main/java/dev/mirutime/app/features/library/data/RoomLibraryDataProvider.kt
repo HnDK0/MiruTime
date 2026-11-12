@@ -76,6 +76,7 @@ class RoomLibraryDataProvider(
                 translatedTitles = batch.translatedTitles,
                 coverStore = coverStore,
                 sourceName = sourceName,
+                originNames = batch.originNames,
             )
         }.distinctBy { it.bookKey }
     }
@@ -94,6 +95,7 @@ class RoomLibraryDataProvider(
             translatedTitles = batch.translatedTitles,
             coverStore = coverStore,
             sourceName = sourceName,
+            originNames = batch.originNames,
         )
     }
 
@@ -243,6 +245,7 @@ class RoomLibraryDataProvider(
                 translatedTitles = batch.translatedTitles,
                 coverStore = coverStore,
                 sourceName = sourceName,
+                originNames = batch.originNames,
             )
         }
     }
@@ -267,6 +270,7 @@ class RoomLibraryDataProvider(
                 translatedTitles = batch.translatedTitles,
                 coverStore = coverStore,
                 sourceName = sourceName,
+                originNames = batch.originNames,
             )
         }.distinctBy { it.bookKey }
     }
@@ -392,6 +396,8 @@ class RoomLibraryDataProvider(
         val tags: Map<Long, List<String>>,
         val covers: Map<Long, BookCoverEntity>,
         val translatedTitles: Map<Long, String>,
+        // Imported-from-catalog books carry the catalog name in their file row.
+        val originNames: Map<Long, String>,
     )
 
     // One batch query per table for the requested rows only: a single-row
@@ -405,6 +411,8 @@ class RoomLibraryDataProvider(
             tags = runCatching { library.tagsByBookFor(bookIds) }.getOrDefault(emptyMap()),
             covers = library.bookCoversFor(bookIds),
             translatedTitles = loadTranslatedTitles(rows, translations),
+            originNames = runCatching { library.localBookOriginNames(bookIds) }
+                .getOrDefault(emptyMap()),
         )
     }
 
@@ -424,6 +432,7 @@ internal fun mapLibraryBookRow(
     translatedTitles: Map<Long, String> = emptyMap(),
     coverStore: BookCoverStore?,
     sourceName: (String) -> String = { it },
+    originNames: Map<Long, String> = emptyMap(),
 ): LibraryBook {
     val rawSource = entity.installId.ifBlank { hostOf(entity.bookUrl) }
     val read = stats[entity.bookId]
@@ -444,7 +453,9 @@ internal fun mapLibraryBookRow(
         title = entity.title,
         source = rawSource,
         installId = entity.installId,
-        sourceLabel = sourceName(rawSource),
+        // A book added from a catalog is labelled by that catalog, not by the
+        // local install id it was imported into.
+        sourceLabel = originNames[entity.bookId] ?: sourceName(rawSource),
         author = entity.authorRaw.ifBlank { entity.author },
         rating = entity.rating.toFloat(),
         contentType = runCatching { ContentType.valueOf(entity.contentType) }

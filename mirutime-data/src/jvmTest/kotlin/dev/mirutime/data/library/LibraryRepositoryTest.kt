@@ -1497,6 +1497,123 @@ class LibraryRepositoryTest {
         assertNull(repository.videoProgress(bookId, chapterId))
     }
 
+    @Test
+    fun `origin membership maps entry urls to library keys`() = runTest {
+        val catalogUrl = "https://opds.test/root"
+        val novelId = repository.saveBook(book("local://novel", inLibrary = false, lastReadAt = null))
+        val mangaId = repository.saveBook(
+            book("local://manga", inLibrary = false, lastReadAt = null)
+                .copy(installId = "local-manga"),
+        )
+        val otherId = repository.saveBook(book("local://other", inLibrary = false, lastReadAt = null))
+        repository.saveLocalBookFile(
+            LocalBookFileEntity(
+                bookId = novelId,
+                uri = "https://opds.test/books/1.epub",
+                displayName = "1.epub",
+                format = "EPUB",
+                mime = null,
+                sizeBytes = 1,
+                sha256 = "sha-1",
+                importedAt = 1L,
+                originCatalogUrl = catalogUrl,
+                originEntryUrl = "https://opds.test/entry/1",
+                originCatalogName = "Test Catalog",
+            ),
+        )
+        repository.saveLocalBookFile(
+            LocalBookFileEntity(
+                bookId = mangaId,
+                uri = "https://opds.test/books/2.cbz",
+                displayName = "2.cbz",
+                format = "CBZ",
+                mime = null,
+                sizeBytes = 1,
+                sha256 = "sha-2",
+                importedAt = 1L,
+                originCatalogUrl = catalogUrl,
+                originEntryUrl = "https://opds.test/entry/2",
+                originCatalogName = "Test Catalog",
+            ),
+        )
+        // Same entry URL from a different catalogue must not match.
+        repository.saveLocalBookFile(
+            LocalBookFileEntity(
+                bookId = otherId,
+                uri = "https://other.test/books/3.epub",
+                displayName = "3.epub",
+                format = "EPUB",
+                mime = null,
+                sizeBytes = 1,
+                sha256 = "sha-3",
+                importedAt = 1L,
+                originCatalogUrl = "https://other.test/root",
+                originEntryUrl = "https://opds.test/entry/3",
+                originCatalogName = "Other Catalog",
+            ),
+        )
+
+        val membership = repository.originMembership(
+            catalogUrl,
+            listOf(
+                "https://opds.test/entry/1",
+                "https://opds.test/entry/2",
+                "https://opds.test/entry/3",
+                "https://opds.test/entry/missing",
+            ),
+        )
+
+        assertEquals(
+            mapOf(
+                "https://opds.test/entry/1" to libraryBookKey("chikari", "local://novel"),
+                "https://opds.test/entry/2" to libraryBookKey("local-manga", "local://manga"),
+            ),
+            membership,
+        )
+        assertEquals(2, repository.localBookCountByOrigin(catalogUrl))
+        assertEquals(
+            mapOf(novelId to "Test Catalog", otherId to "Other Catalog"),
+            repository.localBookOriginNames(listOf(novelId, otherId)),
+        )
+        assertEquals(
+            listOf("https://opds.test/entry/1"),
+            repository.localBookFilesByOrigin(catalogUrl, listOf("https://opds.test/entry/1"))
+                .map { it.originEntryUrl },
+        )
+    }
+
+    @Test
+    fun `opds entry cache prunes to the newest rows`() = runTest {
+        val catalogUrl = "https://opds.test/root"
+        repository.upsertOpdsEntries(
+            (1..5).map { index ->
+                OpdsEntryEntity(
+                    catalogUrl = catalogUrl,
+                    entryUrl = "https://opds.test/entry/$index",
+                    title = "Book $index",
+                    author = "",
+                    description = "",
+                    coverUrl = null,
+                    formatsJson = "[]",
+                    updatedAt = index.toLong(),
+                )
+            },
+        )
+
+        repository.pruneOpdsEntries(catalogUrl, keep = 2)
+
+        assertEquals(
+            listOf(
+                "https://opds.test/entry/4",
+                "https://opds.test/entry/5",
+            ),
+            repository.opdsEntries(
+                catalogUrl,
+                (1..5).map { "https://opds.test/entry/$it" },
+            ).map { it.entryUrl }.sorted(),
+        )
+    }
+
     private fun book(url: String, inLibrary: Boolean, lastReadAt: Long?) = BookEntity(
         installId = "chikari",
         url = url,

@@ -2,10 +2,17 @@ package dev.mirutime.app.features.finder.data
 
 import dev.mirutime.app.core.PluginRequestException
 import dev.mirutime.app.features.finder.domain.CatalogBook
+import dev.mirutime.app.features.finder.domain.CatalogFacetGroup
 import dev.mirutime.app.features.finder.domain.CatalogFilters
 import dev.mirutime.app.features.finder.domain.CatalogPage
+import dev.mirutime.app.features.finder.domain.CatalogSection
+import dev.mirutime.app.features.finder.domain.CatalogSortOption
 import dev.mirutime.app.features.finder.domain.LocalSources
+import dev.mirutime.app.features.finder.domain.OpdsSources
 import dev.mirutime.app.features.finder.domain.dedupeCatalogBooks
+import dev.mirutime.app.features.opds.domain.OpdsFailure
+import dev.mirutime.app.features.opds.domain.OpdsPage
+import dev.mirutime.core.api.Outcome
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,7 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-internal data class CatalogPageState(
+data class CatalogPageState(
     val books: List<CatalogBook> = emptyList(),
     val pagesLoaded: Int = 0,
     val hasMore: Boolean = true,
@@ -29,7 +36,42 @@ internal data class CatalogPageState(
     val generation: Int = 0,
     val started: Boolean = false,
     val active: Boolean = true,
+    // OPDS feed navigation: sections/facets/sort belong to the current feed,
+    // never merged into an appended page.
+    val sections: List<CatalogSection> = emptyList(),
+    val facets: List<CatalogFacetGroup> = emptyList(),
+    val sortOptions: List<CatalogSortOption> = emptyList(),
+    val canGoBack: Boolean = false,
+    /** A navigation feed with no books: show sections, not the empty state. */
+    val sectionsOnly: Boolean = false,
+    /** The current OPDS feed advertises a usable search link. */
+    val searchAvailable: Boolean = false,
 )
+
+/** What the catalogue screen needs from a session; OPDS and plugin sessions differ. */
+internal interface CatalogSessionLike {
+    val state: StateFlow<CatalogPageState>
+
+    fun activate()
+    fun deactivate()
+    fun ensureLoaded()
+    fun requestNext()
+    fun retry()
+    fun refresh(force: Boolean = false)
+    fun saveScroll(bookUrl: String?, offset: Int)
+    fun updateBook(bookUrl: String, transform: (CatalogBook) -> CatalogBook)
+    fun scrollIndex(books: List<CatalogBook>): Int
+    fun scrollOffset(): Int
+    fun close()
+
+    // OPDS feed navigation: a pushed feed keeps the parent on the stack, and
+    // [goBack] restores it without a refetch. No-ops for plugin/local sources.
+    fun openSection(url: String) {}
+    fun openFacet(url: String) {}
+    fun openSort(url: String) {}
+    fun search(text: String) {}
+    fun goBack() {}
+}
 
 /**
  * One catalogue visit that outlives its composition: an in-flight page keeps
@@ -43,53 +85,53 @@ internal data class CatalogPageState(
 internal class CatalogSession(
     private val loadPage: suspend (page: Int, refresh: Boolean) -> CatalogPage,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
-) {
+) : CatalogSessionLike {
     private val mutableState = MutableStateFlow(CatalogPageState())
-    val state: StateFlow<CatalogPageState> = mutableState.asStateFlow()
+    override val state: StateFlow<CatalogPageState> = mutableState.asStateFlow()
     private val mutex = Mutex()
     private var scrollBookUrl: String? = null
     private var scrollOffsetPx = 0
 
-    fun activate() {
+    override fun activate() {
         mutableState.update { it.copy(active = true) }
     }
 
     /** Keeps the list and any in-flight page; only background work pauses. */
-    fun deactivate() {
+    override fun deactivate() {
         mutableState.update { it.copy(active = false) }
     }
 
-    fun ensureLoaded() {
+    override fun ensureLoaded() {
         if (mutableState.value.started) return
         mutableState.update { it.copy(started = true) }
         reload(force = false)
     }
 
-    fun requestNext() {
+    override fun requestNext() {
         val current = mutableState.value
         if (!current.started || current.loading || !current.hasMore) return
         if (current.error != null || current.failure != null) return
         load(page = current.pagesLoaded + 1, refresh = false, append = true)
     }
 
-    fun retry() {
+    override fun retry() {
         val current = mutableState.value
         mutableState.update { it.copy(error = null, failure = null) }
         if (current.books.isEmpty()) reload(force = false) else requestNext()
     }
 
-    fun refresh(force: Boolean = false) {
+    override fun refresh(force: Boolean) {
         mutableState.update { it.copy(started = true) }
         reload(force)
     }
 
-    fun saveScroll(bookUrl: String?, offset: Int) {
+    override fun saveScroll(bookUrl: String?, offset: Int) {
         scrollBookUrl = bookUrl
         scrollOffsetPx = offset
     }
 
     /** In-place card update (membership badge) without reloading the page. */
-    fun updateBook(bookUrl: String, transform: (CatalogBook) -> CatalogBook) {
+    override fun updateBook(bookUrl: String, transform: (CatalogBook) -> CatalogBook) {
         mutableState.update { state ->
             state.copy(
                 books = state.books.map {
@@ -100,12 +142,12 @@ internal class CatalogSession(
     }
 
     /** Index of the book that was visible before a list replacement. */
-    fun scrollIndex(books: List<CatalogBook>): Int =
+    override fun scrollIndex(books: List<CatalogBook>): Int =
         books.indexOfFirst { it.bookUrl == scrollBookUrl }.takeIf { it >= 0 } ?: 0
 
-    fun scrollOffset(): Int = scrollOffsetPx
+    override fun scrollOffset(): Int = scrollOffsetPx
 
-    fun close() {
+    override fun close() {
         scope.cancel()
     }
 
@@ -180,14 +222,30 @@ internal class CatalogSessionRegistry(
         filters: CatalogFilters,
         page: Int,
     ) -> CatalogPage = { sourceId, _, filters, page -> page(sourceId, filters, page) },
+    private val opdsFeed: suspend (sourceId: String, url: String?, includeLinks: Boolean?) -> Outcome<OpdsPage> =
+        { _, _, _ ->
+            Outcome.Err(OpdsFailure.Unknown("opds-unavailable"))
+        },
+    /** Search template (`{searchTerms}` intact) behind [feedUrl], or null. */
+    private val opdsSearch: suspend (sourceId: String, feedUrl: String) -> Outcome<String?> = { _, _ ->
+        Outcome.Ok(null)
+    },
+    private val opdsBooks: (sourceId: String, page: OpdsPage, includeLinks: Boolean) -> List<CatalogBook> =
+        { _, _, _ -> emptyList() },
     private val newScope: () -> CoroutineScope = {
         CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     },
 ) {
-    private val sessions = LinkedHashMap<CatalogCacheKey, CatalogSession>()
+    private val sessions = LinkedHashMap<CatalogCacheKey, CatalogSessionLike>()
 
-    fun get(sourceId: String, filters: CatalogFilters): CatalogSession {
-        val key = CatalogCacheKey(sourceId, filters)
+    fun get(sourceId: String, filters: CatalogFilters): CatalogSessionLike {
+        // The OPDS feed ignores the query: search pushes a feed in the session,
+        // so a new query must not throw the session (and its stack) away.
+        val key = if (OpdsSources.catalogIdOf(sourceId) != null) {
+            CatalogCacheKey(sourceId, filters.copy(query = ""))
+        } else {
+            CatalogCacheKey(sourceId, filters)
+        }
         sessions.remove(key)?.let {
             sessions[key] = it
             return it
@@ -217,10 +275,27 @@ internal class CatalogSessionRegistry(
         sessions.clear()
     }
 
-    private fun create(sourceId: String, filters: CatalogFilters): CatalogSession {
+    private fun create(sourceId: String, filters: CatalogFilters): CatalogSessionLike {
         // Each session owns its own scope: close() must cancel only this visit,
         // never the shared pager of another source or the visible one.
         val scope = newScope()
+        if (OpdsSources.catalogIdOf(sourceId) != null) {
+            return OpdsCatalogSession(
+                fetchFeed = { url, includeLinks ->
+                    when (val loaded = opdsFeed(sourceId, url, includeLinks)) {
+                        is Outcome.Ok -> loaded
+                        is Outcome.Err -> throw PluginRequestException(
+                            opdsPluginError(loaded.error),
+                            sourceId = sourceId,
+                            operation = "catalog",
+                        )
+                    }
+                },
+                resolveSearchUrl = { feedUrl -> opdsSearch(sourceId, feedUrl) },
+                mapBooks = { feed, includeLinks -> opdsBooks(sourceId, feed, includeLinks) },
+                scope = scope,
+            )
+        }
         if (!LocalSources.isLocal(sourceId)) {
             return CatalogSession({ pageNumber, _ -> page(sourceId, filters, pageNumber) }, scope)
         }

@@ -57,13 +57,17 @@ import dev.mirutime.core.network.cf.CfGate
 import dev.mirutime.core.network.createEngine
 import dev.mirutime.core.network.formatNetworkTrace
 import dev.mirutime.core.network.safeHostPath
+import dev.mirutime.core.network.security.ResponseTooLargeException
 import dev.mirutime.core.network.security.SsrfGuard
 import dev.mirutime.core.network.pluginCharset
 import dev.mirutime.imageloader.FetchedImage
 import io.ktor.client.statement.bodyAsBytes
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.request
 import io.ktor.http.HttpHeaders
+import io.ktor.utils.io.readRemaining
 import java.io.File
+import java.io.FileOutputStream
 import java.net.URI
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
@@ -71,6 +75,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.io.readByteArray
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -370,6 +377,20 @@ class PluginGraph(
                 ?: continue
             hostOptions.setReferer(host, sourceId, referer)
         }
+    }
+
+    // A private OPDS catalog serves its covers from the feed host behind the
+    // same Basic auth. [sourceId] doubles as the registry owner so removing the
+    // catalog strips only its own entries. Null [authorization] clears it.
+    fun registerOpdsCatalogHost(sourceId: String, feedUrl: String, authorization: String?) {
+        val host = opdsHost(feedUrl) ?: return
+        originOf(feedUrl)?.let { hostOptions.setReferer(host, sourceId, it) }
+        hostOptions.setAuth(host, sourceId, authorization)
+    }
+
+    fun clearOpdsCatalogHost(sourceId: String, feedUrl: String) {
+        val host = opdsHost(feedUrl) ?: return
+        hostOptions.clear(host, sourceId)
     }
 
     // Host-resolved browser UA for the out-of-band CF bridge ("Open source"):
@@ -1022,6 +1043,68 @@ class PluginGraph(
     private suspend fun fetchRemoteBytes(url: String): RemoteBytes =
         fetchRemote(url, followRedirects = false)
 
+    /**
+     * OPDS book download: plain engine (system DNS), shared gate/cookie store
+     * and per-host UA/Referer, no CF solver. [maxBytes] is enforced while the
+     * body is read. Note the body is materialized in memory by [PluginHttpClient]
+     * before this method sees it, so [maxBytes] is a heap-spike budget as well as
+     * a file-size cap; the copy to [target] is chunked only to keep the write
+     * predictable. Throws [ResponseTooLargeException] over the cap and on a
+     * non-2xx status.
+     */
+    suspend fun downloadToFile(
+        url: String,
+        headers: Map<String, String>,
+        target: File,
+        maxBytes: Long = MAX_DOWNLOAD_BYTES,
+    ): Long = withContext(Dispatchers.IO) {
+        // Per-call client: maxBytes is the caller's cap, and the shared remote
+        // client's 5 MB body budget cannot carry a book.
+        val client = PluginHttpClient(
+            metadata = HOST_METADATA,
+            systemInfo = systemInfo,
+            cookieStore = cookieStore,
+            logger = MiruCoreLogger,
+            engine = plainEngine,
+            gate = cfGate,
+            ssrfGuard = null,
+            maxResponseBytes = maxBytes,
+            hostOptions = hostOptions,
+            trace = networkTrace,
+        )
+        try {
+            val response = client.get(
+                sourceId = "opds",
+                url = url,
+                headers = headers,
+                operation = "downloadToFile",
+                argNames = listOf("url"),
+                solveChallenges = false,
+            )
+            val status = response.status.value
+            if (status !in 200..299) throw IllegalStateException("HTTP $status for download")
+            target.parentFile?.mkdirs()
+            var total = 0L
+            FileOutputStream(target).use { out ->
+                val channel = response.bodyAsChannel()
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val chunk = channel.readRemaining(64L * 1024).readByteArray()
+                    if (chunk.isEmpty()) break
+                    total += chunk.size
+                    if (total > maxBytes) {
+                        throw ResponseTooLargeException(PluginError.ResponseTooLarge(maxBytes))
+                    }
+                    out.write(chunk)
+                }
+                out.fd.sync()
+            }
+            total
+        } finally {
+            client.close()
+        }
+    }
+
     private fun fallbackMetadata(id: String, bytes: ByteArray): PluginMetadata = PluginMetadata(
         id = id,
         name = id,
@@ -1166,6 +1249,10 @@ private const val COVER_FETCH_TIMEOUT_MS = 10_000L
 private const val MAX_BYTES = 5L * 1024 * 1024
 // Image bodies only: a cover at this size is far past any real page asset.
 private const val MAX_IMAGE_BYTES = 16L * 1024 * 1024
+// OPDS book downloads: one book, never a library.
+// Books are downloaded through a client that buffers the whole body in memory
+// (PluginHttpClient), so 64 MB is the heap budget, not just the file cap.
+internal const val MAX_DOWNLOAD_BYTES = 64L * 1024 * 1024
 
 // Generic metadata for HOST-initiated fetches (chapter pages): per-host UA and
 // Referer come from HostOptionsRegistry, so this carries no plugin specifics.
@@ -1216,11 +1303,26 @@ internal fun imageHeadersFor(url: String, hostOptions: HostOptionsRegistry): Map
         ?.let(::normalizeImageHost)
         .orEmpty()
     if (host.isEmpty()) return emptyMap()
-    val headers = LinkedHashMap<String, String>(2)
+    val headers = LinkedHashMap<String, String>(3)
     hostOptions.referer(host)?.takeIf { it.isNotBlank() }?.let { headers["Referer"] = it }
+    hostOptions.auth(host)?.takeIf { it.isNotBlank() }?.let { headers["Authorization"] = it }
     headers["User-Agent"] = hostOptions.userAgent(host)?.takeIf { it.isNotBlank() }
         ?: PluginUserAgentRegistry.resolve(null, host)
     return headers
+}
+
+private fun opdsHost(url: String): String? = runCatching { URI(url).host.orEmpty() }
+    .getOrNull()
+    ?.let(::normalizeImageHost)
+    ?.takeIf { it.isNotEmpty() }
+
+// scheme://host[:port], the Referer an OPDS server expects for its covers.
+private fun originOf(url: String): String? {
+    val uri = runCatching { URI(url) }.getOrNull() ?: return null
+    val scheme = uri.scheme ?: return null
+    val host = uri.host ?: return null
+    val port = if (uri.port > 0) ":${uri.port}" else ""
+    return "$scheme://$host$port"
 }
 
 // Same host key the core network package uses (lowercase, drop "www.", drop

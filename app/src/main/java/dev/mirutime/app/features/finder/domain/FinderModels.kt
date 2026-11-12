@@ -133,11 +133,45 @@ data class CatalogBook(
     val badge: LibraryBadgeState? = null,
     // Raw plugin id. Two plugins may expose different works under one URL.
     val installId: String = "",
+    // OPDS only: the library key of the imported book behind this card. A tap
+    // opens it instead of downloading the entry again.
+    val libraryBookKey: String? = null,
 ) {
     val bookKey: String = libraryBookKey(installId, bookUrl)
 }
 
 data class LibraryBadgeState(val inSameSource: Boolean, val sourceCount: Int)
+
+/** OPDS navigation feed entry: another feed to open. */
+data class CatalogSection(val title: String, val subtitle: String?, val url: String)
+
+/** One selectable facet value; applying it opens [href] as the next feed. */
+data class CatalogFacet(
+    val label: String,
+    val href: String,
+    val active: Boolean,
+    val count: Int?,
+)
+
+data class CatalogFacetGroup(val label: String, val options: List<CatalogFacet>)
+
+/** Feed-provided sort link (`rel=http://opds-spec.org/sort/...`). */
+data class CatalogSortOption(val label: String, val href: String, val active: Boolean)
+
+/**
+ * OPDS catalogs ride the ordinary catalog pipeline as sources with a reserved
+ * id prefix, so the standard catalogue screen, grid settings and cards apply.
+ */
+object OpdsSources {
+    const val Prefix = "opds:"
+
+    fun idOf(catalogId: String): String = Prefix + catalogId
+
+    fun catalogIdOf(sourceId: String): String? = sourceId
+        .takeIf { it.startsWith(Prefix) }
+        ?.removePrefix(Prefix)
+        ?.takeIf { it.isNotBlank() }
+}
 
 internal fun libraryBadgeState(
     bookKey: String,
@@ -263,11 +297,14 @@ data class CatalogPage(val books: List<CatalogBook>, val hasMore: Boolean)
 // `sourceOrderIsLatest` says the incoming order is newest-first, so Latest can
 // use it instead of inventing dates a catalogue page does not carry. When it is
 // false the provider order is preserved because recency is unknowable.
+// `sortEnabled = false` keeps the feed's own order: an OPDS catalog declares its
+// order through sort links, so a client re-rank would contradict them.
 internal fun applyCatalogFilters(
     books: List<CatalogBook>,
     filters: CatalogFilters,
     sourceOrderIsLatest: Boolean = true,
     queryAlreadyApplied: Boolean = false,
+    sortEnabled: Boolean = true,
 ): List<CatalogBook> {
     var result = books
     if (!queryAlreadyApplied) {
@@ -290,6 +327,7 @@ internal fun applyCatalogFilters(
         }
     }
     if (filters.ongoingOnly) result = result.filter { it.ongoing }
+    if (!sortEnabled) return result
     return sortCatalogBooks(result, filters.sort, filters.descending, sourceOrderIsLatest)
 }
 

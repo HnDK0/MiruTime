@@ -26,6 +26,7 @@ import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.app.features.library.data.ImportSummary
 import dev.mirutime.app.features.library.data.LocalImportResult
 import dev.mirutime.app.features.library.data.PickedImportFile
+import dev.mirutime.app.features.opds.domain.OpdsFailure
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.core.api.Outcome
 import dev.mirutime.data.library.LibraryMembership
@@ -68,6 +69,10 @@ interface FinderDataProvider {
     suspend fun supportsSearchFilters(sourceId: String): Boolean = false
     suspend fun sourceLanguage(sourceId: String): String? = null
 
+    // Whether the catalogue screen offers its filter/sort sheet at all. OPDS
+    // feeds order themselves and have no plugin schema.
+    suspend fun supportsFilters(sourceId: String): Boolean = true
+
     // Plugin-declared catalogue filters (getFilterList). Ok(empty) means the
     // source genuinely declared no filters; Err is a load failure the sheet
     // must show with Retry. Never built from library genres.
@@ -107,6 +112,16 @@ interface FinderDataProvider {
     // Loose image folder: null means "not an image tree, use file import".
     suspend fun importTree(uri: String): LocalImportResult?
     suspend fun removeLocal(bookUrl: String)
+
+    /**
+     * OPDS sources: download the acquisition behind a catalogue card and import
+     * it. Returns the local book key the reader opens, not the remote URL.
+     */
+    suspend fun openOpdsBook(sourceId: String, bookUrl: String): Outcome<String> =
+        Outcome.Err(OpdsFailure.Unknown("opds-unavailable"))
+
+    /** Forget a saved OPDS catalog; already-downloaded books stay in the library. */
+    suspend fun removeOpdsCatalog(sourceId: String) = Unit
 
     // Folder management for the built-in local sources. The sheet lists the
     // configured trees, adds/removes them (SAF permission follows the tree)

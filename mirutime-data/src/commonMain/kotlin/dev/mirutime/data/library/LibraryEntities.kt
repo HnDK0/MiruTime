@@ -435,7 +435,12 @@ data class ChapterPageEntity(
         ),
     ],
     // Live SAF catalogue lookup by URI and duplicate detection by content hash.
-    indices = [Index("uri"), Index("sha256")],
+    // The origin pair indexes catalogue membership without scanning the table.
+    indices = [
+        Index("uri"),
+        Index("sha256"),
+        Index("origin_catalog_url", "origin_entry_url"),
+    ],
 )
 data class LocalBookFileEntity(
     @PrimaryKey val bookId: Long,
@@ -448,6 +453,65 @@ data class LocalBookFileEntity(
     val copyPath: String? = null,
     val parserVersion: Int = 1,
     val importedAt: Long,
+    // Catalogue provenance for an OPDS import; empty for a device/SAF file.
+    // `uri` for such a row is the acquisition URL, not the deleted temp path.
+    @ColumnInfo(name = "origin_catalog_url", defaultValue = "''")
+    val originCatalogUrl: String = "",
+    @ColumnInfo(name = "origin_entry_url", defaultValue = "''")
+    val originEntryUrl: String = "",
+    @ColumnInfo(name = "origin_catalog_name", defaultValue = "''")
+    val originCatalogName: String = "",
+)
+
+/**
+ * Saved OPDS catalogs. Credentials are deliberately not here: this table is
+ * part of the backup export, the login/password pair lives in
+ * OpdsCredentialStore under noBackupFilesDir.
+ */
+@Entity(tableName = "opds_catalogs")
+data class OpdsCatalogEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val url: String,
+    val addedAt: Long,
+)
+
+/**
+ * One rendered catalogue entry: enough to show the book page and add it without
+ * re-fetching the feed. Keyed by the entry URL the catalogue itself uses, so a
+ * book re-added from a different feed page still lands on one row.
+ */
+@Entity(
+    tableName = "opds_entries",
+    primaryKeys = ["catalogUrl", "entryUrl"],
+    indices = [Index("catalogUrl", "updatedAt")],
+)
+data class OpdsEntryEntity(
+    val catalogUrl: String,
+    val entryUrl: String,
+    /** Feed page this entry was seen in: the only safe place to re-resolve it. */
+    @ColumnInfo(name = "feed_url", defaultValue = "''")
+    val feedUrl: String = "",
+    val title: String,
+    val author: String,
+    val description: String,
+    val coverUrl: String?,
+    /** Acquisition options as JSON; see OpdsEntryOptions. */
+    val formatsJson: String,
+    val updatedAt: Long,
+)
+
+/** Query projection: one imported book that came from a catalogue entry. */
+data class LocalBookOriginRow(
+    val originEntryUrl: String,
+    val installId: String,
+    val url: String,
+)
+
+/** Query projection: the catalogue display name stored on an imported file. */
+data class LocalBookOriginNameRow(
+    val bookId: Long,
+    val originCatalogName: String,
 )
 
 @Entity(tableName = "import_jobs")

@@ -1188,6 +1188,62 @@ class LibraryRepository(
 
     suspend fun importJobs(): List<ImportJobEntity> = dao.importJobs()
 
+    suspend fun opdsCatalogs(): List<OpdsCatalogEntity> = dao.opdsCatalogs()
+
+    suspend fun saveOpdsCatalog(catalog: OpdsCatalogEntity) = dao.upsertOpdsCatalog(catalog)
+
+    suspend fun deleteOpdsCatalog(id: String) = dao.deleteOpdsCatalogRow(id)
+
+    suspend fun deleteOpdsEntries(catalogUrl: String) = dao.deleteOpdsEntries(catalogUrl)
+
+    suspend fun upsertOpdsEntries(entries: List<OpdsEntryEntity>) = dao.upsertOpdsEntries(entries)
+
+    suspend fun opdsEntry(catalogUrl: String, entryUrl: String): OpdsEntryEntity? =
+        dao.opdsEntry(catalogUrl, entryUrl)
+
+    suspend fun opdsEntries(catalogUrl: String, entryUrls: Collection<String>): List<OpdsEntryEntity> =
+        if (entryUrls.isEmpty()) emptyList() else dao.opdsEntries(catalogUrl, entryUrls.toList())
+
+    suspend fun pruneOpdsEntries(catalogUrl: String, keep: Int) =
+        dao.pruneOpdsEntries(catalogUrl, keep)
+
+    suspend fun localBookFilesByOrigin(
+        catalogUrl: String,
+        entryUrls: Collection<String>,
+    ): List<LocalBookFileEntity> =
+        if (entryUrls.isEmpty()) {
+            emptyList()
+        } else {
+            dao.localBookFilesByOrigin(catalogUrl, entryUrls.toList())
+        }
+
+    /**
+     * Catalogue membership: entry URL -> the library key it was imported as.
+     * Empty when nothing from these entries is in the library.
+     */
+    suspend fun originMembership(
+        catalogUrl: String,
+        entryUrls: Collection<String>,
+    ): Map<String, String> =
+        if (entryUrls.isEmpty()) {
+            emptyMap()
+        } else {
+            dao.localBookOriginRows(catalogUrl, entryUrls.toList())
+                .associate { it.originEntryUrl to libraryBookKey(it.installId, it.url) }
+        }
+
+    suspend fun localBookCountByOrigin(catalogUrl: String): Int =
+        dao.localBookCountByOrigin(catalogUrl)
+
+    /** Catalogue display names for imported books, keyed by bookId. */
+    suspend fun localBookOriginNames(bookIds: Collection<Long>): Map<Long, String> =
+        if (bookIds.isEmpty()) {
+            emptyMap()
+        } else {
+            dao.localBookOriginNames(bookIds.toList())
+                .associate { it.bookId to it.originCatalogName }
+        }
+
     suspend fun saveChapterTranslation(translation: ChapterTranslationEntity): Long {
         // Identity excludes sourceHash: a re-translated body updates the row
         // instead of piling up one row per revision.

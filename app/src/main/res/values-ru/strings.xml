@@ -1756,4 +1756,39 @@
     <string name="updates_remaining_m_fmt">%1$d мин</string>
     <string name="dash_load_error">Не удалось загрузить данные главной</string>
     <string name="dash_retry">Повторить</string>
+
+    <!-- OPDS catalogs -->
+    <string name="opds_entry">OPDS-каталоги</string>
+    <string name="opds_add_title">Новый каталог</string>
+    <string name="opds_add_desc">Вставьте адрес каталога. Название можно не указывать: подставим сам адрес.</string>
+    <string name="opds_field_url">Адрес каталога</string>
+    <string name="opds_field_url_hint">https://example.com/opds</string>
+    <string name="opds_field_name">Название</string>
+    <string name="opds_field_name_hint">Необязательно</string>
+    <string name="opds_field_login">Логин</string>
+    <string name="opds_field_password">Пароль</string>
+    <string name="opds_add_submit">Добавить</string>
+    <string name="opds_add_invalid_url">Нужен адрес http:// или https://</string>
+    <string name="opds_add_failed">Не удалось добавить каталог</string>
+    <string name="opds_err_needs_login">Сервер просит логин и пароль.</string>
+    <string name="opds_err_digest">Сервер Calibre использует Digest. Запустите его с --auth-mode basic или подключитесь по HTTPS.</string>
+    <string name="opds_err_forbidden">Сервер запретил доступ к каталогу.</string>
+    <string name="opds_err_network_fmt">Сервер ответил HTTP %1$d.</string>
+    <string name="opds_err_network">Не удалось связаться с каталогом.</string>
+    <string name="opds_err_not_feed">По этому адресу нет OPDS-каталога.</string>
+    <string name="opds_err_json">Каталог отдаёт OPDS 2 (JSON). Такие каталоги пока не поддерживаются.</string>
+    <string name="opds_err_malformed">Каталог прислал данные, которые не удалось прочитать.</string>
+    <string name="opds_err_too_large_fmt">Файл больше %1$d МБ — скачайте его вручную.</string>
+    <string name="opds_open_failed">Не удалось добавить книгу</string>
+    <string name="opds_no_format">Нет EPUB, FB2 или CBZ — открыть нечего.</string>
+    <string name="opds_opening_book">Добавляем в библиотеку…</string>
+    <string name="opds_add_to_library">Добавить в библиотеку</string>
+    <string name="opds_open">Открыть</string>
+    <string name="opds_open_catalog">Открыть каталог</string>
+    <string name="opds_no_details">Сведения недоступны — откройте каталог</string>
+    <string name="opds_delete_title">Удалить каталог?</string>
+    <string name="opds_delete_desc_fmt">«%1$s» исчезнет из списка. Скачанные книги останутся в библиотеке.</string>
+    <string name="opds_delete_confirm">Удалить</string>
+    <string name="opds_sections_hint">Выберите раздел</string>
+    <string name="opds_sort_label">Сортировка</string>
 </resources>
