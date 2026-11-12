@@ -75,9 +75,11 @@ private fun isImageEntry(name: String): Boolean {
     return ext in IMAGE_EXTENSIONS
 }
 
+private val NaturalDigitsRegex = Regex("\\d+")
+
 // Natural order: page2 before page10 (digit runs zero-padded to a fixed width).
 private fun naturalSortKey(name: String): String =
-    name.replace(Regex("\\d+")) { it.value.padStart(12, '0') }
+    name.replace(NaturalDigitsRegex) { it.value.padStart(12, '0') }
 
 private fun coverImageName(names: List<String>): String? =
     names.sortedWith(

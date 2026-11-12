@@ -88,64 +88,69 @@ class EpubFileReader(file: File) : Closeable {
         private set
 
     init {
-        val container = archive.read("META-INF/container.xml")
-            ?: throw IllegalStateException("META-INF/container.xml file missing")
-        val opfPath = parseXmlDocument(container)
-            ?.selectFirstTag("rootfile")
-            ?.attr("full-path")
-            ?.decodedURL
-            ?: throw IllegalStateException("Invalid container.xml file")
-        rootPath = opfPath.substringBefore('/', "")
+        try {
+            val container = archive.read("META-INF/container.xml")
+                ?: throw IllegalStateException("META-INF/container.xml file missing")
+            val opfPath = parseXmlDocument(container)
+                ?.selectFirstTag("rootfile")
+                ?.attr("full-path")
+                ?.decodedURL
+                ?: throw IllegalStateException("Invalid container.xml file")
+            rootPath = opfPath.substringBefore('/', "")
 
-        val opf = archive.read(opfPath) ?: throw IllegalStateException(".opf file missing")
-        val document = parseXmlDocument(opf)
-            ?: throw IllegalStateException(".opf file failed to parse data")
-        val metadata = document.selectFirstTag("metadata")
-            ?: throw IllegalStateException(".opf file metadata section missing")
-        val manifest = document.selectFirstTag("manifest")
-            ?: throw IllegalStateException(".opf file manifest section missing")
-        val spineEl = document.selectFirstTag("spine")
-            ?: throw IllegalStateException(".opf file spine section missing")
+            val opf = archive.read(opfPath) ?: throw IllegalStateException(".opf file missing")
+            val document = parseXmlDocument(opf)
+                ?: throw IllegalStateException(".opf file failed to parse data")
+            val metadata = document.selectFirstTag("metadata")
+                ?: throw IllegalStateException(".opf file metadata section missing")
+            val manifest = document.selectFirstTag("manifest")
+                ?: throw IllegalStateException(".opf file manifest section missing")
+            val spineEl = document.selectFirstTag("spine")
+                ?: throw IllegalStateException(".opf file spine section missing")
 
-        title = metadata.selectFirstChildTag("dc:title")?.textContent ?: "Unknown Title"
-        author = metadata.selectFirstChildTag("dc:creator")?.textContent
-        description = metadata.selectFirstChildTag("dc:description")?.textContent
+            title = metadata.selectFirstChildTag("dc:title")?.textContent ?: "Unknown Title"
+            author = metadata.selectFirstChildTag("dc:creator")?.textContent
+            description = metadata.selectFirstChildTag("dc:description")?.textContent
 
-        manifestItems = manifest.selectChildTag("item").mapNotNull { item ->
-            val id = item.attr("id").orEmpty()
-            if (id.isEmpty()) return@mapNotNull null
-            id to EpubManifestRef(
-                absPath = item.attr("href").orEmpty().decodedURL.hrefAbsolutePath(rootPath),
-                mediaType = item.attr("media-type").orEmpty(),
-                properties = item.attr("properties").orEmpty(),
-            )
-        }.toMap()
-        spine = spineEl.selectChildTag("itemref").mapNotNull { itemRef ->
-            manifestItems[itemRef.attr("idref").orEmpty()]
-        }.filter { it.absPath.substringAfterLast('.') in FILE_CHAPTER_EXTENSIONS }
-
-        // NCX is optional: EPUB 3 commonly ships only nav.xhtml.
-        val ncxPath = manifestItems.values.firstOrNull {
-            it.mediaType == "application/x-dtbncx+xml"
-        }?.absPath ?: manifestItems["ncx"]?.absPath
-        tocEntries = if (ncxPath != null) {
-            runCatching {
-                parseNcxToc(
-                    { runCatching { archive.read(it) }.getOrNull() },
-                    ncxPath,
-                    rootPath,
+            manifestItems = manifest.selectChildTag("item").mapNotNull { item ->
+                val id = item.attr("id").orEmpty()
+                if (id.isEmpty()) return@mapNotNull null
+                id to EpubManifestRef(
+                    absPath = item.attr("href").orEmpty().decodedURL.hrefAbsolutePath(rootPath),
+                    mediaType = item.attr("media-type").orEmpty(),
+                    properties = item.attr("properties").orEmpty(),
                 )
+            }.toMap()
+            spine = spineEl.selectChildTag("itemref").mapNotNull { itemRef ->
+                manifestItems[itemRef.attr("idref").orEmpty()]
+            }.filter { it.absPath.substringAfterLast('.') in FILE_CHAPTER_EXTENSIONS }
+
+            // NCX is optional: EPUB 3 commonly ships only nav.xhtml.
+            val ncxPath = manifestItems.values.firstOrNull {
+                it.mediaType == "application/x-dtbncx+xml"
+            }?.absPath ?: manifestItems["ncx"]?.absPath
+            tocEntries = if (ncxPath != null) {
+                runCatching {
+                    parseNcxToc(
+                        { runCatching { archive.read(it) }.getOrNull() },
+                        ncxPath,
+                        rootPath,
+                    )
+                }
+                    .getOrNull()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: parseEpub3NavFromArchive(archive, manifestItems, rootPath)
+            } else {
+                parseEpub3NavFromArchive(archive, manifestItems, rootPath)
             }
-                .getOrNull()
-                ?.takeIf { it.isNotEmpty() }
-                ?: parseEpub3NavFromArchive(archive, manifestItems, rootPath)
-        } else {
-            parseEpub3NavFromArchive(archive, manifestItems, rootPath)
+            val cover = runCatching { extractEpubCover(archive, manifestItems, metadata) }.getOrNull()
+            coverBytes = cover?.bytes
+            coverMediaType = cover?.mediaType
+            imageBudget = (imageBudget - (coverBytes?.size ?: 0)).coerceAtLeast(0)
+        } catch (e: Throwable) {
+            runCatching { archive.close() }
+            throw e
         }
-        val cover = runCatching { extractEpubCover(archive, manifestItems, metadata) }.getOrNull()
-        coverBytes = cover?.bytes
-        coverMediaType = cover?.mediaType
-        imageBudget = (imageBudget - (coverBytes?.size ?: 0)).coerceAtLeast(0)
     }
 
     val spineCount: Int get() = spine.size
@@ -279,16 +284,21 @@ class CbzFileReader(file: File) : Closeable {
     val coverMediaType: String?
 
     init {
-        val names = archive.names().filter { name ->
-            name.substringAfterLast('.', "").lowercase() in PageImageExtensions
+        try {
+            val names = archive.names().filter { name ->
+                name.substringAfterLast('.', "").lowercase() in PageImageExtensions
+            }
+            imageNames = names.sortedWith(compareBy(::fileNaturalKey))
+            val comic = archive.read("ComicInfo.xml", MAX_COMIC_INFO_BYTES)?.let(::parseComicInfo)
+            title = comic?.title ?: "Unknown Title"
+            description = comic?.summary
+            val coverName = fileCoverName(imageNames)
+            coverBytes = coverName?.let { runCatching { archive.read(it) }.getOrNull() }
+            coverMediaType = coverName?.let(::mediaTypeForPath)
+        } catch (e: Throwable) {
+            runCatching { archive.close() }
+            throw e
         }
-        imageNames = names.sortedWith(compareBy(::fileNaturalKey))
-        val comic = archive.read("ComicInfo.xml", MAX_COMIC_INFO_BYTES)?.let(::parseComicInfo)
-        title = comic?.title ?: "Unknown Title"
-        description = comic?.summary
-        val coverName = fileCoverName(imageNames)
-        coverBytes = coverName?.let { runCatching { archive.read(it) }.getOrNull() }
-        coverMediaType = coverName?.let(::mediaTypeForPath)
     }
 
     fun readPage(name: String): ByteArray? = archive.read(name)
@@ -314,9 +324,10 @@ class CbzFileReader(file: File) : Closeable {
 }
 
 private val PageImageExtensions = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp")
+private val FileNaturalDigitsRegex = Regex("\\d+")
 
 private fun fileNaturalKey(name: String): String =
-    name.replace(Regex("\\d+")) { it.value.padStart(12, '0') }
+    name.replace(FileNaturalDigitsRegex) { it.value.padStart(12, '0') }
 
 private fun fileCoverName(names: List<String>): String? =
     names.sortedWith(
