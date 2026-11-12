@@ -1,5 +1,6 @@
 package dev.mirutime.feature.reader.session
 
+import androidx.compose.runtime.Immutable
 import dev.mirutime.core.log.MiruLog
 import dev.mirutime.feature.reader.api.ReaderContentSource
 import dev.mirutime.feature.reader.api.ReaderPositionStore
@@ -32,6 +33,7 @@ import kotlinx.coroutines.withContext
 
 enum class RestorePhase { Restoring, Ready, Failed }
 
+@Immutable
 data class ReaderSessionState(
     val book: dev.mirutime.app.features.reader.document.ReaderBook? = null,
     val chapters: List<dev.mirutime.app.features.reader.document.ReaderChapter> = emptyList(),

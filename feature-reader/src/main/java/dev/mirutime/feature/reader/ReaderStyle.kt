@@ -1,5 +1,8 @@
 package dev.mirutime.feature.reader
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class ReaderStyle(
     val fontFamily: String = "serif",   // serif | sans-serif | monospace | sys:<family>
     val customFontPath: String? = null,
@@ -67,6 +70,7 @@ data class ReaderStyle(
     }
 }
 
+@Immutable
 data class ReaderBackground(
     val id: String,
     val backgroundArgb: Long,

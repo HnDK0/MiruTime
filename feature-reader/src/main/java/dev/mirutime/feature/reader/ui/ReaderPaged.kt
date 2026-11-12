@@ -173,31 +173,46 @@ internal fun ReaderPaged(
                 val widthPx = with(density) { maxWidth.toPx() }
                 val heightPx = with(density) { maxHeight.toPx() }
                 val locale = LocalConfiguration.current.locales[0].toLanguageTag()
-                val layoutKey = buildString {
-                    append(widthPx)
-                    append('|')
-                    append(heightPx)
-                    append('|')
-                    append(style.hashCode())
-                    append('|')
-                    append(density.fontScale)
-                    append('|')
-                    append(locale)
-                    append('|')
-                    append(document.revision)
-                    append('|')
-                    append(style.splitSentences)
-                    append('|')
-                    append(parallel)
-                    append('|')
-                    append(translationFirst)
-                    append('|')
-                    append(chapterTitle)
-                    append('|')
-                    append(translationLabel)
-                    append('|')
-                    // A late translation must re-paginate the whole chapter.
-                    append(translations.hashCode())
+                val hasTranslationBadge = translationLabel != null
+                val layoutKey = remember(
+                    widthPx,
+                    heightPx,
+                    style,
+                    density.fontScale,
+                    locale,
+                    document.revision,
+                    parallel,
+                    translationFirst,
+                    chapterTitle,
+                    hasTranslationBadge,
+                    translations,
+                ) {
+                    buildString {
+                        append(widthPx)
+                        append('|')
+                        append(heightPx)
+                        append('|')
+                        append(style.hashCode())
+                        append('|')
+                        append(density.fontScale)
+                        append('|')
+                        append(locale)
+                        append('|')
+                        append(document.revision)
+                        append('|')
+                        append(style.splitSentences)
+                        append('|')
+                        append(parallel)
+                        append('|')
+                        append(translationFirst)
+                        append('|')
+                        append(chapterTitle)
+                        append('|')
+                        append(hasTranslationBadge)
+                        append('|')
+                        // A late translation must re-paginate the whole chapter.
+                        append(translations.hashCode())
+                    }
                 }
                 val pages = remember(layoutKey, document, translations, paginationRetry) {
                     try {
@@ -405,6 +420,7 @@ private fun ReaderPagedPager(
     ) {
         HorizontalPager(
             state = pagerState,
+            key = { it },
             modifier = Modifier.fillMaxSize(),
         ) { pageIndex ->
             val page = pages.getOrNull(pageIndex) ?: return@HorizontalPager
@@ -441,30 +457,30 @@ private fun ReaderPageContent(
     val paragraphStyle = style.toTextStyle()
     val headingStyle = style.headingTextStyle()
     val searchLabel = stringResource(R.string.rd_selection_search)
-    Column(
-        Modifier
-            .fillMaxSize()
-            .clipToBounds(),
+    PagedSelection(
+        style = style,
+        searchable = true,
+        searchLabel = searchLabel,
+        onSearchSelection = onSearchSelection,
     ) {
-        page.lines.forEachIndexed { index, line ->
-            key(line.blockId, line.start, line.isChapterHeader, index) {
-                val spacing = if (index == 0) 0f else line.spacingBeforePx
-                if (spacing > 0f) {
-                    Spacer(Modifier.height(with(density) { spacing.toDp() }))
-                }
-                if (line.isChapterHeader) {
-                    // The reserved height equals the measured header height, so
-                    // the painted header fills the page exactly.
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(with(density) { line.heightPx.toDp() }),
-                    ) {
-                        PagedSelection(
-                            style = style,
-                            searchable = false,
-                            searchLabel = searchLabel,
-                            onSearchSelection = onSearchSelection,
+        Column(
+            Modifier
+                .fillMaxSize()
+                .clipToBounds(),
+        ) {
+            page.lines.forEachIndexed { index, line ->
+                key(line.blockId, line.start, line.isChapterHeader, index) {
+                    val spacing = if (index == 0) 0f else line.spacingBeforePx
+                    if (spacing > 0f) {
+                        Spacer(Modifier.height(with(density) { spacing.toDp() }))
+                    }
+                    if (line.isChapterHeader) {
+                        // The reserved height equals the measured header height, so
+                        // the painted header fills the page exactly.
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(with(density) { line.heightPx.toDp() }),
                         ) {
                             ReaderChapterHeader(
                                 title = chapterTitle,
@@ -472,59 +488,47 @@ private fun ReaderPageContent(
                                 translationLabel = translationLabel,
                             )
                         }
-                    }
-                } else {
-                    when (line.kind) {
-                        BlockKind.Image -> {
-                            val imageBlock = blocks[line.blockId]
-                            val ref = imageBlock?.imageRef
-                            if (ref.isNullOrBlank()) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(with(density) { line.heightPx.toDp() })
-                                        .clip(RoundedCornerShape(MiruRadius.Chip))
-                                        .background(textColor.copy(alpha = 0.08f)),
-                                )
-                            } else {
-                                AsyncImage(
-                                    model = ref,
-                                    contentDescription = imageBlock.original.ifBlank { null },
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(with(density) { line.heightPx.toDp() })
-                                        .clip(RoundedCornerShape(MiruRadius.Chip)),
+                    } else {
+                        when (line.kind) {
+                            BlockKind.Image -> {
+                                val imageBlock = blocks[line.blockId]
+                                val ref = imageBlock?.imageRef
+                                if (ref.isNullOrBlank()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(with(density) { line.heightPx.toDp() })
+                                            .clip(RoundedCornerShape(MiruRadius.Chip))
+                                            .background(textColor.copy(alpha = 0.08f)),
+                                    )
+                                } else {
+                                    AsyncImage(
+                                        model = ref,
+                                        contentDescription = imageBlock.original.ifBlank { null },
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(with(density) { line.heightPx.toDp() })
+                                            .clip(RoundedCornerShape(MiruRadius.Chip)),
+                                    )
+                                }
+                            }
+                            BlockKind.Divider -> {
+                                Text(
+                                    text = "· · ·",
+                                    style = paragraphStyle,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.height(with(density) { line.heightPx.toDp() }),
                                 )
                             }
-                        }
-                        BlockKind.Divider -> PagedSelection(
-                            style = style,
-                            searchable = false,
-                            searchLabel = searchLabel,
-                            onSearchSelection = onSearchSelection,
-                        ) {
-                            Text(
-                                text = "· · ·",
-                                style = paragraphStyle,
-                                maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.height(with(density) { line.heightPx.toDp() }),
-                            )
-                        }
-                        BlockKind.Heading, BlockKind.Paragraph -> {
-                            val block = blocks[line.blockId]
-                            val translated = translations[line.blockId]?.takeIf { it.isNotBlank() }
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .then(pagedLineHighlightModifier(line, style, ttsHighlight)),
-                            ) {
-                                PagedSelection(
-                                    style = style,
-                                    searchable = true,
-                                    searchLabel = searchLabel,
-                                    onSearchSelection = onSearchSelection,
+                            BlockKind.Heading, BlockKind.Paragraph -> {
+                                val block = blocks[line.blockId]
+                                val translated = translations[line.blockId]?.takeIf { it.isNotBlank() }
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .then(pagedLineHighlightModifier(line, style, ttsHighlight)),
                                 ) {
                                     val paired = line.alt
                                     if (paired != null) {

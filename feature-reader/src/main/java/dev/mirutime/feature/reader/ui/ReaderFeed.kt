@@ -121,28 +121,30 @@ internal fun ReaderFeed(
     val currentState by rememberUpdatedState(state)
     // Only layout-affecting fields should restore the anchor after a reflow;
     // TTS-highlight/keep-screen-on changes must not snap-scroll.
-    val layoutStyle = listOf(
-        style.fontFamily,
-        style.customFontPath,
-        style.customFontName,
-        style.fontSizeSp,
-        style.lineHeight,
-        style.paragraphSpacingDp,
-        style.marginStartDp,
-        style.marginEndDp,
-        style.marginTopDp,
-        style.marginBottomDp,
-        style.letterSpacingEm,
-        style.justify,
-        style.hyphenation,
-        style.paragraphIndent,
-        style.firstLetterBold,
-        style.splitSentences,
-        style.bold,
-        style.italic,
-        style.underline,
-        style.shadow,
-    )
+    val layoutStyle = remember(style) {
+        listOf(
+            style.fontFamily,
+            style.customFontPath,
+            style.customFontName,
+            style.fontSizeSp,
+            style.lineHeight,
+            style.paragraphSpacingDp,
+            style.marginStartDp,
+            style.marginEndDp,
+            style.marginTopDp,
+            style.marginBottomDp,
+            style.letterSpacingEm,
+            style.justify,
+            style.hyphenation,
+            style.paragraphIndent,
+            style.firstLetterBold,
+            style.splitSentences,
+            style.bold,
+            style.italic,
+            style.underline,
+            style.shadow,
+        )
+    }
     val initialLayoutStyle = remember { layoutStyle }
 
     val density = LocalDensity.current
@@ -236,9 +238,22 @@ internal fun ReaderFeed(
     }
 
     LaunchedEffect(listState, entries) {
-        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+        var lastReportedIndex = -1
+        var lastReportedOffset = -1
+        snapshotFlow {
+            Triple(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
+                listState.isScrollInProgress,
+            )
+        }
             .distinctUntilChanged()
-            .collect { (index, offset) ->
+            .collect { (index, offset, scrolling) ->
+                val indexChanged = index != lastReportedIndex
+                val settledOffsetChanged = !scrolling && offset != lastReportedOffset
+                if (!indexChanged && !settledOffsetChanged) return@collect
+                lastReportedIndex = index
+                lastReportedOffset = offset
                 val entry = entries.getOrNull(index) ?: return@collect
                 when (entry) {
                     is FeedEntry.Block -> onAnchor(
@@ -259,6 +274,7 @@ internal fun ReaderFeed(
 
     LaunchedEffect(listState, entries) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
             .collect { lastVisible ->
                 val entry = entries.getOrNull(lastVisible) ?: return@collect
                 val range = state.feed.chapterEntryRanges[entry.chapterIndex] ?: return@collect
@@ -277,6 +293,7 @@ internal fun ReaderFeed(
     LaunchedEffect(listState, entries, nextChapterIndex) {
         val next = nextChapterIndex ?: return@LaunchedEffect
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
             .collect { lastVisible ->
                 if (lastVisible >= entries.lastIndex - 1) onLoadNext(next)
             }
@@ -319,7 +336,17 @@ internal fun ReaderFeed(
         ),
         verticalArrangement = Arrangement.spacedBy(style.paragraphSpacingDp.dp),
     ) {
-        itemsIndexed(entries, key = { _, entry -> feedItemKey(entry.id) }) { index, entry ->
+        itemsIndexed(
+            items = entries,
+            key = { _, entry -> feedItemKey(entry.id) },
+            contentType = { _, entry ->
+                when (entry) {
+                    is FeedEntry.Header -> "header"
+                    is FeedEntry.Block -> "block"
+                    is FeedEntry.Gap -> "gap"
+                }
+            },
+        ) { index, entry ->
             when (entry) {
                 is FeedEntry.Header -> ReaderChapterHeader(
                     title = chapterTitles[entry.chapterIndex] ?: entry.title,
@@ -428,7 +455,14 @@ private fun FeedGap(
                     )
                 }
                 Text(
-                    text = status.message,
+                    text = if (
+                        status.message.isBlank() ||
+                        status.message == "Could not load chapter"
+                    ) {
+                        stringResource(R.string.rd_chapter_error)
+                    } else {
+                        status.message
+                    },
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 8.dp),

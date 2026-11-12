@@ -18,7 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asAndroidColorFilter
@@ -249,13 +249,15 @@ internal fun Modifier.mangaColorFilter(filter: ColorFilter?): Modifier =
     if (filter == null) {
         this
     } else {
-        drawWithContent {
+        drawWithCache {
             val paint = Paint().apply {
                 colorFilter = filter.asAndroidColorFilter()
             }
-            val canvas = drawContext.canvas.nativeCanvas
-            val checkpoint = canvas.saveLayer(null, paint)
-            drawContent()
-            canvas.restoreToCount(checkpoint)
+            onDrawWithContent {
+                val canvas = drawContext.canvas.nativeCanvas
+                val checkpoint = canvas.saveLayer(null, paint)
+                drawContent()
+                canvas.restoreToCount(checkpoint)
+            }
         }
     }

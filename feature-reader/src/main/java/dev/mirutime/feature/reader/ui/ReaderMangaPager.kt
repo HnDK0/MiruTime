@@ -497,6 +497,7 @@ private fun MangaChapterPager(
     Box(modifier = Modifier.fillMaxSize()) {
         HorizontalPager(
             state = pagerState,
+            key = { pages.getOrNull(it)?.id?.let { id -> "${id.chapterUrl}#${id.index}" } ?: it },
             modifier = Modifier.fillMaxSize(),
             reverseLayout = style.direction == MangaReadingDirection.Rtl,
             beyondViewportPageCount = 2,
@@ -670,25 +671,29 @@ private fun MangaWebtoonView(
     // Screen-height budget over the whole strip: only what the viewport can
     // actually reach is warmed, with known heights from decoded pages.
     LaunchedEffect(
-        listState.firstVisibleItemIndex,
+        listState,
         strip,
         viewportSize,
         horizontalPaddingPx,
         pageFile,
     ) {
         if (viewportSize.width <= 0 || viewportSize.height <= 0) return@LaunchedEffect
-        val ratios = strip.map { item -> item.page.imageRef?.let { pageRatios[it] } }
-        mangaWebtoonPreloadIndices(
-            currentPage = listState.firstVisibleItemIndex,
-            pageCount = strip.size,
-            pageRatios = ratios,
-            viewportHeightPx = viewportSize.height.toFloat(),
-            pageWidthPx = pageWidth.toFloat(),
-        ).forEach { index ->
-            val ref = strip.getOrNull(index)?.page?.imageRef?.takeIf { it.isNotBlank() }
-                ?: return@forEach
-            pageFile(ref)
-        }
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { currentPage ->
+                val ratios = strip.map { item -> item.page.imageRef?.let { pageRatios[it] } }
+                mangaWebtoonPreloadIndices(
+                    currentPage = currentPage,
+                    pageCount = strip.size,
+                    pageRatios = ratios,
+                    viewportHeightPx = viewportSize.height.toFloat(),
+                    pageWidthPx = pageWidth.toFloat(),
+                ).forEach { index ->
+                    val ref = strip.getOrNull(index)?.page?.imageRef?.takeIf { it.isNotBlank() }
+                        ?: return@forEach
+                    pageFile(ref)
+                }
+            }
     }
 
     LazyColumn(
@@ -713,7 +718,11 @@ private fun MangaWebtoonView(
                 bottom = 24.dp,
             ),
         ) {
-            itemsIndexed(strip, key = { _, item -> item.id }) { index, item ->
+            itemsIndexed(
+                items = strip,
+                key = { _, item -> item.id },
+                contentType = { _, item -> if (item.chapterStart) "chapter_start_page" else "page" },
+            ) { index, item ->
                 // Every page of every stitched chapter is one continuous list;
                 // a divider marks the seam instead of a chapter boundary card.
                 if (item.chapterStart && index > 0) {
