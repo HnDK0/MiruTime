@@ -170,6 +170,7 @@ class BookMigrationPlanner {
 
 internal const val MigrationWriteChunk = 200
 internal const val MigrationIdChunk = 900
+internal const val MigrationTranslationBlockChunk = 20
 internal const val MigrationStatusRunning = "running"
 internal const val MigrationStatusCompleted = "completed"
 internal const val MigrationStatusPartial = "partial"

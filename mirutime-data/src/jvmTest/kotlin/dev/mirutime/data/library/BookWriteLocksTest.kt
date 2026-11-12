@@ -53,4 +53,14 @@ class BookWriteLocksTest {
 
         assertEquals(setOf("first", "second"), setOf(first.await(), second.await()))
     }
+
+    @Test
+    fun `withLocks handles 900 keys iteratively without stack overflow`() = runTest {
+        val locks = BookWriteLocks()
+        val keys = (1..900).map { "book:$it" }
+        val result = locks.withLocks(keys) {
+            keys.size
+        }
+        assertEquals(900, result)
+    }
 }

@@ -478,6 +478,9 @@ interface LibraryDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertBookSearch(row: BookSearchEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertBookSearches(rows: List<BookSearchEntity>)
+
     @Query("DELETE FROM book_search WHERE rowid = :bookId")
     suspend fun deleteBookSearch(bookId: Long)
 
@@ -910,7 +913,7 @@ interface LibraryDao {
 
     @Transaction
     suspend fun upsertChapterRows(rows: List<ChapterEntity>) {
-        rows.forEach { upsertChapter(it) }
+        if (rows.isNotEmpty()) upsertChapters(rows)
     }
 
     // Reconcile writes one short transaction per chunk via the helper below.

@@ -19,18 +19,24 @@ class BookWriteLocks {
 
     fun targetKey(installId: String, url: String): String = "target:$installId|$url"
 
-    fun mutex(key: String): Mutex = locks.getOrPut(key) { Mutex() }
+    fun mutex(key: String): Mutex = locks.computeIfAbsent(key) { Mutex() }
 
     suspend fun <T> withLock(key: String, block: suspend () -> T): T =
         mutex(key).withLock { block() }
 
     suspend fun <T> withLocks(keys: Collection<String>, block: suspend () -> T): T {
         val ordered = keys.distinct().sorted().map(::mutex)
-        suspend fun acquire(index: Int): T = if (index == ordered.size) {
-            block()
-        } else {
-            ordered[index].withLock { acquire(index + 1) }
+        var acquired = 0
+        try {
+            for (mutex in ordered) {
+                mutex.lock()
+                acquired++
+            }
+            return block()
+        } finally {
+            for (index in acquired - 1 downTo 0) {
+                ordered[index].unlock()
+            }
         }
-        return acquire(0)
     }
 }

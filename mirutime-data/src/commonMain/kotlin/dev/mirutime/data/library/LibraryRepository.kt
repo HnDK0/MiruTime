@@ -508,8 +508,18 @@ class LibraryRepository(
 
     suspend fun rebuildSearchIndex() {
         dao.clearBookSearch()
-        for (book in dao.allBooks()) {
-            indexBookWithTags(book)
+        val books = dao.allBooks()
+        if (books.isEmpty()) return
+        val tagsByBookId = tagsByBook()
+        for (chunk in books.chunked(200)) {
+            currentCoroutineContext().ensureActive()
+            val rows = chunk.mapNotNull { book ->
+                if (book.bookId <= 0L) return@mapNotNull null
+                val tags = tagsByBookId[book.bookId]?.joinToString(" ").orEmpty()
+                val translatedTitle = dao.latestBookTranslationTitle(book.bookId, null, null).orEmpty()
+                book.toSearchRow(tags, translatedTitle)
+            }
+            if (rows.isNotEmpty()) dao.upsertBookSearches(rows)
         }
     }
 

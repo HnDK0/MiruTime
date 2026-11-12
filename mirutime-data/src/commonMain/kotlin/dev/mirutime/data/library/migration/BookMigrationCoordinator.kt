@@ -304,7 +304,7 @@ class BookMigrationCoordinator(
                     currentBook?.lastReadAt,
                     oldBook.lastReadAt,
                 ).maxOrNull() ?: at
-                dao.touchHistory(
+                dao.touchHistoryAndRecord(
                     bookId = newBookId,
                     chapterId = mappedLast.chapterId,
                     chapterIndex = mappedLast.idx,
@@ -453,7 +453,7 @@ class BookMigrationCoordinator(
         }
 
         if (oldToNewTranslation.isEmpty()) return
-        for (chunk in oldToNewTranslation.keys.toList().chunked(MigrationIdChunk)) {
+        for (chunk in oldToNewTranslation.keys.toList().chunked(MigrationTranslationBlockChunk)) {
             currentCoroutineContext().ensureActive()
             val blocks = dao.translationBlocksFor(chunk)
             if (blocks.isEmpty()) continue

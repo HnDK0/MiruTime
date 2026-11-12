@@ -389,15 +389,26 @@ private suspend fun importLibraryBackupRows(
             promptHash = translation.promptHash,
             pipelineVersion = translation.pipelineVersion,
         )
-        chapterTranslationIds[translation.translationId] = existing?.translationId
-            ?: target.upsertChapterTranslation(
+        val targetId = if (existing != null) {
+            target.upsertChapterTranslation(
+                translation.copy(translationId = existing.translationId, chapterId = chapterId),
+            )
+            target.deleteTranslationBlocks(existing.translationId)
+            existing.translationId
+        } else {
+            target.upsertChapterTranslation(
                 translation.copy(translationId = 0, chapterId = chapterId),
             )
+        }
+        chapterTranslationIds[translation.translationId] = targetId
         translationCount++
     }
-    forEachOffsetPage(pageSize, source::backupTranslationBlocks) { block ->
-        val translationId = chapterTranslationIds[block.translationId] ?: return@forEachOffsetPage
-        target.upsertTranslationBlock(block.copy(translationId = translationId))
+    forEachOffsetPageBatch(pageSize, source::backupTranslationBlocks) { blocks ->
+        val mapped = blocks.mapNotNull { block ->
+            val translationId = chapterTranslationIds[block.translationId] ?: return@mapNotNull null
+            block.copy(translationId = translationId)
+        }
+        if (mapped.isNotEmpty()) target.upsertTranslationBlocks(mapped)
     }
 
     forEachPage(
@@ -480,6 +491,7 @@ private suspend fun <T> forEachPage(
 ) {
     var after = 0L
     while (true) {
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
         val rows = fetch(after, pageSize)
         if (rows.isEmpty()) return
         rows.forEach { block(it) }
@@ -493,11 +505,22 @@ private suspend fun <T> forEachOffsetPage(
     fetch: suspend (offset: Int, limit: Int) -> List<T>,
     block: suspend (T) -> Unit,
 ) {
+    forEachOffsetPageBatch(pageSize, fetch) { rows ->
+        rows.forEach { block(it) }
+    }
+}
+
+private suspend fun <T> forEachOffsetPageBatch(
+    pageSize: Int,
+    fetch: suspend (offset: Int, limit: Int) -> List<T>,
+    block: suspend (List<T>) -> Unit,
+) {
     var offset = 0
     while (true) {
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
         val rows = fetch(offset, pageSize)
         if (rows.isEmpty()) return
-        rows.forEach { block(it) }
+        block(rows)
         if (rows.size < pageSize) return
         offset += rows.size
     }
