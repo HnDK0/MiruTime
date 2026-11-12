@@ -80,6 +80,53 @@ fun ShelfManagerSheet(
     val counts = remember(summaries) { summaries.associate { it.shelfId to it.bookCount } }
     val coverFor = remember(summaries) { summaries.associateBy { it.shelfId } }
 
+    if (createOpen) {
+        ShelfEditSheet(
+            title = stringResource(R.string.shelf_new_title),
+            description = stringResource(R.string.shelf_new_desc),
+            confirmLabel = stringResource(R.string.shelf_create),
+            initial = "",
+            initialSkipUpdates = false,
+            shelves = shelves,
+            exceptId = null,
+            onClose = { createOpen = false },
+            onConfirm = { name, skip ->
+                onCreateShelf(name, skip)
+                createOpen = false
+            },
+        )
+        return
+    }
+    renameTarget?.let { target ->
+        ShelfEditSheet(
+            title = stringResource(R.string.shelf_edit_title),
+            description = stringResource(R.string.shelf_edit_desc),
+            confirmLabel = stringResource(R.string.shelf_save),
+            initial = target.label,
+            initialSkipUpdates = target.excludeFromUpdates,
+            shelves = shelves,
+            exceptId = target.id,
+            onClose = { renameTarget = null },
+            onConfirm = { name, skip ->
+                onRenameShelf(target, name, skip)
+                renameTarget = null
+            },
+        )
+        return
+    }
+    deleteTarget?.let { target ->
+        DeleteShelfSheet(
+            shelf = target,
+            bookCount = counts[target.id] ?: 0,
+            onClose = { deleteTarget = null },
+            onConfirm = {
+                onDeleteShelf(target)
+                deleteTarget = null
+            },
+        )
+        return
+    }
+
     AppBottomSheet(
         title = stringResource(R.string.shelf_title),
         description = stringResource(R.string.shelf_desc),
@@ -125,50 +172,6 @@ fun ShelfManagerSheet(
                 )
             }
         }
-    }
-
-    if (createOpen) {
-        ShelfEditSheet(
-            title = stringResource(R.string.shelf_new_title),
-            description = stringResource(R.string.shelf_new_desc),
-            confirmLabel = stringResource(R.string.shelf_create),
-            initial = "",
-            initialSkipUpdates = false,
-            shelves = shelves,
-            exceptId = null,
-            onClose = { createOpen = false },
-            onConfirm = { name, skip ->
-                onCreateShelf(name, skip)
-                createOpen = false
-            },
-        )
-    }
-    renameTarget?.let { target ->
-        ShelfEditSheet(
-            title = stringResource(R.string.shelf_edit_title),
-            description = stringResource(R.string.shelf_edit_desc),
-            confirmLabel = stringResource(R.string.shelf_save),
-            initial = target.label,
-            initialSkipUpdates = target.excludeFromUpdates,
-            shelves = shelves,
-            exceptId = target.id,
-            onClose = { renameTarget = null },
-            onConfirm = { name, skip ->
-                onRenameShelf(target, name, skip)
-                renameTarget = null
-            },
-        )
-    }
-    deleteTarget?.let { target ->
-        DeleteShelfSheet(
-            shelf = target,
-            bookCount = counts[target.id] ?: 0,
-            onClose = { deleteTarget = null },
-            onConfirm = {
-                onDeleteShelf(target)
-                deleteTarget = null
-            },
-        )
     }
 }
 

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -158,8 +159,8 @@ fun ManageExtensionsScreen(
     }
 
     val all = plugins.orEmpty()
-    val installed = all.filter { it.installed }
-    val updates = installed.count { it.updateAvailable }
+    val installed = remember(all) { all.filter { it.installed } }
+    val updates = remember(installed) { installed.count { it.updateAvailable } }
     val languages = remember(all) { all.map { it.language }.distinct().sorted() }
     val installedShown = remember(all, filters) {
         all.filter { it.installed }.applyFilters(filters, installedTab = true)
@@ -281,7 +282,7 @@ fun ManageExtensionsScreen(
                             onClick = { repoText = provider.defaultRepoUrl() },
                             modifier = Modifier
                                 .weight(1f)
-                                .height(MiruSize.Button),
+                                .heightIn(min = MiruSize.Button),
                         ) {
                             Text(
                                 text = stringResource(R.string.finder_repo_reset),
@@ -305,7 +306,7 @@ fun ManageExtensionsScreen(
                             enabled = !repoBusy,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(MiruSize.Button),
+                                .heightIn(min = MiruSize.Button),
                         ) {
                             if (repoBusy) {
                                 CircularProgressIndicator(
@@ -396,7 +397,7 @@ fun ManageExtensionsScreen(
                                     }
                                 }
                             },
-                            modifier = Modifier.height(MiruSize.Control),
+                            modifier = Modifier.heightIn(min = MiruSize.Control),
                             contentPadding = PaddingValues(horizontal = MiruSpace.M),
                         ) {
                             Text(
@@ -609,33 +610,35 @@ fun ManageExtensionsScreen(
             onClose = { filterOpen = false },
         )
     }
-    actionsFor?.let { plugin ->
-        ExtensionActionsSheet(
-            plugin = plugin,
-            onCheckUpdate = {
-                actionsFor = null
-                if (plugin.updateAvailable) {
-                    runFor(plugin.id) { provider.update(plugin.id) }
-                } else {
-                    toast(resources.getString(R.string.finder_up_to_date_fmt, plugin.name))
-                }
-            },
-            onSettings = {
-                // Keep actionsFor: settings stacks on top, and closing it
-                // returns to the actions sheet.
-                settingsFor = plugin
-            },
-            onEdit = {
-                actionsFor = null
-                sourceFor = plugin
-            },
-            onTranslate = { translationFor = plugin },
-            onUninstall = {
-                actionsFor = null
-                pendingUninstall = plugin
-            },
-            onClose = { actionsFor = null },
-        )
+    if (settingsFor == null && translationFor == null) {
+        actionsFor?.let { plugin ->
+            ExtensionActionsSheet(
+                plugin = plugin,
+                onCheckUpdate = {
+                    actionsFor = null
+                    if (plugin.updateAvailable) {
+                        runFor(plugin.id) { provider.update(plugin.id) }
+                    } else {
+                        toast(resources.getString(R.string.finder_up_to_date_fmt, plugin.name))
+                    }
+                },
+                onSettings = {
+                    // Keep actionsFor: closing settings returns to the actions
+                    // sheet while only one AppBottomSheet is mounted at a time.
+                    settingsFor = plugin
+                },
+                onEdit = {
+                    actionsFor = null
+                    sourceFor = plugin
+                },
+                onTranslate = { translationFor = plugin },
+                onUninstall = {
+                    actionsFor = null
+                    pendingUninstall = plugin
+                },
+                onClose = { actionsFor = null },
+            )
+        }
     }
     settingsFor?.let { plugin ->
         PluginSettingsSheet(

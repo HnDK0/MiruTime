@@ -359,11 +359,16 @@ private fun isCharging(context: Context): Boolean {
         status == BatteryManager.BATTERY_STATUS_FULL
 }
 
+@Composable
 private fun formatRemaining(ms: Long): String {
     val totalMinutes = (ms / 60_000L).coerceAtLeast(0L)
     val hours = totalMinutes / 60L
     val minutes = totalMinutes % 60L
-    return if (hours > 0L) "${hours}h ${minutes}m" else "${minutes}m"
+    return if (hours > 0L) {
+        stringResource(R.string.updates_remaining_hm_fmt, hours, minutes)
+    } else {
+        stringResource(R.string.updates_remaining_m_fmt, minutes)
+    }
 }
 
 @Composable

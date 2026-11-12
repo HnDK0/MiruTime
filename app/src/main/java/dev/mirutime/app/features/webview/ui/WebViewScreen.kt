@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -634,7 +635,7 @@ fun WebViewScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(MiruSize.Touch),
+                    .heightIn(min = MiruSize.Touch),
             ) {
                 BrowserIconButton(
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
@@ -1008,7 +1009,7 @@ private fun WebViewError(host: String, onRetry: () -> Unit) {
                         containerColor = MaterialTheme.colorScheme.onBackground,
                         contentColor = MaterialTheme.colorScheme.background,
                     ),
-                    modifier = Modifier.height(MiruSize.Button),
+                    modifier = Modifier.heightIn(min = MiruSize.Button),
                 ) {
                     Text(text = stringResource(R.string.webview_retry))
                 }
