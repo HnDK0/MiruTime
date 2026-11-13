@@ -20,6 +20,18 @@ val signingProperties = Properties().apply {
     }
 }
 
+// The only number to bump on a release: MAJOR.MINOR.PATCH, optionally with a
+// suffix ("1.0.0-rc1"). versionCode is derived from it, so the two can never
+// disagree; a prerelease keeps the code of its final build, which only matters
+// for sideloaded builds (GitHub releases, never Play).
+val appVersionName = "1.0.0"
+
+// MAJOR*10000 + MINOR*100 + PATCH: 1.0.0 -> 10000, 1.2.3 -> 10203.
+val appVersionCode = appVersionName.substringBefore('-').split('.').let { parts ->
+    fun part(index: Int) = parts.getOrNull(index).orEmpty().takeWhile(Char::isDigit).toIntOrNull() ?: 0
+    part(0) * 10_000 + part(1) * 100 + part(2)
+}
+
 android {
     // Mirrored from MiruTime-Core android block (namespace differs: app).
     namespace = "dev.mirutime.app"
@@ -29,8 +41,8 @@ android {
         applicationId = "dev.mirutime.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = appVersionCode
+        versionName = appVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Short commit + build type are shown in About so a tester can name
         // the exact build. Release CI has a clean checkout; local builds too.
