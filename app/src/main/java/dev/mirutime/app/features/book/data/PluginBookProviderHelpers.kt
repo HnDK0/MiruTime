@@ -16,6 +16,7 @@ import java.security.MessageDigest
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 
+
 // Status overlay is pure so tests cover the mapping without Room/Compose.
 internal fun applyChapterStatus(
     chapters: List<BookChapter>,

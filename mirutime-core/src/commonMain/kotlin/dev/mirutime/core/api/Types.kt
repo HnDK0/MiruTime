@@ -2,7 +2,7 @@ package dev.mirutime.core.api
 
 import dev.mirutime.core.network.cf.CfOptions
 
-enum class ContentType { NOVEL, MANGA, VIDEO }
+enum class ContentType { NOVEL, MANGA, VIDEO, AUDIO }
 
 // Plugin API level this library implements. A plugin declares the API it was
 // written against in metadata.api (and index.yaml `api`); anything else is

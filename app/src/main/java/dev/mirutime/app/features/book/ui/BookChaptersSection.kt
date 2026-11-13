@@ -115,6 +115,8 @@ internal fun SelectionBar(
     allSelected: Boolean,
     translationConfigured: Boolean,
     downloadAvailable: Boolean,
+    // Audio streams from its catalogue: no download/delete-downloads chips.
+    showDownload: Boolean = true,
     translatedCount: Int,
     downloadedCount: Int,
     busy: BulkAction?,
@@ -202,20 +204,22 @@ internal fun SelectionBar(
                 enabled = busy == null && selectionCount > 0 && translatedCount > 0,
                 onClick = onDeleteTranslations,
             )
-            MiruCompactButton(
-                icon = Icons.Filled.Download,
-                label = stringResource(R.string.book_sel_action_download),
-                ink = if (downloadAvailable) extra.accent else extra.muted,
-                enabled = busy == null && selectionCount > 0,
-                onClick = onDownloadSelected,
-            )
-            MiruCompactButton(
-                icon = Icons.Filled.Delete,
-                label = stringResource(R.string.book_sel_action_delete_downloads),
-                ink = MaterialTheme.colorScheme.error,
-                enabled = busy == null && selectionCount > 0 && downloadedCount > 0,
-                onClick = onDeleteDownloads,
-            )
+            if (showDownload) {
+                MiruCompactButton(
+                    icon = Icons.Filled.Download,
+                    label = stringResource(R.string.book_sel_action_download),
+                    ink = if (downloadAvailable) extra.accent else extra.muted,
+                    enabled = busy == null && selectionCount > 0,
+                    onClick = onDownloadSelected,
+                )
+                MiruCompactButton(
+                    icon = Icons.Filled.Delete,
+                    label = stringResource(R.string.book_sel_action_delete_downloads),
+                    ink = MaterialTheme.colorScheme.error,
+                    enabled = busy == null && selectionCount > 0 && downloadedCount > 0,
+                    onClick = onDeleteDownloads,
+                )
+            }
             MiruCompactButton(
                 icon = Icons.Filled.Check,
                 label = stringResource(R.string.book_sel_action_mark_read),

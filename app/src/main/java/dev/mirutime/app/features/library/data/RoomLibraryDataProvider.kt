@@ -2,6 +2,7 @@ package dev.mirutime.app.features.library.data
 
 import android.text.format.DateUtils
 import dev.mirutime.app.core.jsonStringArray
+import dev.mirutime.app.core.jsonStringField
 import dev.mirutime.core.api.Outcome
 import dev.mirutime.core.log.MiruLog
 import dev.mirutime.app.features.library.domain.ContentType
@@ -455,7 +456,9 @@ internal fun mapLibraryBookRow(
         installId = entity.installId,
         // A book added from a catalog is labelled by that catalog, not by the
         // local install id it was imported into.
-        sourceLabel = originNames[entity.bookId] ?: sourceName(rawSource),
+        sourceLabel = originNames[entity.bookId]
+            ?: jsonStringField(entity.extrasJson, "opdsCatalogName")
+            ?: sourceName(rawSource),
         author = entity.authorRaw.ifBlank { entity.author },
         rating = entity.rating.toFloat(),
         contentType = runCatching { ContentType.valueOf(entity.contentType) }

@@ -24,12 +24,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.Icon
 
+// Plugin catalogues only declare novel/manga/video; audio comes from OPDS.
+internal val PluginContentTypes: List<ContentType> =
+    ContentType.entries.filter { it != ContentType.Audio }
+
 @Composable
 internal fun typeLabel(type: ContentType): String = stringResource(
     when (type) {
         ContentType.Novel -> R.string.finder_type_novel
         ContentType.Manga -> R.string.finder_type_manga
         ContentType.Video -> R.string.finder_type_video
+        ContentType.Audio -> R.string.finder_type_audio
     },
 )
 

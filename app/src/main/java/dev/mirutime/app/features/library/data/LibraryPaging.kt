@@ -61,6 +61,7 @@ internal fun ContentType.toData(): LibraryContentType = when (this) {
     ContentType.Novel -> LibraryContentType.Novel
     ContentType.Manga -> LibraryContentType.Manga
     ContentType.Video -> LibraryContentType.Video
+    ContentType.Audio -> LibraryContentType.Audio
 }
 
 internal fun LibrarySort.toData(): dev.mirutime.data.library.LibrarySort = when (this) {

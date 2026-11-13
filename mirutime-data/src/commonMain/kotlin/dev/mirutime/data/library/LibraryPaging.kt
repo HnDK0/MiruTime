@@ -24,6 +24,7 @@ enum class LibraryContentType(val stored: String) {
     Novel("Novel"),
     Manga("Manga"),
     Video("Video"),
+    Audio("Audio"),
     ;
 
     companion object {
@@ -237,8 +238,8 @@ private class WhereParts {
             // row with an unknown stored value is still a Novel filter hit.
             clauses += when (type) {
                 LibraryContentType.Novel ->
-                    "(b.contentType = 'Novel' OR b.contentType NOT IN ('Manga', 'Video'))"
-                LibraryContentType.Manga, LibraryContentType.Video ->
+                    "(b.contentType = 'Novel' OR b.contentType NOT IN ('Manga', 'Video', 'Audio'))"
+                LibraryContentType.Manga, LibraryContentType.Video, LibraryContentType.Audio ->
                     "b.contentType = ${bind(type.stored)}"
             }
         }

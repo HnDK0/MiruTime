@@ -9,6 +9,7 @@ import dev.mirutime.app.features.dashboard.domain.UpdateItem
 import dev.mirutime.app.features.library.data.BookCoverStore
 import dev.mirutime.app.features.library.data.loadTranslatedTitles
 import dev.mirutime.app.features.library.data.resolveStoredCover
+import dev.mirutime.app.core.jsonStringField
 import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.app.features.translation.data.MetadataTranslationStore
 import dev.mirutime.app.features.translation.data.RoomMetadataTranslationStore
@@ -148,7 +149,8 @@ class RoomDashboardDataProvider(
             translatedTitle = batch.translatedTitles[bookId],
             source = installId.ifBlank { hostOf(bookUrl) },
             installId = installId,
-            sourceLabel = sourceName(installId.ifBlank { hostOf(bookUrl) }),
+            sourceLabel = jsonStringField(extrasJson, "opdsCatalogName")
+                ?: sourceName(installId.ifBlank { hostOf(bookUrl) }),
             author = authorRaw.ifBlank { author },
             rating = rating.toFloat(),
             totalChapters = totalChapters,

@@ -162,6 +162,9 @@ private suspend fun importLibraryBackupRows(
         )
     }
     target.upsertShelves(source.shelves())
+    // Catalogue rows before books: a restored `installId = opds:<id>` must
+    // resolve. Credentials live outside the DB and are not restored.
+    source.opdsCatalogs().forEach { catalog -> target.upsertOpdsCatalog(catalog) }
 
     val localBookIds = source.localBookFileIds().toHashSet()
     val bookIds = LinkedHashMap<Long, Long>()

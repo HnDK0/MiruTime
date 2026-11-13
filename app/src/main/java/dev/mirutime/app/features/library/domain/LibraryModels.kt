@@ -2,7 +2,7 @@ package dev.mirutime.app.features.library.domain
 
 import dev.mirutime.data.library.libraryBookKey
 
-enum class ContentType { Novel, Manga, Video }
+enum class ContentType { Novel, Manga, Video, Audio }
 
 enum class LibrarySort {
     LastRead,

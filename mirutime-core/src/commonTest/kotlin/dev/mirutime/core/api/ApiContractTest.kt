@@ -8,10 +8,12 @@ import kotlin.test.assertTrue
 class ApiContractTest {
 
     // --- ContentType ---
+    // AUDIO is additive for the host (OPDS-only). Plugin script API is
+    // unchanged: ScriptMetadataParser still yields NOVEL/MANGA/VIDEO only.
     @Test
     fun contentTypeValues() {
         assertEquals(
-            setOf(ContentType.NOVEL, ContentType.MANGA, ContentType.VIDEO),
+            setOf(ContentType.NOVEL, ContentType.MANGA, ContentType.VIDEO, ContentType.AUDIO),
             ContentType.entries.toSet()
         )
     }

@@ -108,6 +108,11 @@ class DownloadEngine(
         if (isOfflineBook(book, bookUrl)) {
             return@withContext EnqueueResult(reason = EnqueueFailure.LOCAL_BOOK)
         }
+        // Audiobooks stream from their catalogue: there is no chapter payload
+        // to store, so no download task may ever be created for one.
+        if (isAudioBook(book)) {
+            return@withContext EnqueueResult(reason = EnqueueFailure.UNSUPPORTED_CONTENT)
+        }
         val chapters = loadChapters(book, bookUrl)
         if (chapters.isEmpty()) {
             return@withContext EnqueueResult(reason = EnqueueFailure.NO_CHAPTERS)
@@ -256,6 +261,9 @@ class DownloadEngine(
             ?: return@withContext EnqueueResult(reason = EnqueueFailure.BOOK_NOT_SAVED)
         if (isOfflineBook(book, bookUrl)) {
             return@withContext EnqueueResult(reason = EnqueueFailure.LOCAL_BOOK)
+        }
+        if (isAudioBook(book)) {
+            return@withContext EnqueueResult(reason = EnqueueFailure.UNSUPPORTED_CONTENT)
         }
         val chapters = loadChapters(book, bookUrl)
         if (chapters.isEmpty()) {
@@ -1238,6 +1246,9 @@ class DownloadEngine(
         store.localBookFile(book.bookId) != null ||
             LocalBookProvider.isLocalBook(bookUrl) ||
             isLocalFileBook(bookUrl)
+
+    private fun isAudioBook(book: BookEntity): Boolean =
+        book.contentType.equals("Audio", ignoreCase = true)
 
     private fun kindOf(book: BookEntity): DownloadKind =
         if (book.contentType.equals("Manga", ignoreCase = true)) {

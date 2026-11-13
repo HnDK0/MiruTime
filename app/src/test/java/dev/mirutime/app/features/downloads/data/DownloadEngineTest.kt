@@ -64,6 +64,22 @@ class DownloadEngineTest {
     )
 
     @Test
+    fun `an audio book enqueue creates no download tasks`() = runTest {
+        store.bookRow = testBook(contentType = "Audio")
+        val engine = engine()
+
+        val selected = engine.enqueueNow(bookUrl, listOf(1, 2, 3))
+        val next = engine.enqueueNextNow(bookUrl, 100)
+        val next100 = engine.enqueueNext100Now(bookUrl)
+
+        assertEquals(EnqueueFailure.UNSUPPORTED_CONTENT, selected.reason)
+        assertEquals(EnqueueFailure.UNSUPPORTED_CONTENT, next.reason)
+        assertEquals(EnqueueFailure.UNSUPPORTED_CONTENT, next100.reason)
+        assertTrue(store.tasksById.isEmpty())
+        assertTrue(store.bodies.isEmpty())
+    }
+
+    @Test
     fun `rearmPending enqueues only when runnable rows remain`() = runTest {
         val engine = engine()
         engine.rearmPending(1)

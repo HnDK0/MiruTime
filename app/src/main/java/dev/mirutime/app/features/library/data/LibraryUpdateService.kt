@@ -128,8 +128,13 @@ class LibraryUpdateService(
     private suspend fun excludedShelfIds(): Set<String> =
         library.shelves().filter { it.excludeFromUpdates }.map { it.id }.toSet()
 
+    // Update checks only make sense for plugin/local-file sources. An OPDS
+    // audiobook has no chapter feed to refresh; counting it as failed would
+    // report every catalogue book as broken.
     private fun BookEntity.isLocalOnly(): Boolean =
-        installId.startsWith("local-") || url.startsWith("local://")
+        installId.startsWith("local-") ||
+            url.startsWith("local://") ||
+            installId.startsWith("opds:")
 
     private suspend fun check(
         bookId: Long,

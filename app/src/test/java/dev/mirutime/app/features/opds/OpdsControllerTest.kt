@@ -207,6 +207,57 @@ class OpdsControllerTest {
     }
 
     @Test
+    fun `audio media types map to the audio format`() {
+        fun formatOf(type: String?, href: String) = OpdsMediaTypes.formatOf(
+            dev.mirutime.core.opds.OpdsLink(
+                rel = "http://opds-spec.org/acquisition",
+                href = href,
+                type = type,
+                title = null,
+            ),
+        )
+
+        // A Readium manifest link and a bare audio file are both playable.
+        assertEquals(
+            OpdsFormat.AUDIO,
+            formatOf("application/audiobook+json", "https://c.test/services/opds/audiobooks/1"),
+        )
+        assertEquals(OpdsFormat.AUDIO, formatOf("audio/mpeg", "https://c.test/1.mp3"))
+        assertEquals(OpdsFormat.AUDIO, formatOf("audio/mp4", "https://c.test/1.m4a"))
+        assertEquals(OpdsFormat.AUDIO, formatOf(null, "https://c.test/1.mp3?dl=1"))
+        assertEquals("", OpdsFormat.AUDIO.fileNameSuffix)
+        assertEquals("AUDIO", OpdsBookOption(OpdsFormat.AUDIO, "https://c.test/1", "").label)
+    }
+
+    @Test
+    fun `audio extensions are one shared list`() {
+        assertTrue(OpdsMediaTypes.isAudioFileUrl("https://c.test/1.MP3?x=1"))
+        assertTrue(OpdsMediaTypes.isAudioFileUrl("https://c.test/1.aac"))
+        assertTrue(OpdsMediaTypes.isAudioFileUrl("https://c.test/1.flac#t=1"))
+        assertTrue(!OpdsMediaTypes.isAudioFileUrl("https://c.test/1.m3u8"))
+        assertTrue(!OpdsMediaTypes.isAudioFileUrl("https://c.test/audiobooks/1"))
+    }
+
+    @Test
+    fun `stream headers follow the catalogue origin and its credentials`() = runTest {
+        val transport = FakeTransport()
+        transport.respond(200, ACQUISITION_FEED, "https://final.test/opds/")
+        val controller = controller(transport)
+        val catalog = (controller.add("c", "https://final.test/opds", "логин", "пароль") as Outcome.Ok).value
+        val expected = "Basic " +
+            Base64.getEncoder().encodeToString("логин:пароль".toByteArray(Charsets.UTF_8))
+
+        assertEquals(
+            mapOf("Authorization" to expected),
+            controller.streamHeaders(catalog.url, "https://final.test/download/a.mp3"),
+        )
+        assertEquals(
+            emptyMap<String, String>(),
+            controller.streamHeaders(catalog.url, "https://cdn.test/x.mp3"),
+        )
+    }
+
+    @Test
     fun `a pdf-only entry is a downloadable option`() = runTest {
         val transport = FakeTransport()
         transport.respond(200, PDF_ONLY_FEED, "https://final.test/opds/")
@@ -724,6 +775,34 @@ class OpdsControllerTest {
     }
 
     @Test
+    fun `a stored pdf-only archive entry is re-probed before add`() = runTest {
+        val transport = FakeTransport()
+        transport.respond(200, ARCHIVE_ENTRY_FEED, ARCHIVE_ENTRY)
+        transport.bodiesByUrl[ARCHIVE_EPUB_PROBE] = ARCHIVE_EPUB_ENVELOPE
+        val dao = FakeDao()
+        val imported = mutableListOf<String>()
+        val controller = controller(
+            transport = transport,
+            dao = dao,
+            importer = object : LocalImportPort {
+                override suspend fun import(file: File, origin: ImportOrigin?): LocalImportResult {
+                    imported += file.name
+                    return LocalImportResult.Success(1, "local://new-book", "Book", duplicate = false)
+                }
+            },
+        )
+        val catalog = (controller.add("c", ARCHIVE_ENTRY, "", "") as Outcome.Ok).value
+        // Written while browsing: no probe, pdf only.
+        dao.putEntry(catalog.url, ARCHIVE_ENTRY, CACHED_ARCHIVE_PDF_ONLY)
+
+        val added = controller.addEntry(catalog.url, ARCHIVE_ENTRY, null, "Archive")
+
+        assertEquals(Outcome.Ok("local://new-book"), added)
+        assertTrue(ARCHIVE_EPUB_PROBE in transport.requested)
+        assertTrue(imported.single().endsWith(".epub"))
+    }
+
+    @Test
     fun `an archive probe that finds no epub leaves the served pdf downloadable`() = runTest {
         val transport = FakeTransport()
         transport.respond(200, ARCHIVE_ENTRY_FEED, ARCHIVE_ENTRY)
@@ -1156,6 +1235,10 @@ private val CACHED_OPTIONS = """
 // archive.org serves a text item with only a pdf link; the epub lives behind
 // the book endpoint, which its own OPDS never mentions.
 private const val ARCHIVE_ENTRY = "https://archive.org/details/item1"
+private val CACHED_ARCHIVE_PDF_ONLY = """
+    [{"format":"PDF","url":"https://archive.org/services/opds/book/item1?glob_pattern=*pdf",
+      "rel":"http://opds-spec.org/acquisition/open-access","reason":null}]
+""".trimIndent()
 private const val ARCHIVE_EPUB_PROBE =
     "https://archive.org/services/opds/book/item1?glob_pattern=*epub"
 private const val ARCHIVE_EPUB_ENVELOPE =

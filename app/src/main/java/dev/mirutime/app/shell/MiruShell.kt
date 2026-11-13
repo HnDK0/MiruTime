@@ -250,6 +250,12 @@ fun MiruShell(
                     },
                     localBooks = localBooksName,
                     localManga = localMangaName,
+                    opdsCatalogName = { catalogId ->
+                        (context.applicationContext as dev.mirutime.app.MiruApp)
+                            .opdsController.catalogs.value
+                            .firstOrNull { it.id == catalogId }
+                            ?.name
+                    },
                 )
             },
         )
@@ -267,6 +273,12 @@ fun MiruShell(
                     },
                     localBooks = localBooksName,
                     localManga = localMangaName,
+                    opdsCatalogName = { catalogId ->
+                        (context.applicationContext as dev.mirutime.app.MiruApp)
+                            .opdsController.catalogs.value
+                            .firstOrNull { it.id == catalogId }
+                            ?.name
+                    },
                 )
             },
         )

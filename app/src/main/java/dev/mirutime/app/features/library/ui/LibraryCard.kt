@@ -103,6 +103,7 @@ private fun ContentType.toMiruKind(): MiruContentKind = when (this) {
     ContentType.Novel -> MiruContentKind.Novel
     ContentType.Manga -> MiruContentKind.Manga
     ContentType.Video -> MiruContentKind.Video
+    ContentType.Audio -> MiruContentKind.Audio
 }
 
 @StringRes
@@ -110,6 +111,7 @@ private fun ContentType.labelRes(): Int = when (this) {
     ContentType.Novel -> R.string.type_novel
     ContentType.Manga -> R.string.type_manga
     ContentType.Video -> R.string.type_video
+    ContentType.Audio -> R.string.type_audio
 }
 
 private fun LibraryBook.displayTitle(): String =

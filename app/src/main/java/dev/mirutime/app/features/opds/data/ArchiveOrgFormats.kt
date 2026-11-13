@@ -47,6 +47,14 @@ internal object ArchiveOrgFormats {
         return OpdsBookOption(format = OpdsFormat.EPUB, url = location, rel = OPEN_ACCESS_REL)
     }
 
+    /**
+     * A stored option list is written while browsing (no probe); a pdf-only
+     * archive.org entry must be re-resolved before its detail/add uses it.
+     */
+    fun needsProbe(options: List<OpdsBookOption>): Boolean =
+        options.none { it.format == OpdsFormat.EPUB } &&
+            options.any { isArchiveBookLink(it.url) != null }
+
     internal fun epubUrl(itemId: String): String =
         "https://archive.org$BOOK_PATH$itemId?glob_pattern=*epub"
 

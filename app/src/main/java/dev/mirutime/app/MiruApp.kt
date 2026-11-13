@@ -743,6 +743,9 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
                 }
             }
             step("startup_shelves_failed") { libraryRepository.ensureDefaultShelves() }
+            // Catalogue names label their books in the library/dashboard, and
+            // the first read can happen before Finder loads.
+            step("startup_opds_catalogs_failed") { opdsController.refresh() }
             step("startup_auto_backup_failed") {
                 AutoBackupScheduler.sync(this@MiruApp, initialSettings)
             }

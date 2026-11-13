@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Movie
@@ -29,7 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.util.Locale
 
-enum class MiruContentKind { Novel, Manga, Video }
+enum class MiruContentKind { Novel, Manga, Video, Audio }
 
 // NoveLA membership: same source = filled bookmark, another plugin = muted,
 // a number replaces the glyph when the title exists in more than one source.
@@ -57,6 +58,7 @@ fun MiruContentTypeIcon(
         MiruContentKind.Novel -> Icons.Filled.MenuBook
         MiruContentKind.Manga -> Icons.Filled.Image
         MiruContentKind.Video -> Icons.Filled.Movie
+        MiruContentKind.Audio -> Icons.Filled.Headphones
     }
     val extra = LocalMiruExtraColors.current
     Surface(

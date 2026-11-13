@@ -896,5 +896,6 @@ fun contentTypeLabel(type: ContentType): String = stringResource(
         ContentType.Novel -> R.string.type_novel
         ContentType.Manga -> R.string.type_manga
         ContentType.Video -> R.string.type_video
+        ContentType.Audio -> R.string.type_audio
     },
 )

@@ -9,6 +9,8 @@ enum class OpdsFormat {
     FB2,
     CBZ,
     PDF,
+    /** Remote OPDS audiobook: tracks stream from the catalogue, nothing is stored. */
+    AUDIO,
     ;
 
     /** Suffix for the temp file name; matches LocalImportFormat's extensions. */
@@ -18,6 +20,7 @@ enum class OpdsFormat {
             FB2_ZIP, FB2 -> ".fb2"
             CBZ -> ".cbz"
             PDF -> ".pdf"
+            AUDIO -> ""
         }
 
     internal val priority: Int
@@ -27,6 +30,7 @@ enum class OpdsFormat {
             FB2 -> 2
             CBZ -> 3
             PDF -> 4
+            AUDIO -> 5
         }
 }
 
@@ -39,6 +43,9 @@ sealed class OpdsError : MiruError {
 
     /** XML is unreadable or the nesting cap tripped. */
     data object Malformed : OpdsError()
+
+    /** An audiobook manifest parsed but carries no playable track. */
+    data object NoTracks : OpdsError()
 }
 
 data class OpdsLink(

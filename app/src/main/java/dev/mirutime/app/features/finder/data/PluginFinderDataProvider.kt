@@ -1545,4 +1545,5 @@ internal fun CoreContentType.toAppType(): ContentType = when (this) {
     CoreContentType.NOVEL -> ContentType.Novel
     CoreContentType.MANGA -> ContentType.Manga
     CoreContentType.VIDEO -> ContentType.Video
+    CoreContentType.AUDIO -> ContentType.Audio
 }

@@ -289,6 +289,8 @@ private fun enqueueMessage(context: Context, result: EnqueueResult): String = wh
     result.reason == EnqueueFailure.BOOK_NOT_SAVED -> context.getString(R.string.book_dl_add_first)
     result.reason == EnqueueFailure.NOT_CONFIGURED ->
         context.getString(R.string.book_dl_engine_unavailable)
+    result.reason == EnqueueFailure.UNSUPPORTED_CONTENT ->
+        context.getString(R.string.book_dl_unsupported)
     result.adopted > 0 -> context.getString(R.string.book_dl_adopted_fmt, result.adopted)
     result.cached > 0 -> context.getString(R.string.book_dl_cached_fmt, result.cached)
     else -> context.getString(R.string.book_dl_nothing_new)
@@ -416,6 +418,8 @@ internal fun BookScreen(
     var epubExporting by remember { mutableStateOf(false) }
     var cbzExporting by remember { mutableStateOf(false) }
     val mangaBook = book?.contentType == ContentType.Manga
+    // Audio rides the video player but exposes no reader/download actions.
+    val isAudioBook = book?.contentType == ContentType.Audio
     val isLocalBook = remember(bookUrl) {
         isLocalFileBook(bookUrl) || LocalBookProvider.isLocalBook(bookUrl)
     }
@@ -1233,7 +1237,10 @@ internal fun BookScreen(
     val opdsSelected = opdsSelectedOption(opdsOptions, opdsOptionKey)
     // OPDS: the feed decides what the page's primary action is. Every other
     // book keeps the chapter/continue page untouched.
-    val catalogEntry = current?.action != null
+    // An added audiobook keeps its OpenLibrary action but is a real library
+    // row: it must render the track list and the play CTA, not the catalogue
+    // block.
+    val catalogEntry = current?.action != null && !(isAudioBook && current.inLibrary)
 
     // One add at a time: the same slot turns into progress, Cancel stops it and
     // a late answer from a cancelled job cannot open a book.
@@ -1682,7 +1689,7 @@ internal fun BookScreen(
             }
             item {
                 val opdsAction = current.action
-                if (opdsAction != null) {
+                if (opdsAction != null && !(isAudioBook && current.inLibrary)) {
                     OpdsActions(
                         action = opdsAction,
                         options = opdsOptions,
@@ -1727,6 +1734,8 @@ internal fun BookScreen(
                     } else {
                         downloadEngine != null
                     },
+                    showDownload = !isAudioBook,
+                    showTools = !isAudioBook,
                     downloadRunning = downloadActive,
                     downloadQueued = downloadQueued,
                     downloadPercent = downloadProgress,
@@ -1777,7 +1786,7 @@ internal fun BookScreen(
                     VideoDownloadPausedNotice(onResume = ::resumeVideoDownloads)
                 }
             }
-            if (toolsExpanded && !catalogEntry) {
+            if (toolsExpanded && !catalogEntry && !isAudioBook) {
                 item {
                     ToolsSection(
                         translatorOn = AppSettings.novelTranslation[current.bookUrl]?.enabled == true,
@@ -1877,7 +1886,9 @@ internal fun BookScreen(
                             downloadPercent = downloadProgress,
                             onStopDownload = { stopDownloadsConfirm = true },
                             onOpenChapter = { index ->
-                                if (current.contentType == ContentType.Video) {
+                                if (current.contentType == ContentType.Video ||
+                                    current.contentType == ContentType.Audio
+                                ) {
                                     onOpenVideo(bookUrl, index)
                                 } else {
                                     // Opening the saved chapter resumes its saved
@@ -1929,9 +1940,12 @@ internal fun BookScreen(
                             onSelectChapters = { selectSheetOpen = true },
                             downloadAvailable = if (isVideoBook) {
                                 videoDownloads != null && videoRepository != null
+                            } else if (isAudioBook) {
+                                false
                             } else {
                                 downloadEngine != null
                             },
+                            showDownload = !isAudioBook,
                             translationStates = translationStates,
                             translationConfigured = translationConfigured,
                             onTranslate = { indexes, onDone ->
@@ -2296,6 +2310,7 @@ internal fun BookScreen(
             SelectChaptersSheet(
                 book = current,
                 onClose = { selectSheetOpen = false },
+                showDownload = !isAudioBook,
                 onApply = { range, action ->
                     selectSheetOpen = false
                     val indexes = range.toSet()
@@ -2814,9 +2829,15 @@ private fun StatStrip(
                     textAlign = TextAlign.Center,
                 )
                 Text(
-                    text = stringResource(R.string.book_stat_downloaded_fmt, downloaded),
+                    // Audio has no downloads by design: show the track count
+                    // instead of a permanent fake "0 downloaded".
+                    text = if (book.contentType == ContentType.Audio) {
+                        stringResource(R.string.book_stat_tracks_fmt, book.totalChapters)
+                    } else {
+                        stringResource(R.string.book_stat_downloaded_fmt, downloaded)
+                    },
                     style = MiruCardType.Meta,
-                    color = extra.accent,
+                    color = if (book.contentType == ContentType.Audio) extra.muted else extra.accent,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
@@ -3050,6 +3071,10 @@ private fun ActionRow(
     // A failed refresh with no stored rows is not a genuine empty list.
     chaptersFailed: Boolean = false,
     downloadEnabled: Boolean,
+    showDownload: Boolean = true,
+    // Audio has no tools (no translation/export/migration); the source row and
+    // the library toggle remain.
+    showTools: Boolean = true,
     downloadRunning: Boolean = false,
     downloadQueued: Boolean = false,
     downloadPercent: Float? = null,
@@ -3187,15 +3212,15 @@ private fun ActionRow(
         }
         if (largeText) {
             Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                download(Modifier.fillMaxWidth())
+                if (showDownload) download(Modifier.fillMaxWidth())
                 if (showSource) source(Modifier.fillMaxWidth())
-                options(Modifier.fillMaxWidth())
+                if (showTools) options(Modifier.fillMaxWidth())
             }
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                download(Modifier.weight(1f))
+                if (showDownload) download(Modifier.weight(1f))
                 if (showSource) source(Modifier.weight(1f))
-                options(Modifier.weight(1f))
+                if (showTools) options(Modifier.weight(1f))
             }
         }
     }
@@ -3897,6 +3922,7 @@ private fun ChapterBrowser(
     translationStates: Map<String, ChapterTranslation>,
     translationConfigured: Boolean,
     downloadAvailable: Boolean,
+    showDownload: Boolean = true,
     onOpenChapter: (Int) -> Unit,
     onDownloadNext100: () -> Unit,
     downloadRunning: Boolean,
@@ -4079,14 +4105,14 @@ private fun ChapterBrowser(
         }
         if (largeText) {
             Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                downloadButton(Modifier.weight(1f))
+                if (showDownload) downloadButton(Modifier.weight(1f))
                 selectButton(Modifier.weight(1f))
             }
             Spacer(modifier = Modifier.height(MiruSpace.S))
             lastReadButton(Modifier.fillMaxWidth())
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                downloadButton(Modifier.weight(1f))
+                if (showDownload) downloadButton(Modifier.weight(1f))
                 selectButton(Modifier.weight(1f))
                 lastReadButton(Modifier.weight(1f))
             }
@@ -4197,6 +4223,7 @@ private fun ChapterBrowser(
                 allSelected = allSelected,
                 translationConfigured = translationConfigured,
                 downloadAvailable = downloadAvailable,
+                showDownload = showDownload,
                 translatedCount = selectedTranslated,
                 downloadedCount = selectedDownloaded,
                 busy = bulkBusy,

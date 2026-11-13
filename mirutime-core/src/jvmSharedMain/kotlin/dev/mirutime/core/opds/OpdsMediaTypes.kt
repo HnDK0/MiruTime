@@ -20,6 +20,10 @@ object OpdsMediaTypes {
             -> OpdsFormat.FB2
             "application/vnd.comicbook+zip", "application/x-cbz" -> OpdsFormat.CBZ
             "application/pdf", "application/x-pdf" -> OpdsFormat.PDF
+            // A Readium audiobook manifest, or a bare audio file the catalogue
+            // hands out directly (a one-track book).
+            "application/audiobook+json" -> OpdsFormat.AUDIO
+            "audio/mpeg", "audio/mp4", "audio/aac", "audio/ogg" -> OpdsFormat.AUDIO
             // OPDS 2 catalogue and publication documents are pages, not books,
             // whatever their href happens to end with.
             "application/opds+json", "application/opds-publication+json" -> null
@@ -36,7 +40,21 @@ object OpdsMediaTypes {
             path.endsWith(".fb2") -> OpdsFormat.FB2
             path.endsWith(".cbz") -> OpdsFormat.CBZ
             path.endsWith(".pdf") -> OpdsFormat.PDF
-            else -> null
+            else -> if (isAudioFileUrl(href)) OpdsFormat.AUDIO else null
         }
+    }
+
+    /** Audio file suffixes we treat as a directly playable track, not a manifest. */
+    private val AUDIO_SUFFIXES = listOf(
+        ".mp3", ".m4a", ".m4b", ".m4r", ".aac", ".ogg", ".opus", ".flac", ".wav",
+    )
+
+    /**
+     * True when [url] points at an audio file the catalogue hands out directly.
+     * Shared with the add flow so no other list of extensions can drift.
+     */
+    fun isAudioFileUrl(url: String): Boolean {
+        val path = url.trim().substringBefore('?').substringBefore('#').lowercase()
+        return AUDIO_SUFFIXES.any { path.endsWith(it) }
     }
 }

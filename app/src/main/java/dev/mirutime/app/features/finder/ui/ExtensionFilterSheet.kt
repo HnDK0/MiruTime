@@ -71,7 +71,7 @@ fun ExtensionFilterSheet(
                 horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
                 verticalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
             ) {
-                ContentType.entries.forEach { type ->
+                PluginContentTypes.forEach { type ->
                     MiruFilterChip(
                         selected = type in draft.types,
                         onClick = {

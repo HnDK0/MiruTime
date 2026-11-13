@@ -181,6 +181,7 @@
     <string name="book_dl_no_chapters">Нет глав для скачивания</string>
     <string name="book_dl_add_first">Сначала добавьте книгу в библиотеку</string>
     <string name="book_dl_engine_unavailable">Движок загрузок недоступен</string>
+    <string name="book_dl_unsupported">Книга воспроизводится из каталога и не скачивается</string>
     <string name="book_dl_nothing_new">Новых глав для скачивания нет</string>
     <string name="book_dl_adopted_fmt">Уже скачано: %1$d</string>
     <string name="book_dl_cached_fmt">Уже в кэше этой книги: %1$d</string>
@@ -385,6 +386,7 @@
     <string name="type_novel">Новелла</string>
     <string name="type_manga">Манга</string>
     <string name="type_video">Видео</string>
+    <string name="type_audio">Аудио</string>
     <string name="badge_novel">НОВЕЛЛА</string>
     <string name="badge_manga">МАНГА</string>
     <string name="badge_video">ВИДЕО</string>
@@ -549,6 +551,7 @@
     <string name="finder_type_novel">Новеллы</string>
     <string name="finder_type_manga">Манга</string>
     <string name="finder_type_video">Видео</string>
+    <string name="finder_type_audio">Аудио</string>
     <string name="finder_source_meta_fmt">%1$s · %2$s · v%3$s</string>
     <string name="finder_pin_cd">Закрепить источник</string>
     <string name="finder_unpin_cd">Открепить источник</string>
@@ -1723,6 +1726,7 @@
     <string name="book_action_options_fmt">Опции (%1$d)</string>
     <string name="book_synopsis">Описание</string>
     <string name="book_stat_downloaded_fmt">Скачано: %1$d</string>
+    <string name="book_stat_tracks_fmt">Дорожек: %1$d</string>
     <string name="book_tool_on">Вкл</string>
     <string name="book_tool_off">Выкл</string>
     <string name="book_tool_rules_fmt">Правил: %1$d</string>

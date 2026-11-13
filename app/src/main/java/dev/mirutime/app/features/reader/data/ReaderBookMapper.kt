@@ -18,6 +18,6 @@ fun BookDetails.toReaderBook(): ReaderBook = ReaderBook(
         )
     },
     isManga = contentType == ContentType.Manga,
-    isVideo = contentType == ContentType.Video,
+    isVideo = contentType == ContentType.Video || contentType == ContentType.Audio,
     coverUrl = coverUrl,
 )

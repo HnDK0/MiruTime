@@ -389,7 +389,7 @@ fun GlobalSearchScreen(
                         label = stringResource(R.string.finder_filter_all),
                     )
                 }
-                items(ContentType.entries.toList()) { type ->
+                items(PluginContentTypes) { type ->
                     MiruFilterChip(
                         selected = scopeType == type.name,
                         onClick = { scopeType = if (scopeType == type.name) null else type.name },

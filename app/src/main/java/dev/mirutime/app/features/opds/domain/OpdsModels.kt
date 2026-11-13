@@ -55,6 +55,7 @@ data class OpdsBookOption(
             OpdsFormat.FB2, OpdsFormat.FB2_ZIP -> "FB2"
             OpdsFormat.CBZ -> "CBZ"
             OpdsFormat.PDF -> "PDF"
+            OpdsFormat.AUDIO -> "AUDIO"
             null -> rel.substringAfterLast('/').uppercase().ifBlank { "FILE" }
         }
 }
@@ -91,6 +92,12 @@ interface OpdsAddPort {
     ): Outcome<String>
 
     suspend fun resolveEntry(catalogUrl: String, entryUrl: String): Outcome<List<OpdsBookOption>>
+
+    /**
+     * Authorization headers a media request for [targetUrl] needs when the
+     * catalogue it belongs to has credentials. Empty for public catalogues.
+     */
+    suspend fun streamHeaders(catalogUrl: String, targetUrl: String): Map<String, String>
 }
 
 data class OpdsPage(

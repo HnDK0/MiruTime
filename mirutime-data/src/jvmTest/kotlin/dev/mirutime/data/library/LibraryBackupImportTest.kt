@@ -606,6 +606,44 @@ class LibraryBackupImportTest {
         assertNull(target.libraryDao().chapterPage(chapterId))
     }
 
+    @Test
+    fun `restore carries opds catalogs before the books that reference them`() = runTest {
+        val entry = "https://archive.org/details/vie_des_abeilles_2002_librivox"
+        val source = openRoom()
+        source.libraryDao().upsertOpdsCatalog(
+            OpdsCatalogEntity(
+                id = "cat-1",
+                name = "Archive.org",
+                url = "https://archive.org/services/opds",
+                addedAt = 5L,
+            ),
+        )
+        val sourceRepo = LibraryRepository(source.libraryDao())
+        val sourceBook = sourceRepo.saveBook(
+            book(entry).copy(installId = "opds:cat-1", contentType = "Audio", totalChapters = 2),
+        )
+        sourceRepo.replaceChapters(
+            sourceBook,
+            listOf(
+                ChapterSeed(1, "https://archive.org/download/x/1.mp3", "01"),
+                ChapterSeed(2, "https://archive.org/download/x/2.mp3", "02"),
+            ),
+            at = 6L,
+        )
+
+        val target = openRoom()
+        target.importLibraryBackup(source.libraryDao())
+
+        val catalog = target.libraryDao().opdsCatalogs().single()
+        assertEquals("cat-1", catalog.id)
+        assertEquals("Archive.org", catalog.name)
+        val imported = assertNotNull(
+            target.libraryDao().bookByInstallAndUrl("opds:cat-1", entry),
+        )
+        assertEquals("Audio", imported.contentType)
+        assertEquals(2, target.libraryDao().chapters(imported.bookId).size)
+    }
+
     private suspend fun seedPluginCache(source: LibraryDatabase, bookId: Long) {
         val repository = LibraryRepository(source.libraryDao())
         val chapter = repository.replaceChapters(

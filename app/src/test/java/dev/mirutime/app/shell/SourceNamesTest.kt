@@ -31,4 +31,29 @@ class SourceNamesTest {
             sourceDisplayName("removed-plugin", plugins::get, "Local books", "Local manga"),
         )
     }
+
+    @Test
+    fun `opds sources use the saved catalogue name`() {
+        assertEquals(
+            "Archive.org",
+            sourceDisplayName(
+                "opds:cat-1",
+                plugins::get,
+                "Local books",
+                "Local manga",
+                opdsCatalogName = { id -> if (id == "cat-1") "Archive.org" else null },
+            ),
+        )
+        // A removed catalogue keeps its id rather than showing a plugin name.
+        assertEquals(
+            "opds:gone",
+            sourceDisplayName(
+                "opds:gone",
+                plugins::get,
+                "Local books",
+                "Local manga",
+                opdsCatalogName = { null },
+            ),
+        )
+    }
 }

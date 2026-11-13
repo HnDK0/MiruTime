@@ -165,6 +165,7 @@
     <string name="book_dl_no_chapters">No chapters to download</string>
     <string name="book_dl_add_first">Add the book to the library first</string>
     <string name="book_dl_engine_unavailable">Download engine is unavailable</string>
+    <string name="book_dl_unsupported">This book streams from its catalogue and cannot be downloaded</string>
     <string name="book_dl_nothing_new">Nothing new to download</string>
     <string name="book_dl_adopted_fmt">Already downloaded: %1$d</string>
     <string name="book_dl_cached_fmt">Cached in this book: %1$d</string>
@@ -389,6 +390,7 @@
     <string name="type_novel">Novel</string>
     <string name="type_manga">Manga</string>
     <string name="type_video">Video</string>
+    <string name="type_audio">Audio</string>
     <string name="badge_novel">NOVELLA</string>
     <string name="badge_manga">MANGA</string>
     <string name="badge_video">VIDEO</string>
@@ -536,6 +538,7 @@
     <string name="finder_type_novel">Novels</string>
     <string name="finder_type_manga">Manga</string>
     <string name="finder_type_video">Video</string>
+    <string name="finder_type_audio">Audio</string>
     <string name="finder_source_meta_fmt">%1$s · %2$s · v%3$s</string>
     <string name="finder_pin_cd">Pin source</string>
     <string name="finder_unpin_cd">Unpin source</string>
@@ -1702,6 +1705,7 @@
     <string name="book_action_options_fmt">Options (%1$d)</string>
     <string name="book_synopsis">Synopsis</string>
     <string name="book_stat_downloaded_fmt">%1$d downloaded</string>
+    <string name="book_stat_tracks_fmt">%1$d tracks</string>
     <string name="book_tool_on">On</string>
     <string name="book_tool_off">Off</string>
     <string name="book_tool_rules_fmt">%1$d rules</string>

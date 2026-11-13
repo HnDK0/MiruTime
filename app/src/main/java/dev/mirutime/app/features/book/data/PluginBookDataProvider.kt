@@ -2,6 +2,7 @@ package dev.mirutime.app.features.book.data
 
 import dev.mirutime.core.log.MiruLog
 import dev.mirutime.app.core.buildPluginErrorReport
+import dev.mirutime.app.core.jsonStringField
 import dev.mirutime.app.core.uriHostPath
 import dev.mirutime.app.di.PluginGraph
 import dev.mirutime.app.di.TextFetchResult
@@ -16,6 +17,7 @@ import dev.mirutime.app.features.finder.data.resolveCoverUrl
 import dev.mirutime.app.features.finder.data.toAppType
 import dev.mirutime.app.features.finder.domain.OpdsSources
 import dev.mirutime.app.features.opds.domain.OpdsAddPort
+import dev.mirutime.app.features.opds.data.ArchiveOrgFormats
 import dev.mirutime.app.features.opds.data.OpdsEntryOptions
 import dev.mirutime.app.features.opds.data.canonicalCatalogUrl
 import dev.mirutime.app.features.book.domain.BookActionKind
@@ -30,6 +32,7 @@ import dev.mirutime.app.features.library.data.isLocalManga
 import dev.mirutime.app.features.library.data.resolveStoredCover
 import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.app.features.reader.document.chapterKey
+import dev.mirutime.core.opds.OpdsFormat
 import dev.mirutime.core.reader.ChapterContent
 import dev.mirutime.core.reader.ChapterSource
 import dev.mirutime.core.text.chapterHtml
@@ -56,6 +59,7 @@ import dev.mirutime.data.library.bookKeyUrl
 import dev.mirutime.data.library.decodeLibraryBookKey
 import dev.mirutime.data.library.libraryBookKey
 import dev.mirutime.data.library.LocalBookFileEntity
+import dev.mirutime.data.library.OpdsCatalogEntity
 import dev.mirutime.data.library.TagEntity
 import java.io.File
 import java.net.URI
@@ -227,17 +231,27 @@ class PluginBookDataProvider(
         details[bookKey]?.let { return it }
         val catalog = runCatching { repo.opdsCatalogs() }.getOrNull()
             ?.firstOrNull { it.id == catalogId }
-            ?: return null
+        // An added audiobook is a library row: its metadata and track list come
+        // from the DB, never from the catalogue feed, so a deleted catalogue
+        // (or a restore from a build that did not carry the row) still opens.
+        val row = runCatching { repo.book(bookKey) }.getOrNull()
+        if (row != null && row.contentType.equals(ContentType.Audio.name, ignoreCase = true)) {
+            return loadOpdsAudioBook(bookKey, entryUrl, catalog, row, repo)
+        }
+        // Every other catalogue page needs its saved catalogue row.
+        catalog ?: return null
         val entry = runCatching { repo.opdsEntry(catalog.url, entryUrl) }.getOrNull()
         val membership = runCatching {
             repo.originMembership(canonicalCatalogUrl(catalog.url), listOf(entryUrl))[entryUrl]
         }.getOrNull()
         var options = entry?.formatsJson?.let(OpdsEntryOptions::decode).orEmpty()
-        if (options.isEmpty()) {
+        // Browsing does not probe archive.org's hidden EPUB; the detail page does.
+        if (options.isEmpty() || ArchiveOrgFormats.needsProbe(options)) {
             // Indirect publication (Gutenberg): the acquisition lives one feed
             // down. A failure here leaves the catalogue link, not an empty page.
             (opds?.resolveEntry(catalog.url, entryUrl) as? Outcome.Ok)?.let { options = it.value }
         }
+        val isAudio = options.any { it.format == OpdsFormat.AUDIO }
         val downloadable = options.filter { it.isDownloadable }
         // OpenCatalog is only for an entry we know nothing about: bouncing back
         // to the catalogue from a known pdf-only book reads as a loop.
@@ -253,7 +267,7 @@ class PluginBookDataProvider(
             installId = OpdsSources.idOf(catalog.id),
             author = entry?.author?.takeIf { it.isNotBlank() } ?: "Unknown",
             originLanguage = null,
-            contentType = ContentType.Novel,
+            contentType = if (isAudio) ContentType.Audio else ContentType.Novel,
             rating = 0f,
             ongoing = false,
             updatedLabel = "",
@@ -288,6 +302,69 @@ class PluginBookDataProvider(
             "opds",
             "event=opds_book_entry options=${options.size} action=${action.name}",
         )
+        return built
+    }
+
+    /**
+     * Added audiobook page: the stored row + track rows are authoritative.
+     * Opening, continuing and the library toggle all work from the DB, so a
+     * catalogue outage never blanks the page.
+     */
+    private suspend fun loadOpdsAudioBook(
+        bookKey: String,
+        entryUrl: String,
+        catalog: OpdsCatalogEntity?,
+        row: BookEntity,
+        repo: LibraryRepository,
+    ): BookDetails {
+        val chapters = repo.chapters(row.bookId).map { chapter ->
+            BookChapter(
+                index = chapter.idx,
+                title = chapter.title.ifBlank { "Track ${chapter.idx}" },
+                isRead = chapter.read,
+                downloaded = false,
+                translated = false,
+                downloading = false,
+                url = chapter.url,
+                isLastRead = row.lastChapterId == chapter.chapterId,
+            )
+        }
+        val built = BookDetails(
+            bookUrl = bookKey,
+            title = row.title,
+            source = jsonStringField(row.extrasJson, "opdsCatalogName")
+                ?: catalog?.name?.takeIf { it.isNotBlank() }
+                ?: row.installId,
+            installId = row.installId,
+            author = row.author.ifBlank { "Unknown" },
+            originLanguage = null,
+            contentType = ContentType.Audio,
+            rating = row.rating.toFloat(),
+            ongoing = false,
+            updatedLabel = "",
+            totalChapters = row.totalChapters,
+            readCount = repo.readChapterIndexes(bookKey).size,
+            readMinutes = (repo.durationForBook(row.bookId, "reading") / 60_000L).toInt(),
+            ttsMinutes = (repo.durationForBook(row.bookId, "tts") / 60_000L).toInt(),
+            inLibrary = row.inLibrary,
+            shelfId = row.shelfId,
+            genres = emptyList(),
+            description = row.description,
+            sourceUrl = entryUrl,
+            authUrl = null,
+            chapters = chapters,
+            reviews = emptyList(),
+            coverUrl = row.coverUrl,
+            action = if (row.inLibrary) {
+                BookActionKind.OpenLibrary
+            } else {
+                BookActionKind.AddToLibrary
+            },
+            libraryBookKey = libraryBookKey(row.installId, row.url),
+            originCatalogUrl = catalog?.url
+                ?: jsonStringField(row.extrasJson, "opdsCatalogUrl"),
+        )
+        details[bookKey] = built
         return built
     }
 
@@ -1454,6 +1531,40 @@ class PluginBookDataProvider(
     }
 
     /**
+     * An OPDS audiobook key resolves to its persisted track row. Null means
+     * "not an audio book", so the plugin video path stays untouched.
+     */
+    private suspend fun opdsAudioStream(
+        bookUrl: String,
+        chapterIndex: Int,
+    ): Outcome<List<VideoStream>>? {
+        val installId = bookKeyInstallId(bookUrl)?.takeIf { OpdsSources.catalogIdOf(it) != null }
+            ?: return null
+        val repo = library ?: return null
+        val row = runCatching { repo.book(bookUrl) }.getOrNull() ?: return null
+        if (!row.contentType.equals(ContentType.Audio.name, ignoreCase = true)) return null
+        val chapter = repo.chapterByIndex(row.bookId, chapterIndex)
+            ?: return Outcome.Err(PluginError.ScriptError("Track not found"))
+        val catalog = OpdsSources.catalogIdOf(installId)?.let { catalogId ->
+            runCatching { repo.opdsCatalogs() }.getOrNull()?.firstOrNull { it.id == catalogId }
+        }
+        val headers = if (catalog != null && opds != null) {
+            try {
+                opds.streamHeaders(catalog.url, chapter.url)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                emptyMap()
+            }
+        } else {
+            emptyMap()
+        }
+        return Outcome.Ok(
+            listOf(VideoStream(url = chapter.url, headers = headers, mime = "audio/mpeg")),
+        )
+    }
+
+    /**
      * Video payloads are parsed from an empty document: the plugin resolves
      * the stream URLs itself, so the host must not fetch chapter HTML. Text
      * and page chapters stay typed errors rather than silently empty lists.
@@ -1462,6 +1573,9 @@ class PluginBookDataProvider(
         bookUrl: String,
         chapterIndex: Int,
     ): Outcome<List<VideoStream>> {
+        // A remote audiobook plays its stored track URL; the catalogue's own
+        // Basic auth (when it has one) travels with the media request.
+        opdsAudioStream(bookUrl, chapterIndex)?.let { return it }
         val sourceId = PluginBookIndex.sourceForBook(bookUrl)
             ?: return Outcome.Err(PluginError.ScriptError("Unknown source"))
         val source = pluginSourceFor(sourceId)

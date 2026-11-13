@@ -1,5 +1,6 @@
 package dev.mirutime.app.features.opds.data
 
+import dev.mirutime.app.features.finder.domain.OpdsSources
 import dev.mirutime.app.features.library.data.ImportOrigin
 import dev.mirutime.app.features.library.data.LocalImportPort
 import dev.mirutime.app.features.library.data.LocalImportResult
@@ -14,6 +15,9 @@ import dev.mirutime.app.features.opds.domain.OpdsPage
 import dev.mirutime.app.features.opds.domain.OpdsUnavailableReason
 import dev.mirutime.core.api.Outcome
 import dev.mirutime.core.log.MiruLog
+import dev.mirutime.core.opds.OpdsAudioTrack
+import dev.mirutime.core.opds.OpdsAudiobook
+import dev.mirutime.core.opds.OpdsAudiobookParser
 import dev.mirutime.core.opds.OpdsEntry
 import dev.mirutime.core.opds.OpdsError
 import dev.mirutime.core.opds.OpdsFeed
@@ -24,13 +28,20 @@ import dev.mirutime.core.opds.OpdsMediaTypes
 import dev.mirutime.core.opds.OpdsParser
 import dev.mirutime.core.opds.OpdsSearchTemplate
 import dev.mirutime.core.network.security.ResponseTooLargeException
+import dev.mirutime.data.library.LibraryRemoteAudioBookStore
 import dev.mirutime.data.library.LibraryRepository
 import dev.mirutime.data.library.OpdsCatalogEntity
 import dev.mirutime.data.library.OpdsEntryEntity
+import dev.mirutime.data.library.RemoteAudioBook
+import dev.mirutime.data.library.RemoteAudioBookStore
+import dev.mirutime.data.library.RemoteAudioTrack
+import dev.mirutime.data.library.libraryBookKey
 import java.io.File
 import java.net.URI
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -64,6 +75,8 @@ class OpdsControllerImpl(
     private val registerHost: (sourceId: String, feedUrl: String, authorization: String?) -> Unit =
         { _, _, _ -> },
     private val clearHost: (sourceId: String, feedUrl: String) -> Unit = { _, _ -> },
+    // Persists remote audiobook rows; defaults to the library-backed store.
+    private val audioStore: RemoteAudioBookStore = LibraryRemoteAudioBookStore(library),
 ) : OpdsController, OpdsAddPort {
     private val _catalogs = MutableStateFlow<List<OpdsCatalog>>(emptyList())
     override val catalogs: StateFlow<List<OpdsCatalog>> = _catalogs.asStateFlow()
@@ -221,6 +234,11 @@ class OpdsControllerImpl(
         if (format == null || downloadUrl == null) {
             return Outcome.Err(OpdsFailure.Unknown("not-downloadable"))
         }
+        // An audiobook is a remote manifest, never a file to save; the add flow
+        // persists the track list instead.
+        if (format == OpdsFormat.AUDIO) {
+            return Outcome.Err(OpdsFailure.Unknown("not-a-file"))
+        }
         val catalog = library.opdsCatalogs().firstOrNull { it.id == catalogId }
             ?: return Outcome.Err(OpdsFailure.Unknown("unknown-catalog"))
         return downloadAndImport(catalog, format, downloadUrl, book.title, origin = null)
@@ -248,6 +266,34 @@ class OpdsControllerImpl(
         val cacheKey = optionsKey(catalog.url, entryUrl)
         resolvedOptions[cacheKey]?.let { return Outcome.Ok(it) }
         val stored = library.opdsEntry(catalog.url, entryUrl)
+        // A stored row is written while browsing, where archive.org's hidden
+        // EPUB is never probed. Probe by item id before trusting a page lookup:
+        // the page may have moved, and the probe does not need it anyway.
+        val storedOptions = stored?.formatsJson?.let(OpdsEntryOptions::decode).orEmpty()
+        if (ArchiveOrgFormats.needsProbe(storedOptions)) {
+            val probed = withArchiveEpubFromOptions(storedOptions)
+            if (probed.size > storedOptions.size) {
+                runCatching {
+                    library.upsertOpdsEntries(
+                        listOf(
+                            OpdsEntryEntity(
+                                catalogUrl = catalog.url,
+                                entryUrl = entryUrl,
+                                feedUrl = stored?.feedUrl.orEmpty(),
+                                title = stored?.title.orEmpty(),
+                                author = stored?.author.orEmpty(),
+                                description = stored?.description.orEmpty(),
+                                coverUrl = stored?.coverUrl,
+                                formatsJson = OpdsEntryOptions.encode(probed),
+                                updatedAt = now(),
+                            ),
+                        ),
+                    )
+                }
+                resolvedOptions[cacheKey] = probed
+                return Outcome.Ok(probed)
+            }
+        }
         // The stored page may list the publication as a link (Gutenberg), so an
         // empty result there is not final: the entry URL itself may be a feed.
         val fromPage = if (stored != null && stored.feedUrl.isNotBlank()) {
@@ -307,6 +353,24 @@ class OpdsControllerImpl(
         val itemId = entry.acquisitionLinks.firstNotNullOfOrNull {
             ArchiveOrgFormats.isArchiveBookLink(it.href)
         } ?: return options
+        return probeArchiveEpub(itemId, options)
+    }
+
+    /** Same probe, keyed off an already-resolved option list (stored rows). */
+    private suspend fun withArchiveEpubFromOptions(
+        options: List<OpdsBookOption>,
+    ): List<OpdsBookOption> {
+        if (options.any { it.format == OpdsFormat.EPUB }) return options
+        val itemId = options.firstNotNullOfOrNull {
+            ArchiveOrgFormats.isArchiveBookLink(it.url)
+        } ?: return options
+        return probeArchiveEpub(itemId, options)
+    }
+
+    private suspend fun probeArchiveEpub(
+        itemId: String,
+        options: List<OpdsBookOption>,
+    ): List<OpdsBookOption> {
         val extra = archiveEpub[itemId] ?: run {
             val probed = ArchiveOrgFormats.epubOption(itemId, transport)
             listOfNotNull(probed).also { archiveEpub[itemId] = it }
@@ -364,7 +428,9 @@ class OpdsControllerImpl(
             ?: return Outcome.Err(OpdsFailure.Unknown("unknown-catalog"))
         val stored = library.opdsEntry(catalog.url, entryUrl)
         var options = stored?.formatsJson?.let(OpdsEntryOptions::decode).orEmpty()
-        if (options.isEmpty()) {
+        // Stored options come from browsing, where archive.org's hidden EPUB was
+        // never probed: re-resolve so the add does not silently pick the pdf.
+        if (options.isEmpty() || ArchiveOrgFormats.needsProbe(options)) {
             when (val resolved = resolveOptions(catalog, entryUrl)) {
                 is Outcome.Err -> return resolved
                 is Outcome.Ok -> options = resolved.value
@@ -392,6 +458,14 @@ class OpdsControllerImpl(
         }
         chosen.unavailableReason?.let { return Outcome.Err(OpdsFailure.Unavailable(it)) }
         val format = chosen.format ?: return Outcome.Err(OpdsFailure.NotDownloadable)
+        if (format == OpdsFormat.AUDIO) {
+            return addAudioEntry(
+                catalog = catalog,
+                entryUrl = entryUrl,
+                manifestUrl = chosen.url,
+                stored = stored,
+            )
+        }
         val origin = ImportOrigin(
             catalogUrl = canonicalCatalogUrl(catalogUrl),
             catalogName = catalogName,
@@ -412,6 +486,113 @@ class OpdsControllerImpl(
                 is LocalImportResult.Failure -> Outcome.Err(OpdsFailure.Unknown(result.message))
             }
         }
+    }
+
+    /**
+     * A remote audiobook: only metadata, the track list and progress are
+     * persisted. No file, body or page row is written, so a backup never
+     * carries audio bytes. Re-adding the same entry merges the row and
+     * reconciles tracks by URL, keeping chapter ids and playback progress.
+     */
+    private suspend fun addAudioEntry(
+        catalog: OpdsCatalogEntity,
+        entryUrl: String,
+        manifestUrl: String,
+        stored: OpdsEntryEntity?,
+    ): Outcome<String> {
+        val authorization = authorizationFor(catalog.id)
+        registerHost(catalog.id, catalog.url, authorization)
+        val audiobook = when (val loaded = loadAudiobook(manifestUrl, stored, authorization, catalog.url)) {
+            is Outcome.Err -> return loaded
+            is Outcome.Ok -> loaded.value
+        }
+        val installId = OpdsSources.idOf(catalog.id)
+        audioStore.save(
+            RemoteAudioBook(
+                installId = installId,
+                url = entryUrl,
+                title = audiobook.title.ifBlank { stored?.title?.takeIf { it.isNotBlank() } ?: entryUrl },
+                author = audiobook.authors.joinToString(", ").ifBlank { stored?.author.orEmpty() },
+                description = stored?.description.orEmpty(),
+                coverUrl = audiobook.coverUrl ?: stored?.coverUrl,
+                tracks = audiobook.tracks.map { RemoteAudioTrack(url = it.href, title = it.title) },
+                extrasJson = buildJsonObject {
+                    put("opdsCatalogName", catalog.name)
+                    put("opdsCatalogUrl", catalog.url)
+                }.toString(),
+                at = now(),
+            ),
+        )
+        MiruLog.event(
+            "opds",
+            "opds_audio_add",
+            "host" to hostOf(entryUrl),
+            "tracks" to audiobook.tracks.size,
+        )
+        return Outcome.Ok(libraryBookKey(installId, entryUrl))
+    }
+
+    private suspend fun loadAudiobook(
+        manifestUrl: String,
+        stored: OpdsEntryEntity?,
+        authorization: String?,
+        catalogUrl: String,
+    ): Outcome<OpdsAudiobook> {
+        // A catalogue may hand out an audio file directly: that is a one-track
+        // book, no manifest to fetch.
+        if (OpdsMediaTypes.isAudioFileUrl(manifestUrl)) {
+            return Outcome.Ok(singleTrackBook(manifestUrl, stored))
+        }
+        val fetch = try {
+            transport.get(manifestUrl, authHeaders(catalogUrl, manifestUrl, authorization))
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            MiruLog.event(
+                "opds",
+                "opds_audio_manifest",
+                "host" to hostOf(manifestUrl),
+                "status" to 0,
+                "error" to e::class.simpleName,
+            )
+            return Outcome.Err(OpdsFailure.Network(null))
+        }
+        MiruLog.event(
+            "opds",
+            "opds_audio_manifest",
+            "host" to hostOf(manifestUrl),
+            "status" to fetch.status,
+        )
+        if (fetch.status !in 200..299) return Outcome.Err(failureFor(fetch))
+        val bytes = fetch.bytes ?: return Outcome.Err(OpdsFailure.Network(fetch.status))
+        return when (val parsed = OpdsAudiobookParser.parse(bytes, fetch.finalUrl.ifBlank { manifestUrl })) {
+            is Outcome.Ok -> parsed
+            is Outcome.Err -> when {
+                // A server labelled the manifest as an audio file: play it as
+                // the single track instead of failing the add.
+                fetch.contentType?.startsWith("audio/") == true ->
+                    Outcome.Ok(singleTrackBook(fetch.finalUrl.ifBlank { manifestUrl }, stored))
+                parsed.error == OpdsError.NoTracks -> Outcome.Err(OpdsFailure.NotDownloadable)
+                else -> Outcome.Err(OpdsFailure.Unknown("bad-manifest"))
+            }
+        }
+    }
+
+    private fun singleTrackBook(href: String, stored: OpdsEntryEntity?): OpdsAudiobook {
+        val title = stored?.title?.takeIf { it.isNotBlank() } ?: href.substringAfterLast('/')
+        return OpdsAudiobook(
+            title = title,
+            authors = listOfNotNull(stored?.author?.takeIf { it.isNotBlank() }),
+            durationSeconds = null,
+            coverUrl = stored?.coverUrl,
+            tracks = listOf(OpdsAudioTrack(href = href, title = title, durationSeconds = null)),
+        )
+    }
+
+    /** Authorization headers for a stream URL of this catalogue, if any. */
+    override suspend fun streamHeaders(catalogUrl: String, targetUrl: String): Map<String, String> {
+        val catalog = library.opdsCatalogs().firstOrNull { it.url == catalogUrl } ?: return emptyMap()
+        return authHeaders(catalog.url, targetUrl, authorizationFor(catalog.id))
     }
 
     private suspend fun downloadAndImport(

@@ -57,7 +57,8 @@ class DefaultReaderRepository(
                 )
             },
             isManga = book.contentType == ContentType.Manga,
-            isVideo = book.contentType == ContentType.Video,
+            isVideo = book.contentType == ContentType.Video ||
+                book.contentType == ContentType.Audio,
             coverUrl = book.coverUrl,
         )
     }

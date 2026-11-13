@@ -171,6 +171,8 @@ enum class ChapterRangeAction {
 fun SelectChaptersSheet(
     book: BookDetails,
     onClose: () -> Unit,
+    // Audio has nothing to download; the range sheet must not offer it.
+    showDownload: Boolean = true,
     onApply: (IntRange, ChapterRangeAction) -> Unit,
 ) {
     val total = book.totalChapters
@@ -243,18 +245,20 @@ fun SelectChaptersSheet(
                 onSelect = { action = it },
                 label = stringResource(R.string.book_sel_action_delete_translations),
             )
-            RangeActionChip(
-                action = ChapterRangeAction.Download,
-                selected = action,
-                onSelect = { action = it },
-                label = stringResource(R.string.book_sel_action_download),
-            )
-            RangeActionChip(
-                action = ChapterRangeAction.DeleteDownloads,
-                selected = action,
-                onSelect = { action = it },
-                label = stringResource(R.string.book_sel_action_delete_downloads),
-            )
+            if (showDownload) {
+                RangeActionChip(
+                    action = ChapterRangeAction.Download,
+                    selected = action,
+                    onSelect = { action = it },
+                    label = stringResource(R.string.book_sel_action_download),
+                )
+                RangeActionChip(
+                    action = ChapterRangeAction.DeleteDownloads,
+                    selected = action,
+                    onSelect = { action = it },
+                    label = stringResource(R.string.book_sel_action_delete_downloads),
+                )
+            }
             RangeActionChip(
                 action = ChapterRangeAction.MarkRead,
                 selected = action,

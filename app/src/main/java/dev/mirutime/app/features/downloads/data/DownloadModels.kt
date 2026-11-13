@@ -133,6 +133,8 @@ enum class EnqueueFailure {
     LOCAL_BOOK,
     NO_CHAPTERS,
     NOT_CONFIGURED,
+    /** Audiobooks stream from their catalogue and have nothing to download. */
+    UNSUPPORTED_CONTENT,
 }
 
 enum class DownloadWorkDecision { RETRY, EXHAUSTED, DONE }
