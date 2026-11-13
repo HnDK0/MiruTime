@@ -107,10 +107,12 @@ import dev.mirutime.app.features.video.domain.videoVariantKey
 import dev.mirutime.app.features.video.domain.videoRestartPositionMs
 import dev.mirutime.core.api.VideoStream
 import dev.mirutime.uikit.ChoiceOption
+import dev.mirutime.uikit.LocalMiruLocale
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.ChoiceSheet
+import dev.mirutime.uikit.miruDecimal
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -1192,6 +1194,7 @@ private fun currentGestureConfig(widthPx: Float): GestureConfig = GestureConfig(
 @Composable
 private fun GestureHudOverlay(state: State<GestureHud?>) {
     val hud = state.value
+    val locale = LocalMiruLocale.current
     // Keep the last content during the exit fade.
     var lastHud by remember { mutableStateOf<GestureHud?>(null) }
     if (hud != null) lastHud = hud
@@ -1218,22 +1221,22 @@ private fun GestureHudOverlay(state: State<GestureHud?>) {
                         is GestureHud.Seek -> {
                             Icon(Icons.Filled.AccessTime, contentDescription = null)
                             Text(
-                                text = formatSeekTime(shown.positionMs) + "/" +
-                                    formatSeekTime(shown.durationMs),
+                                text = formatSeekTime(shown.positionMs, locale) + "/" +
+                                    formatSeekTime(shown.durationMs, locale),
                                 style = MaterialTheme.typography.titleMedium,
                             )
                         }
                         is GestureHud.Brightness -> {
                             Icon(Icons.Filled.Brightness6, contentDescription = null)
                             Text(
-                                text = "${(shown.fraction * 100).toInt()}%",
+                                text = miruDecimal((shown.fraction * 100).toInt(), 0, locale) + "%",
                                 style = MaterialTheme.typography.titleMedium,
                             )
                         }
                         is GestureHud.Volume -> {
                             Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null)
                             Text(
-                                text = "${(shown.fraction * 100).toInt()}%",
+                                text = miruDecimal((shown.fraction * 100).toInt(), 0, locale) + "%",
                                 style = MaterialTheme.typography.titleMedium,
                             )
                         }
@@ -1256,12 +1259,12 @@ private fun GestureHudOverlay(state: State<GestureHud?>) {
     }
 }
 
-private fun formatSeekTime(ms: Long): String {
+private fun formatSeekTime(ms: Long, locale: Locale): String {
     val seconds = (ms / 1000).coerceAtLeast(0)
     return if (seconds >= 3600) {
-        String.format(Locale.ROOT, "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+        String.format(locale, "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
     } else {
-        String.format(Locale.ROOT, "%d:%02d", seconds / 60, seconds % 60)
+        String.format(locale, "%d:%02d", seconds / 60, seconds % 60)
     }
 }
 

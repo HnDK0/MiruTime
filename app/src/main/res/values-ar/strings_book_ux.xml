@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- تسميات الفصول واختيارها: إجراءات قصيرة مسمّاة بدل أيقونات بلا نص. -->
+<resources>
+    <string name="book_sel_action_translate">ترجمة</string>
+    <string name="book_sel_action_download">تنزيل</string>
+    <string name="book_sel_action_mark_read">تعليم كمقروء</string>
+    <string name="book_sel_action_mark_unread">تعليم كغير مقروء</string>
+    <string name="book_sel_action_delete_translations">حذف الترجمات</string>
+    <string name="book_sel_action_delete_downloads">حذف التنزيلات</string>
+    <string name="book_ch_size_cd">حجم الفصل: %1$s</string>
+    <plurals name="book_sel_delete_translations_desc_plural">
+        <item quantity="zero">لا توجد فصول محدَّدة لحذف ترجماتها.</item>
+        <item quantity="one">إزالة الترجمة المحفوظة لفصل واحد محدَّد؟</item>
+        <item quantity="two">إزالة الترجمات المحفوظة لفصلين محدَّدين؟</item>
+        <item quantity="few">إزالة الترجمات المحفوظة لـ%1$d فصول محدَّدة؟</item>
+        <item quantity="many">إزالة الترجمات المحفوظة لـ%1$d فصلاً محدَّدًا؟</item>
+        <item quantity="other">إزالة الترجمات المحفوظة لـ%1$d فصل محدَّد؟</item>
+    </plurals>
+    <string name="book_continue_title_fmt">متابعة · %1$s</string>
+    <string name="book_read_again_title_fmt">إعادة القراءة · %1$s</string>
+</resources>

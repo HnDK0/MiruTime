@@ -80,6 +80,7 @@ fun MiruListCard(
     footer: (@Composable () -> Unit)? = null,
 ) {
     val extra = LocalMiruExtraColors.current
+    val locale = LocalMiruLocale.current
     val shape = RoundedCornerShape(MiruRadius.Card)
     val shell = modifier
         .miruCardShadow(shape)
@@ -118,7 +119,7 @@ fun MiruListCard(
                             Text(
                                 text = stringResource(
                                     R.string.card_star_fmt,
-                                    ListRating(value),
+                                    ListRating(value, locale),
                                 ),
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     fontWeight = FontWeight.Bold,
@@ -196,8 +197,7 @@ fun MiruListCard(
 }
 
 // "4.5" / "4" one-decimal rating per the library blueprint (zeros trimmed).
-private fun ListRating(rating: Float): String =
-    String.format(Locale.US, "%.1f", rating).trimEnd('0').trimEnd('.')
+private fun ListRating(rating: Float, locale: Locale): String = miruDecimal(rating, 1, locale)
 
 // C badge plate (LibraryCard TypeChip twin): 4dp-radius accent plate.
 @Composable

@@ -33,6 +33,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.LocalMiruLocale
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
@@ -194,6 +195,7 @@ fun NetworkSettingsScreen(contentPadding: PaddingValues) {
 // the library, so it is the loudest one).
 @Composable
 fun DataSettingsScreen(contentPadding: PaddingValues) {
+    val locale = LocalMiruLocale.current
     val context = LocalContext.current
     val storage = remember(context) {
         (context.applicationContext as dev.mirutime.app.MiruApp).storageUsageService
@@ -215,7 +217,7 @@ fun DataSettingsScreen(contentPadding: PaddingValues) {
         item(key = "storage") {
             MiruSectionCard(
                 title = stringResource(R.string.st_data_storage),
-                description = stringResource(R.string.st_data_total_fmt, formatBytes(usage.totalBytes)),
+                description = stringResource(R.string.st_data_total_fmt, formatBytes(usage.totalBytes, locale)),
                 contentPadding = PaddingValues(0.dp),
             ) {
                 StorageBucket.entries.forEachIndexed { index, bucket ->
@@ -237,7 +239,7 @@ fun DataSettingsScreen(contentPadding: PaddingValues) {
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
                             Text(
-                                text = stringResource(R.string.st_data_size_fmt, formatBytes(size)),
+                                text = stringResource(R.string.st_data_size_fmt, formatBytes(size, locale)),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = LocalMiruExtraColors.current.muted,
                             )
@@ -307,7 +309,7 @@ fun DataSettingsScreen(contentPadding: PaddingValues) {
                                     R.string.st_data_out_of_library_count,
                                     usage.outOfLibraryBookCount,
                                     usage.orphanBookDirCount,
-                                    formatBytes(usage.orphanBookBytes),
+                                    formatBytes(usage.orphanBookBytes, locale),
                                 )
                             },
                             style = MaterialTheme.typography.titleSmall,

@@ -47,6 +47,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
@@ -370,12 +371,15 @@ private fun ReaderPagedPager(
             }
     }
 
+    // In RTL the text flows right to left, so "previous" sits on the right edge.
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     Box(
         modifier = modifier.pointerInput(
             pages,
             canPrevChapter,
             canNextChapter,
             doubleTapMenu,
+            rtl,
         ) {
             var lastHandledTap: ReaderTap? = null
             awaitEachGesture {
@@ -385,8 +389,10 @@ private fun ReaderPagedPager(
                 // pass through untouched.
                 val tap = awaitReaderTap(lastHandledTap) { x, isDouble ->
                     val width = size.width.toFloat()
+                    val prevEdge = if (rtl) x > width * 0.75f else x < width * 0.25f
+                    val nextEdge = if (rtl) x < width * 0.25f else x > width * 0.75f
                     when {
-                        x < width * 0.25f -> {
+                        prevEdge -> {
                             // Edge taps turn pages immediately, even in
                             // two-tap mode.
                             if (pagerState.currentPage > 0) {
@@ -397,7 +403,7 @@ private fun ReaderPagedPager(
                                 onPrevChapter()
                             }
                         }
-                        x > width * 0.75f -> {
+                        nextEdge -> {
                             if (pagerState.currentPage < pages.lastIndex) {
                                 scope.launch {
                                     pagerState.animateScrollToPage(pagerState.currentPage + 1)

@@ -76,6 +76,7 @@ import dev.mirutime.app.features.video.data.videoDownloadActions
 import dev.mirutime.core.api.Outcome
 import dev.mirutime.core.api.PluginError
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.LocalMiruLocale
 import dev.mirutime.uikit.MiruCardType
 import dev.mirutime.uikit.MiruCompactButton
 import dev.mirutime.uikit.MiruIconButton
@@ -84,6 +85,7 @@ import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.compactTouchTarget
 import dev.mirutime.uikit.isLargeText
+import dev.mirutime.uikit.miruDecimal
 import java.util.Locale
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.roundToInt
@@ -261,11 +263,12 @@ internal fun ChapterRow(
     modifier: Modifier = Modifier,
 ) {
     val extra = LocalMiruExtraColors.current
+    val locale = LocalMiruLocale.current
     val translationLoading = stringResource(R.string.book_ch_translation_loading)
     // 0 means the body/pages are not stored locally; show no size at all
     // rather than a fake estimate or "0 B".
-    val sizeLabel = remember(chapter.sizeBytes) {
-        chapter.sizeBytes.takeIf { it > 0L }?.let(::formatChapterSize)
+    val sizeLabel = remember(chapter.sizeBytes, locale) {
+        chapter.sizeBytes.takeIf { it > 0L }?.let { formatChapterSize(it, locale) }
     }
     // Video rows take their state from media3; text rows keep the existing
     // DownloadEngine queue state. The two never mix for one book.
@@ -616,6 +619,7 @@ internal fun ReaderNotesSection(
 @Composable
 private fun ReviewItem(review: BookReview, onTranslate: () -> Unit) {
     val extra = LocalMiruExtraColors.current
+    val locale = LocalMiruLocale.current
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
@@ -636,13 +640,13 @@ private fun ReviewItem(review: BookReview, onTranslate: () -> Unit) {
                             imageVector = Icons.Filled.Star,
                             contentDescription = stringResource(
                                 R.string.book_review_rating_cd_fmt,
-                                formatRating(review.rating),
+                                formatRating(review.rating, locale),
                             ),
                             tint = extra.accent,
                             modifier = Modifier.size(14.dp),
                         )
                         Text(
-                            text = formatRating(review.rating),
+                            text = formatRating(review.rating, locale),
                             style = MaterialTheme.typography.labelMedium,
                             color = extra.accent,
                             maxLines = 1,
@@ -679,38 +683,37 @@ private fun ReviewItem(review: BookReview, onTranslate: () -> Unit) {
 }
 
 // "4.5" / "5" from a float, no trailing zeros (stat strip + review stars).
-internal fun formatRating(value: Float): String =
-    String.format(Locale.US, "%.1f", value).trimEnd('0').trimEnd('.')
+internal fun formatRating(value: Float, locale: Locale): String = miruDecimal(value, 1, locale)
 
 // Honest sub-percent progress: 5/1432 must read 0.35%, not 0%.
-internal fun formatPercent(read: Int, total: Int): String {
-    if (read <= 0 || total <= 0) return "0"
+internal fun formatPercent(read: Int, total: Int, locale: Locale): String {
+    if (read <= 0 || total <= 0) return miruDecimal(0, 0, locale)
     val value = read * 100.0 / total
     return when {
-        value < 1.0 -> String.format(Locale.US, "%.2f", value)
-        value < 10.0 -> String.format(Locale.US, "%.1f", value)
-        else -> String.format(Locale.US, "%.0f", value)
+        value < 1.0 -> String.format(locale, "%.2f", value)
+        value < 10.0 -> String.format(locale, "%.1f", value)
+        else -> String.format(locale, "%.0f", value)
     }
 }
 
 // Compact chapter size for the row's secondary line: B under 1 KiB, one
 // decimal below 10 KB/MB, whole numbers above. 0/unknown returns an empty
 // string and the caller never renders it.
-internal fun formatChapterSize(bytes: Long): String {
+internal fun formatChapterSize(bytes: Long, locale: Locale): String {
     if (bytes <= 0L) return ""
     val kb = 1024.0
     val mb = kb * 1024
     return when {
-        bytes < kb -> "$bytes B"
+        bytes < kb -> miruDecimal(bytes, 0, locale) + " B"
         bytes < mb -> {
             val value = bytes / kb
-            if (value < 10) String.format(Locale.US, "%.1f KB", value)
-            else "${value.roundToInt()} KB"
+            if (value < 10) String.format(locale, "%.1f", value) + " KB"
+            else miruDecimal(value.roundToInt(), 0, locale) + " KB"
         }
         else -> {
             val value = bytes / mb
-            if (value < 10) String.format(Locale.US, "%.1f MB", value)
-            else "${value.roundToInt()} MB"
+            if (value < 10) String.format(locale, "%.1f", value) + " MB"
+            else miruDecimal(value.roundToInt(), 0, locale) + " MB"
         }
     }
 }

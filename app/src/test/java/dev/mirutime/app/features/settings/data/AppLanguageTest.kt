@@ -22,7 +22,7 @@ class AppLanguageTest {
     @Test
     fun `only resource-backed app languages are offered`() {
         assertEquals(
-            listOf("en", "ru", "es", "pt", "in", "vi", "fr", "de", "it", "tr"),
+            listOf("en", "ru", "es", "pt", "in", "vi", "fr", "de", "it", "tr", "ar"),
             SettingsLanguages.app,
         )
     }

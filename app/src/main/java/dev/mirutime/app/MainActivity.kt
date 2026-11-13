@@ -53,6 +53,7 @@ import dev.mirutime.app.design.saveThemePrefs
 import dev.mirutime.app.design.themePrefsChanges
 import dev.mirutime.app.features.settings.data.AppLanguage
 import dev.mirutime.app.features.settings.data.AppSettings
+import dev.mirutime.app.features.settings.ui.uiLocale
 import dev.mirutime.app.features.webview.ui.LocalWebUserAgent
 import dev.mirutime.app.shell.MiruShell
 import kotlinx.coroutines.Dispatchers
@@ -176,6 +177,7 @@ class MainActivity : ComponentActivity() {
             val bgSource = if (themeMode == ThemeMode.Custom) customBg else null
             val bgBitmap = rememberBackgroundBitmap(bgSource)
             MiruTheme(
+                locale = uiLocale(),
                 mode = themeMode,
                 background = bgSource?.let { ThemeBackground.Image(it) } ?: ThemeBackground.None,
                 backgroundBitmap = bgBitmap,

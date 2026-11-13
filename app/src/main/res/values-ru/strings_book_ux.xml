@@ -12,6 +12,7 @@
         <item quantity="one">Удалить сохранённый перевод для %1$d выбранной главы?</item>
         <item quantity="few">Удалить сохранённые переводы для %1$d выбранных глав?</item>
         <item quantity="many">Удалить сохранённые переводы для %1$d выбранных глав?</item>
+        <item quantity="other">Удалить сохранённые переводы для %1$d выбранных глав?</item>
     </plurals>
     <string name="book_continue_title_fmt">Продолжить · %1$s</string>
     <string name="book_read_again_title_fmt">Перечитать · %1$s</string>

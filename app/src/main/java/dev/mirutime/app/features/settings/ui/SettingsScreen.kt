@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
+import dev.mirutime.uikit.LocalMiruLocale
 import dev.mirutime.uikit.MiruActionRow
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
@@ -43,6 +44,7 @@ fun SettingsScreen(
 ) {
     val settings = AppSettings
     val perNovel = !settings.translationGlobalMode
+    val locale = LocalMiruLocale.current
     val context = LocalContext.current
     val storage = remember(context) {
         (context.applicationContext as dev.mirutime.app.MiruApp).storageUsageService
@@ -55,7 +57,7 @@ fun SettingsScreen(
         storageLoaded = true
     }
     val storageSummary = if (storageLoaded) {
-        formatBytes(storageTotal)
+        formatBytes(storageTotal, locale)
     } else {
         stringResource(R.string.loading_value)
     }

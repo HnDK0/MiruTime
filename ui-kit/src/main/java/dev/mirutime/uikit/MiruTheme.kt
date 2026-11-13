@@ -38,6 +38,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import java.util.Locale
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 
@@ -1165,6 +1166,9 @@ fun MiruTheme(
     // Decoded by the host (SAF/cache stays in :app); null falls back to the
     // flat palette while the picture loads or when it cannot be decoded.
     backgroundBitmap: ImageBitmap? = null,
+    // Numbers inside the theme must use the interface language, not the device
+    // one, so the host passes its chosen locale down.
+    locale: Locale = Locale.getDefault(),
     content: @Composable () -> Unit,
 ) {
     val bgSource = (background as? ThemeBackground.Image)?.source
@@ -1177,6 +1181,7 @@ fun MiruTheme(
     CompositionLocalProvider(
         LocalMiruExtraColors provides colors.extra,
         LocalMiruOnImage provides (bgBitmap != null),
+        LocalMiruLocale provides locale,
     ) {
         MaterialTheme(
             colorScheme = colors.scheme,

@@ -9,6 +9,8 @@ import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import dev.mirutime.app.MiruApp
 import dev.mirutime.app.R
+import dev.mirutime.app.features.settings.data.AppLanguage
+import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.core.host.CfChallenge
 import java.net.URI
 import kotlinx.coroutines.CancellationException
@@ -24,6 +26,12 @@ import kotlinx.coroutines.withContext
  * only the app's own PendingIntent can launch it.
  */
 class CfSolveActivity : ComponentActivity() {
+
+    // Same per-app language as the rest of the app: these screens are separate
+    // activities, so the activity base context has to be wrapped here too.
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(AppLanguage.wrap(newBase, AppSettings.appLanguage))
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val request = CfSolveRequestPolicy.from(

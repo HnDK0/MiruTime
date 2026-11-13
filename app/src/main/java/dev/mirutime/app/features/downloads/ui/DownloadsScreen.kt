@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import dev.mirutime.app.MiruApp
 import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.LocalMiruLocale
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
@@ -108,6 +109,7 @@ fun DownloadsScreen(
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
+    val locale = LocalMiruLocale.current
     val app = context.applicationContext as MiruApp
     val engine = app.downloadEngine
     val repository = app.libraryRepository
@@ -242,7 +244,7 @@ fun DownloadsScreen(
         stringResource(R.string.dl_tab_queue)
     }
     val storageValue = if (usageLoaded) {
-        formatBytes(totalBytes)
+        formatBytes(totalBytes, locale)
     } else {
         stringResource(R.string.loading_value)
     }
@@ -495,7 +497,7 @@ fun DownloadsScreen(
             title = stringResource(cleanupTitleRes(kind)),
             description = stringResource(
                 R.string.dl_confirm_cleanup_desc,
-                formatBytes(cleanupBytes),
+                formatBytes(cleanupBytes, locale),
             ),
             onClose = { pendingCleanup = null },
             doneLabel = stringResource(R.string.st_data_clear),
@@ -507,7 +509,7 @@ fun DownloadsScreen(
                     runCatching { storage.clear(cleanupBucket(kind)) }
                     usage = runCatching { storage.refresh() }.getOrDefault(usage)
                     usageLoaded = true
-                    toast(R.string.dl_cleanup_toast_fmt, formatBytes(freed))
+                    toast(R.string.dl_cleanup_toast_fmt, formatBytes(freed, locale))
                     refresh()
                 }
             },
@@ -520,6 +522,7 @@ fun DownloadsScreen(
 @Composable
 private fun StorageLegendRow(slice: StorageSlice, loading: Boolean = false) {
     val extra = LocalMiruExtraColors.current
+    val locale = LocalMiruLocale.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -545,7 +548,7 @@ private fun StorageLegendRow(slice: StorageSlice, loading: Boolean = false) {
             SkeletonBar(modifier = Modifier.width(40.dp), height = 10.dp)
         } else {
             Text(
-                text = formatBytes(slice.bytes),
+                text = formatBytes(slice.bytes, locale),
                 style = MaterialTheme.typography.labelSmall,
                 color = extra.muted,
             )

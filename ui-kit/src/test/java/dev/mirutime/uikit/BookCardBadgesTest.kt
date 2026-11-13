@@ -1,5 +1,6 @@
 package dev.mirutime.uikit
 
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -13,9 +14,9 @@ class BookCardBadgesTest {
 
     @Test
     fun `rating text is one decimal with no trailing zero`() {
-        assertEquals("4.5", ratingText(4.5f))
-        assertEquals("4", ratingText(4.0f))
-        assertNull(ratingText(0f))
-        assertNull(ratingText(5.5f))
+        assertEquals("4.5", ratingText(4.5f, Locale.US))
+        assertEquals("4", ratingText(4.0f, Locale.US))
+        assertNull(ratingText(0f, Locale.US))
+        assertNull(ratingText(5.5f, Locale.US))
     }
 }

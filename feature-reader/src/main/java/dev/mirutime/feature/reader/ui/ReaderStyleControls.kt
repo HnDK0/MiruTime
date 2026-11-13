@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.mirutime.feature.reader.R
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.LocalMiruLocale
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
@@ -56,12 +57,12 @@ import dev.mirutime.uikit.SettingsSliderRow
 import dev.mirutime.uikit.SettingsSwitchRow
 import dev.mirutime.uikit.SettingsValueRow
 import dev.mirutime.uikit.SheetSection
+import dev.mirutime.uikit.miruDecimal
 import dev.mirutime.feature.reader.api.ReaderAssetPort
 import dev.mirutime.feature.reader.Autoscroll
 import dev.mirutime.feature.reader.MangaReaderStyle
 import dev.mirutime.feature.reader.ReaderPalette
 import dev.mirutime.feature.reader.ReaderStyle
-import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
@@ -90,6 +91,7 @@ fun ReaderStyleControls(
     val currentUpdate by rememberUpdatedState(update)
     val backgroundImportFailed = stringResource(R.string.rd_background_import_failed)
     val fontImportFailed = stringResource(R.string.rd_font_import_failed)
+    val locale = LocalMiruLocale.current
 
     val backgroundPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -194,7 +196,7 @@ fun ReaderStyleControls(
             MiruRowDivider()
             SettingsSliderRow(
                 title = stringResource(R.string.rd_font_size),
-                valueText = "${style.fontSizeSp} sp",
+                valueText = miruDecimal(style.fontSizeSp, 0, locale) + " sp",
                 value = style.fontSizeSp.toFloat(),
                 range = 8f..32f,
                 steps = 23,
@@ -204,7 +206,7 @@ fun ReaderStyleControls(
             MiruRowDivider()
             SettingsSliderRow(
                 title = stringResource(R.string.rd_line_spacing),
-                valueText = String.format(Locale.US, "%.2f×", style.lineHeight),
+                valueText = String.format(locale, "%.2f×", style.lineHeight),
                 value = style.lineHeight,
                 range = 1.0f..2.5f,
                 steps = 14,
@@ -214,7 +216,7 @@ fun ReaderStyleControls(
             MiruRowDivider()
             SettingsSliderRow(
                 title = stringResource(R.string.rd_paragraph_spacing),
-                valueText = "${style.paragraphSpacingDp} dp",
+                valueText = miruDecimal(style.paragraphSpacingDp, 0, locale) + " dp",
                 value = style.paragraphSpacingDp.toFloat(),
                 range = 0f..40f,
                 steps = 39,
@@ -224,7 +226,7 @@ fun ReaderStyleControls(
             MiruRowDivider()
             SettingsSliderRow(
                 title = stringResource(R.string.rd_letter_spacing),
-                valueText = String.format(Locale.US, "%.2f em", style.letterSpacingEm),
+                valueText = String.format(locale, "%.2f em", style.letterSpacingEm),
                 value = style.letterSpacingEm,
                 range = 0f..0.3f,
                 steps = 29,

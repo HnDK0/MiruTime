@@ -5,9 +5,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import dev.mirutime.app.R
 import dev.mirutime.uikit.ChoiceOption
+import dev.mirutime.uikit.miruDecimal
 import dev.mirutime.app.features.settings.data.AppLanguage
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.settings.data.SettingsLanguages
+import java.text.Collator
 import java.util.Locale
 
 // Routes of the Settings tree. A section is its own screen;
@@ -73,16 +75,16 @@ fun uiLanguageName(code: String): String {
         .ifBlank { code }
 }
 
-fun formatBytes(bytes: Long): String {
-    if (bytes <= 0L) return "0 B"
+fun formatBytes(bytes: Long, locale: Locale): String {
+    if (bytes <= 0L) return miruDecimal(0, 0, locale) + " B"
     val kb = 1024.0
     val mb = kb * 1024
     val gb = mb * 1024
     return when {
-        bytes >= gb -> String.format(Locale.US, "%.1f GB", bytes / gb)
-        bytes >= mb -> String.format(Locale.US, "%.1f MB", bytes / mb)
-        bytes >= kb -> String.format(Locale.US, "%.0f KB", bytes / kb)
-        else -> "$bytes B"
+        bytes >= gb -> String.format(locale, "%.1f GB", bytes / gb)
+        bytes >= mb -> String.format(locale, "%.1f MB", bytes / mb)
+        bytes >= kb -> String.format(locale, "%.0f KB", bytes / kb)
+        else -> miruDecimal(bytes, 0, locale) + " B"
     }
 }
 
@@ -91,7 +93,8 @@ fun appLanguageOptions(): List<ChoiceOption<String>> =
     listOf(ChoiceOption("system", stringResource(R.string.st_language_system))) +
         SettingsLanguages.app
             .map { code -> code to nativeLanguageName(code) }
-            .sortedBy { (_, name) -> name.lowercase(Locale.ROOT) }
+            // Code-point order would sort every Arabic name by its second letter.
+            .sortedWith(compareBy(Collator.getInstance(uiLocale())) { it.second })
             .map { (code, name) -> ChoiceOption(code, name) }
 
 @Composable

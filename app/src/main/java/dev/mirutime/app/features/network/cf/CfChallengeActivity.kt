@@ -19,6 +19,8 @@ import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import dev.mirutime.app.R
+import dev.mirutime.app.features.settings.data.AppLanguage
+import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.di.host.MiruCoreLogger
 import dev.mirutime.app.di.host.parseCookieHeader
 
@@ -27,6 +29,12 @@ import dev.mirutime.app.di.host.parseCookieHeader
 // clearance probe, this Activity only renders the site, keeps the bound UA and
 // publishes cookie snapshots.
 class CfChallengeActivity : ComponentActivity() {
+
+    // Same per-app language as the rest of the app: these screens are separate
+    // activities, so the activity base context has to be wrapped here too.
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(AppLanguage.wrap(newBase, AppSettings.appLanguage))
+    }
 
     private var webView: WebView? = null
     private var pending: PendingChallenge? = null

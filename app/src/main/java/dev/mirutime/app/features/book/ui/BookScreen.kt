@@ -126,6 +126,7 @@ import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
 import dev.mirutime.uikit.R as UiKitR
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.LocalMiruLocale
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
@@ -2757,6 +2758,7 @@ private fun StatStrip(
     downloadedOverride: Int? = null,
 ) {
     val extra = LocalMiruExtraColors.current
+    val locale = LocalMiruLocale.current
     val ttsLabel = formatDurationLocalized(book.ttsMinutes * 60_000L)
     val chaptersKnown = bookChaptersCountKnown(chaptersLoading, book.totalChapters)
     val novelDownloaded = remember(book.chapters) { book.chapters.count { it.downloaded } }
@@ -2764,11 +2766,11 @@ private fun StatStrip(
     val largeText = isLargeText()
     val percentLabel = stringResource(
         R.string.book_stat_read_pct_dec_fmt,
-        formatPercent(book.readCount, book.totalChapters),
+        formatPercent(book.readCount, book.totalChapters, locale),
     )
 
     val ratingValue = if (book.rating > 0f) {
-        formatRating(book.rating)
+        formatRating(book.rating, locale)
     } else {
         stringResource(R.string.book_stat_none)
     }

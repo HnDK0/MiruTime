@@ -22,6 +22,7 @@ import dev.mirutime.app.features.reader.domain.ReadingSessionTracker
 import dev.mirutime.app.features.video.data.VideoSourceRepository
 import dev.mirutime.app.features.settings.data.AppLanguage
 import dev.mirutime.app.features.settings.data.AppSettings
+import dev.mirutime.app.features.settings.ui.uiLocale
 import dev.mirutime.app.features.video.domain.VideoPlaybackSession
 import dev.mirutime.app.features.video.ui.VideoPlayerScreen
 import dev.mirutime.uikit.MiruTheme
@@ -93,7 +94,7 @@ class VideoPlayerActivity : ComponentActivity() {
             ?: ThemeMode.Night
 
         setContent {
-            MiruTheme(mode = theme) {
+            MiruTheme(mode = theme, locale = uiLocale()) {
                 VideoPlayerScreen(
                     repository = repository!!,
                     videoDownloads = app.videoDownloadManager,

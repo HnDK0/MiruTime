@@ -591,7 +591,7 @@ object SettingsLanguages {
     // that silently falls back to English would be a dead choice.
     // "in" is Android's resource qualifier for Indonesian (`values-in`):
     // Locale normalizes it to "id", and the platform maps that back to the folder.
-    val app = listOf("en", "ru", "es", "pt", "in", "vi", "fr", "de", "it", "tr")
+    val app = listOf("en", "ru", "es", "pt", "in", "vi", "fr", "de", "it", "tr", "ar")
     val translation = listOf(
         "en", "zh", "ja", "ko", "ru", "uk", "es", "fr", "de", "it", "pt", "tr",
         "ar", "vi", "th", "id", "ms", "pl", "hi", "bn", "fil", "nl", "cs", "el",

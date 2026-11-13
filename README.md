@@ -59,7 +59,7 @@ git clone https://github.com/HnDK0/MiruTime
 - Import of NoveLA backup files
 - Shelves and library updates, dashboard with reading activity
 - EPUB export from the book screen
-- Ten interface languages: English, Russian, Spanish, Portuguese, French, German, Italian, Turkish, Vietnamese and Indonesian
+- Eleven interface languages: English, Russian, Spanish, Portuguese, French, German, Italian, Turkish, Vietnamese, Indonesian and Arabic
 - Light and dark themes, Material 3
 
 ---

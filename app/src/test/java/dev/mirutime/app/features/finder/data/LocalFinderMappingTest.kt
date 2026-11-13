@@ -5,6 +5,7 @@ import dev.mirutime.app.features.finder.domain.CatalogSort
 import dev.mirutime.app.features.finder.domain.FilterPreset
 import dev.mirutime.app.features.finder.domain.LocalBook
 import dev.mirutime.app.features.finder.domain.LocalSources
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -100,8 +101,8 @@ class LocalFinderMappingTest {
     fun `install id and human size stay stable`() {
         assertEquals("local-manga", localInstallId("manga"))
         assertEquals("local-books", localInstallId("books"))
-        assertEquals("512 B", formatFileSize(512))
-        assertEquals("1.0 KB", formatFileSize(1024))
-        assertEquals("5.0 MB", formatFileSize(5L * 1024 * 1024))
+        assertEquals("512 B", formatFileSize(512, Locale.US))
+        assertEquals("1.0 KB", formatFileSize(1024, Locale.US))
+        assertEquals("5.0 MB", formatFileSize(5L * 1024 * 1024, Locale.US))
     }
 }

@@ -13,6 +13,7 @@ import dev.mirutime.app.R
 import dev.mirutime.app.features.finder.domain.CatalogBook
 import dev.mirutime.app.features.finder.domain.LibraryBadgeState
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.LocalMiruLocale
 import dev.mirutime.uikit.MiruBookCard
 import dev.mirutime.uikit.MiruCardPreset
 import dev.mirutime.uikit.MiruCardType
@@ -49,6 +50,7 @@ fun CatalogTile(
 ) {
     val badge = membership
         ?: if (inLibrary) MiruMembershipBadge(sameSource = true, sourceCount = 1) else null
+    val locale = LocalMiruLocale.current
     val membershipDescription = badge?.let {
         when {
             it.sourceCount > 1 -> stringResource(R.string.lib_membership_count_fmt, it.sourceCount)
@@ -74,7 +76,7 @@ fun CatalogTile(
         title = translatedTitle?.takeIf { it.isNotBlank() } ?: book.title,
         modifier = modifier,
         source = caption,
-        rating = ratingText(book.rating),
+        rating = ratingText(book.rating, locale),
         membership = badge,
         selected = selected,
         selectionMode = selectionMode,

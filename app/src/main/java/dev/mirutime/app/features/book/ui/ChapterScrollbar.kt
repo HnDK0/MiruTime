@@ -22,6 +22,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -65,11 +67,15 @@ internal fun chapterScrollbarTouchZone(
     laneWidthPx: Float,
     visualWidthPx: Float,
     edgeInsetPx: Float,
+    rtl: Boolean = false,
 ): ChapterScrollbarTouchZone {
+    // The rail hugs the end edge. Mirror the finger once so the geometry below
+    // stays written for the right edge in both directions.
+    val px = if (rtl) canvasWidthPx - x else x
     val trackStart = canvasWidthPx - edgeInsetPx - visualWidthPx
-    if (x >= trackStart) return ChapterScrollbarTouchZone.TRACK
+    if (px >= trackStart) return ChapterScrollbarTouchZone.TRACK
     val laneStart = canvasWidthPx - laneWidthPx
-    if (x >= laneStart) return ChapterScrollbarTouchZone.LANE
+    if (px >= laneStart) return ChapterScrollbarTouchZone.LANE
     return ChapterScrollbarTouchZone.NONE
 }
 
@@ -86,6 +92,7 @@ internal fun ChapterScrollbar(
     val extra = LocalMiruExtraColors.current
     val density = LocalDensity.current
     val description = stringResource(R.string.book_cd_ch_scrollbar)
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val minThumbPx = with(density) { MiruSize.Control.toPx() }
     val visualWidthPx = with(density) { ChapterScrollbarVisualWidth.toPx() }
     val edgeInsetPx = with(density) { ChapterScrollbarEdgeInset.toPx() }
@@ -128,6 +135,7 @@ internal fun ChapterScrollbar(
                 canvasWidthPx = size.width,
                 edgeInsetPx = edgeInsetPx,
                 visualWidthPx = visualWidthPx,
+                rtl = rtl,
             )
 
             drawRoundRect(
@@ -166,7 +174,8 @@ internal fun Modifier.chapterScrollbarDrag(
     val edgeInsetPx = with(density) { ChapterScrollbarEdgeInset.toPx() }
     val minThumbPx = with(density) { MiruSize.Control.toPx() }
     val dragChange by rememberUpdatedState(onDragThumbTopChange)
-    return pointerInput(state, laneWidthPx, visualWidthPx, edgeInsetPx, minThumbPx) {
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    return pointerInput(state, laneWidthPx, visualWidthPx, edgeInsetPx, minThumbPx, rtl) {
         var scrollJob: Job? = null
         fun jumpTo(index: Int) {
             scrollJob?.cancel()
@@ -184,6 +193,7 @@ internal fun Modifier.chapterScrollbarDrag(
                     laneWidthPx = laneWidthPx,
                     visualWidthPx = visualWidthPx,
                     edgeInsetPx = edgeInsetPx,
+                    rtl = rtl,
                 )
                 if (zone == ChapterScrollbarTouchZone.NONE) return@awaitEachGesture
 
@@ -288,8 +298,9 @@ internal fun chapterScrollbarLine(
     canvasWidthPx: Float,
     edgeInsetPx: Float,
     visualWidthPx: Float,
+    rtl: Boolean = false,
 ): ChapterScrollbarLine = ChapterScrollbarLine(
-    left = canvasWidthPx - edgeInsetPx - visualWidthPx,
+    left = if (rtl) edgeInsetPx else canvasWidthPx - edgeInsetPx - visualWidthPx,
     width = visualWidthPx,
     radius = visualWidthPx / 2f,
 )

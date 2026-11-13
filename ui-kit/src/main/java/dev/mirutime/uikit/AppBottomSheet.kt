@@ -63,9 +63,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
@@ -225,6 +227,7 @@ fun AppBottomSheet(
                 Spacer(modifier = Modifier.height(MiruSpace.S))
                 if (contentScrollable) {
                     val scroll = rememberScrollState()
+                    val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
                     // The thumb lives in the sheet's side gutter, outside the
                     // content padding, so it never paints over rows or text and
                     // never competes with the fade at the content edges.
@@ -248,6 +251,7 @@ fun AppBottomSheet(
                                 .sheetScrollIndicator(
                                     scroll = scroll,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
+                                    isRtl = isRtl,
                                 ),
                         )
                     }
@@ -397,7 +401,11 @@ fun SheetSection(
 // visible without scrolling first. It tracks [scroll] directly in the draw
 // phase, so it never recomposes the sheet content; nothing is drawn when the
 // content fits.
-private fun Modifier.sheetScrollIndicator(scroll: ScrollState, color: Color): Modifier =
+private fun Modifier.sheetScrollIndicator(
+    scroll: ScrollState,
+    color: Color,
+    isRtl: Boolean,
+): Modifier =
     drawWithContent {
         drawContent()
         if (scroll.maxValue <= 0) return@drawWithContent
@@ -410,7 +418,10 @@ private fun Modifier.sheetScrollIndicator(scroll: ScrollState, color: Color): Mo
         val top = travel * (scroll.value.toFloat() / scroll.maxValue)
         drawRoundRect(
             color = color,
-            topLeft = Offset(size.width - width - MiruSpace.Xxs.toPx(), top),
+            topLeft = Offset(
+                if (isRtl) MiruSpace.Xxs.toPx() else size.width - width - MiruSpace.Xxs.toPx(),
+                top,
+            ),
             size = Size(width, thumb),
             cornerRadius = CornerRadius(width / 2f),
         )

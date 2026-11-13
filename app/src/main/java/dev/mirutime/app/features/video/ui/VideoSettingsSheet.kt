@@ -41,12 +41,14 @@ import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.uikit.ChipOption
 import dev.mirutime.uikit.ChipRow
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.LocalMiruLocale
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.SettingsSliderRow
 import dev.mirutime.uikit.SettingsSwitchRow
 import dev.mirutime.uikit.SettingsValueRow
 import dev.mirutime.uikit.SheetSection
+import dev.mirutime.uikit.miruDecimal
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -83,19 +85,9 @@ fun videoTrackLabel(format: Format): String =
         ?: format.height.takeIf { it > 0 }?.let { "${it}p" }
         ?: ""
 
-fun speedLabel(speed: Float): String =
-    if (speed == speed.toInt().toFloat()) {
-        "${speed.toInt()}x"
-    } else {
-        "${String.format(Locale.ROOT, "%.2f", speed).trimEnd('0').trimEnd('.')}x"
-    }
+fun speedLabel(speed: Float, locale: Locale): String = miruDecimal(speed, 2, locale) + "x"
 
-private fun secondsLabel(ms: Int): String =
-    if (ms % 1_000 == 0) {
-        (ms / 1_000).toString()
-    } else {
-        String.format(Locale.ROOT, "%.1f", ms / 1_000f)
-    }
+private fun secondsLabel(ms: Int, locale: Locale): String = miruDecimal(ms / 1_000f, 1, locale)
 
 /**
  * Player settings panel, matching NoveLA's `VideoSettingsPanel`: playback
@@ -122,6 +114,7 @@ fun VideoSettingsSheet(
     onClose: () -> Unit,
 ) {
     val muted = LocalMiruExtraColors.current.muted
+    val locale = LocalMiruLocale.current
     AppBottomSheet(
         title = stringResource(R.string.video_settings),
         description = stringResource(R.string.video_settings_desc),
@@ -129,11 +122,11 @@ fun VideoSettingsSheet(
     ) {
         SheetSection(
             title = stringResource(R.string.video_section_playback),
-            summary = speedLabel(speed),
+            summary = speedLabel(speed, locale),
         ) {
             VideoChipLabel(stringResource(R.string.video_speed))
             ChipRow(
-                options = VideoSpeedOptions.map { ChipOption(it.toString(), speedLabel(it)) },
+                options = VideoSpeedOptions.map { ChipOption(it.toString(), speedLabel(it, locale)) },
                 selectedIds = setOf(speed.toString()),
                 onToggle = { onSpeed(it.toFloat()) },
                 contentPadding = PaddingValues(0.dp),
@@ -160,7 +153,7 @@ fun VideoSettingsSheet(
                         if (option == 0) {
                             stringResource(R.string.video_auto_hide_never)
                         } else {
-                            stringResource(R.string.video_seconds_value, secondsLabel(option))
+                            stringResource(R.string.video_seconds_value, secondsLabel(option, locale))
                         },
                     )
                 },
@@ -230,7 +223,11 @@ fun VideoSettingsSheet(
             SettingsSliderRow(
                 title = stringResource(R.string.video_gesture_sensitivity),
                 subtitle = stringResource(R.string.video_gesture_sensitivity_desc),
-                valueText = "${(AppSettings.videoGestureDragThreshold * 100).roundToInt()}%",
+                valueText = miruDecimal(
+                    (AppSettings.videoGestureDragThreshold * 100).roundToInt(),
+                    0,
+                    locale,
+                ) + "%",
                 value = AppSettings.videoGestureDragThreshold,
                 range = DragThresholdMin..DragThresholdMax,
                 steps = DragThresholdSteps,

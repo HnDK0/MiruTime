@@ -63,7 +63,9 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import dev.mirutime.app.features.reader.document.ReaderBlock
@@ -511,7 +513,10 @@ private fun MangaChapterPager(
             state = pagerState,
             key = { pages.getOrNull(it)?.id?.let { id -> "${id.chapterUrl}#${id.index}" } ?: it },
             modifier = Modifier.fillMaxSize(),
-            reverseLayout = style.direction == MangaReadingDirection.Rtl,
+            reverseLayout = mangaReverseLayout(
+                mangaRtl = style.direction == MangaReadingDirection.Rtl,
+                uiRtl = LocalLayoutDirection.current == LayoutDirection.Rtl,
+            ),
             beyondViewportPageCount = 2,
             // Single-finger swipes are handled by the tiled page so pinch zoom
             // and paging never fight over the same pointer stream.
@@ -1043,3 +1048,7 @@ private fun mangaColorFilter(filter: MangaColorFilter): ColorFilter? = when (fil
         ),
     )
 }
+
+// The pager mirrors page placement in RTL (`placeRelativeWithLayer`) while the
+// manga reading direction is physical, so `reverseLayout` is the XOR of both.
+internal fun mangaReverseLayout(mangaRtl: Boolean, uiRtl: Boolean): Boolean = mangaRtl xor uiRtl

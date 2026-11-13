@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- تسميات تحميل وانشغال صادقة. في ملف مستقل حتى لا تمس التسميات الجديدة
+     ملف strings.xml المشترك. -->
+<resources>
+    <string name="loading_value">…</string>
+    <string name="loading_updates">جارٍ تحميل التحديثات…</string>
+    <string name="loading_history">جارٍ تحميل السجل…</string>
+    <string name="loading_searching">جارٍ البحث…</string>
+    <string name="loading_importing">جارٍ استيراد الملفات…</string>
+    <string name="loading_downloads">جارٍ تحميل التنزيلات…</string>
+    <string name="loading_deleting">جارٍ الحذف…</string>
+    <string name="loading_cleaning">جارٍ التنظيف…</string>
+    <string name="loading_queueing">جارٍ الإضافة إلى قائمة الانتظار…</string>
+</resources>

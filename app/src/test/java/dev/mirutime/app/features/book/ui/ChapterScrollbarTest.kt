@@ -165,4 +165,39 @@ class ChapterScrollbarTest {
             0.001f,
         )
     }
+
+    @Test
+    fun `rtl mirrors the rail and the touch zone to the start edge`() {
+        val canvas = 480f
+        val inset = ChapterScrollbarEdgeInset.value
+        val visual = ChapterScrollbarVisualWidth.value
+        val lane = ChapterScrollbarLaneWidth.value
+
+        // Same 8dp line, same 8dp gap, just on the other edge.
+        val line = chapterScrollbarLine(canvas, inset, visual, rtl = true)
+        assertEquals(inset, line.left, 0.001f)
+        assertEquals(visual, line.width, 0.001f)
+
+        // The finger comes from the left now: the track hugs that edge and the
+        // rest of the lane stays open for vertical drags.
+        assertEquals(
+            ChapterScrollbarTouchZone.TRACK,
+            chapterScrollbarTouchZone(inset + 1f, canvas, lane, visual, inset, rtl = true),
+        )
+        assertEquals(
+            ChapterScrollbarTouchZone.LANE,
+            chapterScrollbarTouchZone(inset + visual + 1f, canvas, lane, visual, inset, rtl = true),
+        )
+        assertEquals(
+            ChapterScrollbarTouchZone.LANE,
+            chapterScrollbarTouchZone(lane - 1f, canvas, lane, visual, inset, rtl = true),
+        )
+        assertEquals(
+            ChapterScrollbarTouchZone.NONE,
+            chapterScrollbarTouchZone(lane + 1f, canvas, lane, visual, inset, rtl = true),
+        )
+
+        // Row icons stop at the same 16dp the rail leaves free, so nothing overlaps.
+        assertEquals(canvas - ChapterRowEndGutter.value, canvas - inset - visual, 0.001f)
+    }
 }

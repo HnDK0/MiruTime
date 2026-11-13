@@ -77,6 +77,7 @@ import dev.mirutime.data.library.migration.BookMigrationPlan
 import dev.mirutime.data.library.migration.BookMigrationResult
 import dev.mirutime.uikit.CardProgressBar
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.LocalMiruLocale
 import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruButton
 import dev.mirutime.uikit.MiruButtonStyle
@@ -583,7 +584,7 @@ fun MigrationMatchProgress(
     }
     val fraction = plan.chaptersMatched.toFloat() / plan.chaptersTotal
     // One decimal: 3225/3227 is 99.9%, not a misleading 100%.
-    val percent = String.format(java.util.Locale.US, "%.1f", fraction * 100f)
+    val percent = String.format(LocalMiruLocale.current, "%.1f", fraction * 100f)
     Column(modifier = modifier) {
         Row(
             modifier = Modifier.fillMaxWidth(),

@@ -12,6 +12,7 @@ import dev.mirutime.app.features.library.domain.CardStyle
 import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.app.features.library.domain.LibraryBook
 import dev.mirutime.uikit.MiruBookCard
+import dev.mirutime.uikit.LocalMiruLocale
 import dev.mirutime.uikit.MiruContentKind
 import dev.mirutime.uikit.MiruMembershipBadge
 import dev.mirutime.uikit.MiruRadius
@@ -38,6 +39,7 @@ fun LibraryCard(
     membership: MiruMembershipBadge? = null,
 ) {
     val catalog = compactInfo
+    val locale = LocalMiruLocale.current
     val kind = if (showTypeChip && !catalog) book.contentType.toMiruKind() else null
     // Card progress is the finished-chapter count, never the saved position.
     val read = if (catalog) null else book.readChapters
@@ -59,7 +61,7 @@ fun LibraryCard(
         title = book.displayTitle(),
         modifier = modifier,
         source = if (catalog) null else book.sourceLabel,
-        rating = ratingText(book.rating),
+        rating = ratingText(book.rating, locale),
         readChapters = read,
         totalChapters = total,
         newChapters = if (catalog) 0 else book.newChapters,

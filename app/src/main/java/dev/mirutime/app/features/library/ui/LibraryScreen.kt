@@ -31,7 +31,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CircularProgressIndicator
@@ -1404,7 +1404,7 @@ private fun ResumeCard(
             }
             Spacer(modifier = Modifier.width(MiruSpace.S))
             MiruIconButton(
-                icon = Icons.Filled.ArrowForward,
+                icon = Icons.AutoMirrored.Filled.ArrowForward,
                 contentDescription = stringResource(
                     R.string.lib_continue_desc_fmt,
                     book.continueLabel,

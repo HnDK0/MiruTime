@@ -43,9 +43,9 @@ internal fun memberBadge(sameSource: Boolean, sourceCount: Int): MiruMembershipB
     MiruMembershipBadge(sameSource = sameSource, sourceCount = sourceCount.coerceAtLeast(1))
 
 // A 0..5 score, or nothing; hidden when absent (never a fake 0).
-fun ratingText(value: Float): String? {
+fun ratingText(value: Float, locale: Locale): String? {
     if (value <= 0f || value > 5f) return null
-    return String.format(Locale.US, "%.1f", value).trimEnd('0').trimEnd('.')
+    return miruDecimal(value, 1, locale)
 }
 
 @Composable

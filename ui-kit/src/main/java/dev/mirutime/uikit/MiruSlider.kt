@@ -21,12 +21,14 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -53,6 +55,9 @@ fun MiruSlider(
     val extra = LocalMiruExtraColors.current
     val currentOnValueChange by rememberUpdatedState(onValueChange)
     val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
+    // Mirrored in RTL: the value grows towards the start edge, so both the
+    // gesture mapping and the filled part follow the reading direction.
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val density = LocalDensity.current
     val thumbRadius = with(density) {
         (if (compact) MiruSpace.Xs else 13.dp).toPx()
@@ -66,8 +71,7 @@ fun MiruSlider(
     var dragValue by remember { mutableStateOf<Float?>(null) }
 
     fun valueAt(x: Float, width: Float): Float {
-        val usableWidth = (width - thumbRadius * 2f).coerceAtLeast(1f)
-        val fraction = ((x - thumbRadius) / usableWidth).coerceIn(0f, 1f)
+        val fraction = sliderFractionAt(x, width, thumbRadius, rtl)
         return snapToStep(
             value = valueRange.start + fraction * (valueRange.endInclusive - valueRange.start),
             range = valueRange,
@@ -98,7 +102,7 @@ fun MiruSlider(
                     true
                 }
             }
-            .pointerInput(valueRange, steps, enabled) {
+            .pointerInput(valueRange, steps, enabled, rtl) {
                 if (!enabled) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -180,14 +184,17 @@ fun MiruSlider(
         if (activeWidth > 0f) {
             drawRoundRect(
                 color = activeColor,
-                topLeft = Offset(trackLeft, trackTop),
+                topLeft = Offset(if (rtl) trackLeft + trackWidth - activeWidth else trackLeft, trackTop),
                 size = Size(activeWidth, trackHeight),
                 cornerRadius = CornerRadius(trackHeight / 2f),
             )
         }
         val pressed = dragValue != null
         val radius = thumbRadius * if (pressed) 1.08f else 1f
-        val thumbCenter = Offset(trackLeft + activeWidth, centerY)
+        val thumbCenter = Offset(
+            if (rtl) trackLeft + trackWidth - activeWidth else trackLeft + activeWidth,
+            centerY,
+        )
         if (compact) {
             // A filled accent dot: at 24dp a white knob, a ring and a shadow
             // have no room to read as depth and just look dirty.
@@ -240,4 +247,11 @@ private fun snapToStep(
     if (stepSize <= 0f) return range.start
     val snapped = range.start + ((value - range.start) / stepSize).roundToInt() * stepSize
     return snapped.coerceIn(range.start, range.endInclusive)
+}
+
+/** Where a touch sits on the track, 0 at the start edge. Mirrored in RTL. */
+internal fun sliderFractionAt(x: Float, width: Float, thumbRadius: Float, rtl: Boolean): Float {
+    val position = if (rtl) width - x else x
+    val usableWidth = (width - thumbRadius * 2f).coerceAtLeast(1f)
+    return ((position - thumbRadius) / usableWidth).coerceIn(0f, 1f)
 }

@@ -2,6 +2,7 @@ package dev.mirutime.app.features.finder.data
 
 import android.net.Uri
 import dev.mirutime.core.log.MiruLog
+import dev.mirutime.uikit.miruDecimal
 import dev.mirutime.app.di.InstalledPlugin
 import dev.mirutime.app.di.InstallReport
 import dev.mirutime.app.di.PluginGraph
@@ -53,6 +54,7 @@ import dev.mirutime.app.features.opds.domain.OpdsFailure
 import dev.mirutime.app.features.opds.domain.OpdsPage
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.settings.data.SettingsStore
+import dev.mirutime.app.features.settings.ui.uiLocale
 import dev.mirutime.data.library.LibraryMembership
 import dev.mirutime.data.library.OpdsEntryEntity
 import dev.mirutime.data.library.LibraryRepository
@@ -946,6 +948,9 @@ class PluginFinderDataProvider(
     private suspend fun localBooksFromDb(kind: String): List<LocalBook> {
         val repo = library ?: return emptyList()
         val installId = localInstallId(kind)
+        // Display strings, but produced here: the interface language decides
+        // how the size reads, the same way a `%d` in a resource does.
+        val locale = uiLocale()
         return repo.libraryBooks()
             .filter { it.installId == installId }
             .mapNotNull { book ->
@@ -956,7 +961,7 @@ class PluginFinderDataProvider(
                     fileName = file.displayName,
                     title = book.title,
                     format = file.format,
-                    sizeLabel = formatFileSize(file.sizeBytes),
+                    sizeLabel = formatFileSize(file.sizeBytes, locale),
                     count = book.totalChapters,
                     bookId = book.bookId,
                 )
@@ -1129,14 +1134,16 @@ internal fun localCatalogPage(
     )
 }
 
-internal fun formatFileSize(bytes: Long): String {
-    if (bytes < 1024) return "$bytes B"
+internal fun formatFileSize(bytes: Long, locale: Locale): String {
+    if (bytes < 1024) return miruDecimal(bytes, 0, locale) + " B"
     val kb = bytes / 1024.0
     if (kb < 1024) {
-        return if (kb < 10) String.format(Locale.US, "%.1f KB", kb) else "${kb.roundToInt()} KB"
+        return if (kb < 10) String.format(locale, "%.1f", kb) + " KB"
+        else miruDecimal(kb.roundToInt(), 0, locale) + " KB"
     }
     val mb = kb / 1024.0
-    return if (mb < 10) String.format(Locale.US, "%.1f MB", mb) else "${mb.roundToInt()} MB"
+    return if (mb < 10) String.format(locale, "%.1f", mb) + " MB"
+    else miruDecimal(mb.roundToInt(), 0, locale) + " MB"
 }
 
 // Successful schemas are cached by source; a failed filters() call is not

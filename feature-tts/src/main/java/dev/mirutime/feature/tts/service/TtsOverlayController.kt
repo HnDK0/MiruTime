@@ -335,7 +335,8 @@ class TtsOverlayController(
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
+            // x is measured from the left in the drag math; START would mirror it.
+            gravity = Gravity.TOP or Gravity.LEFT
             x = offsetX
             y = offsetY
         }
