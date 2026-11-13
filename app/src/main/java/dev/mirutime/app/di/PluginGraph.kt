@@ -1000,7 +1000,11 @@ class PluginGraph(
         runtimeErrors.remove(id)
         fileSystem.delete("$INSTALL_DIR/$id.lua")
         keyValueStore.remove(ENABLED_NS, id)
+        // A reinstall must not inherit the removed plugin's base URL.
+        keyValueStore.remove(BASE_URL_NS, id)
         _installed.update { list -> list.filterNot { it.id == id } }
+        // Shared lua_libs stay: other installed plugins may resolve them.
+        MiruLog.event("plugins", "uninstall", "plugin" to id, "libraries" to "kept")
     }
 
     // id -> load error for the plugins that failed; folded into InstalledPlugin
