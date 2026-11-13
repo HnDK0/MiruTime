@@ -49,7 +49,7 @@ class ChipRailContractTest {
 
     @Test
     fun `plugin rows use the shared avatar`() {
-        val extensions = source("src/main/java/dev/mirutime/app/features/finder/ui/ExtensionsContent.kt")
+        val extensions = source("src/main/java/dev/mirutime/app/features/finder/ui/ManageExtensionsScreen.kt")
         assertFalse(extensions.contains("MonogramTile(plugin.name)"))
         assertTrue(extensions.contains("PluginAvatar(name = plugin.name, iconUrl = plugin.iconUrl)"))
     }

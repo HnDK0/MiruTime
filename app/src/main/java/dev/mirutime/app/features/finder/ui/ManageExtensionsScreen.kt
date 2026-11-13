@@ -224,18 +224,28 @@ fun ManageExtensionsScreen(
         }
     }
 
-    // Two phases: paint what is already local/on disk, then refresh the
-    // repository in the background while the old rows stay visible.
-    LaunchedEffect(provider) {
-        reload()
+    // Repository check: downloads the index, keeps the current rows visible
+    // while it runs, and reports per-source failures. Returns false when a
+    // source failed, so a "check for updates" cannot claim it is up to date.
+    suspend fun refreshRepository(): Boolean {
+        // A second tap must not start a parallel index download.
+        if (repoBusy) return false
         repoBusy = true
         try {
             val refreshed = provider.refreshExtensions()
             plugins = refreshed.extensions
             showFailure(InstallReport(emptyList(), refreshed.failed))
+            return refreshed.failed.isEmpty()
         } finally {
             repoBusy = false
         }
+    }
+
+    // Two phases: paint what is already local/on disk, then refresh the
+    // repository in the background while the old rows stay visible.
+    LaunchedEffect(provider) {
+        reload()
+        refreshRepository()
     }
 
     val listState = rememberLazyListState()
@@ -370,8 +380,8 @@ fun ManageExtensionsScreen(
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f),
                     )
-                    // Update all appears once several plugins are waiting.
-                    if (updates >= 2) {
+                    // Update all appears as soon as one plugin is waiting.
+                    if (updates >= 1) {
                         Button(
                             onClick = {
                                 val ids = installed.filter { it.updateAvailable }.map { it.id }.toSet()
@@ -558,6 +568,7 @@ fun ManageExtensionsScreen(
                                             reload()
                                         }
                                     },
+                                    onUpdate = { runFor(plugin.id) { provider.update(plugin.id) } },
                                     onMore = { actionsFor = plugin },
                                 )
                             }
@@ -616,10 +627,19 @@ fun ManageExtensionsScreen(
                 plugin = plugin,
                 onCheckUpdate = {
                     actionsFor = null
-                    if (plugin.updateAvailable) {
-                        runFor(plugin.id) { provider.update(plugin.id) }
-                    } else {
-                        toast(resources.getString(R.string.finder_up_to_date_fmt, plugin.name))
+                    scope.launch {
+                        // A failed refresh already reported itself; claiming
+                        // "up to date" from the stale rows would be a lie.
+                        if (!refreshRepository()) return@launch
+                        // Read the refreshed row, not the snapshot the sheet
+                        // opened with: the check may find a new version.
+                        val current = plugins.orEmpty().firstOrNull { it.id == plugin.id }
+                        val version = current?.availableVersion
+                        if (current?.updateAvailable == true && version != null) {
+                            toast(resources.getString(R.string.finder_update_available_fmt, version))
+                        } else {
+                            toast(resources.getString(R.string.finder_up_to_date_fmt, plugin.name))
+                        }
                     }
                 },
                 onSettings = {
@@ -772,6 +792,7 @@ private fun InstalledRow(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onToggle: (Boolean) -> Unit,
+    onUpdate: () -> Unit,
     onMore: () -> Unit,
 ) {
     val extra = LocalMiruExtraColors.current
@@ -843,6 +864,15 @@ private fun InstalledRow(
             )
             selectionMode -> Checkbox(checked = selected, onCheckedChange = { onClick() })
             else -> {
+                if (plugin.updateAvailable) {
+                    TextButton(onClick = onUpdate) {
+                        Text(
+                            text = stringResource(R.string.finder_update),
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                        )
+                    }
+                }
                 // A broken plugin has no working toggle: its row opens the
                 // health sheet, and the error badge already says why.
                 if (plugin.error == null) {
