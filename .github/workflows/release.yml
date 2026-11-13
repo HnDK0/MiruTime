@@ -20,6 +20,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Full history and tags are needed to diff the release against the
+          # previous stable tag.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up JDK
         uses: actions/setup-java@v6
@@ -140,6 +145,131 @@ jobs:
             fi
           done
 
+      - name: Build release notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git fetch origin --tags --force --quiet
+
+          # Baseline = newest stable tag reachable from this commit, excluding
+          # the tag being released right now.
+          PREV_TAG=$(git tag --sort=-v:refname --merged HEAD \
+            | grep -E '^v[0-9]' | grep -vx "$TAG" | head -n1 || true)
+
+          if [ -n "$PREV_TAG" ]; then
+            git log --no-merges --pretty=format:'- %s (%h)' "$PREV_TAG..HEAD"
+          else
+            git log --no-merges -20 --pretty=format:'- %s (%h)' HEAD
+          fi > "$RUNNER_TEMP/commits.raw"
+
+          # Release chores are bookkeeping, not changes worth announcing.
+          grep -vE -- '^- (chore\(release\):|Merge )' "$RUNNER_TEMP/commits.raw" \
+            > "$RUNNER_TEMP/commits.txt" || true
+
+          # Prints a section only when the group has commits.
+          section() {
+            local title=$1; shift
+            local lines
+            lines=$("$@" || true)
+            if [ -n "$lines" ]; then
+              printf '### %s\n\n%s\n\n' "$title" "$lines"
+            fi
+          }
+
+          # One language's changelog: four localized section titles.
+          groups() {
+            local commits=$RUNNER_TEMP/commits.txt
+            if [ ! -s "$commits" ]; then
+              return 0
+            fi
+            section "$1" grep -E -- '^- feat(\(|:)' "$commits"
+            section "$2" grep -E -- '^- fix(\(|:)' "$commits"
+            section "$3" grep -E -- '^- perf(\(|:)' "$commits"
+            section "$4" awk '!/^- (feat|fix|perf)(\(|:)/' "$commits"
+          }
+
+          {
+            echo "<div align=\"center\">"
+            echo "<img src=\"https://github.com/${GITHUB_REPOSITORY}/raw/main/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png\" width=\"88\" height=\"88\" alt=\"MiruTime\"/>"
+            echo
+            echo "# MiruTime $TAG"
+            echo
+            echo "Reader for novels, manga and video"
+            echo "</div>"
+            echo
+            # Each language block is self-contained: no mixed-language lines.
+            echo "<details>"
+            echo "<summary><b>🇷🇺 Русская версия</b></summary>"
+            echo
+            echo "> 🤖 Список изменений собран автоматически из сообщений коммитов, поэтому он может быть неполным или слишком техническим."
+            echo
+            echo "> ⚠️ Перед обновлением сделайте бэкап библиотеки: миграции Room необратимы."
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo "Изменения с \`$PREV_TAG\`:"
+            else
+              echo "Первая сборка: последние изменения."
+            fi
+            echo
+            if [ -s "$RUNNER_TEMP/commits.txt" ]; then
+              groups "✨ Новое" "🐛 Исправления" "⚡ Производительность" "🧹 Прочее"
+            else
+              echo "_Нет изменений в коде._"
+              echo
+            fi
+            echo "## Артефакты"
+            echo
+            echo "- \`MiruTime-${TAG}-arm64-v8a.apk\` — для современных 64-битных устройств (большинство телефонов); это обычная загрузка."
+            echo "- \`MiruTime-${TAG}-universal.apk\` — для x86_64 (эмуляторы, Chromebooks, WSA) и 32-битных устройств; содержит все четыре ABI, поэтому больше по размеру."
+            echo "- \`mirutime-core-maven-${CORE_VERSION}.zip\` — Maven-репозиторий с core JVM JAR и Android AAR для plugin tester."
+            echo "- \`mirutime-core-jvm-${CORE_VERSION}.jar\`, \`mirutime-core-android-${CORE_VERSION}.aar\` — core без Maven-обёртки."
+            echo "- R8 mapping — для деобфускации стектрейсов."
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo "[Полный список изменений](https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${TAG})."
+              echo
+            fi
+            echo "</details>"
+            echo
+            echo "<details open>"
+            echo "<summary><b>🇬🇧 English version</b></summary>"
+            echo
+            echo "> 🤖 The changelog is generated automatically from commit messages, so it may be incomplete or too technical."
+            echo
+            echo "> ⚠️ Back up the library before upgrading; Room migrations are one-way."
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo "Changes since \`$PREV_TAG\`:"
+            else
+              echo "Initial release: recent changes."
+            fi
+            echo
+            if [ -s "$RUNNER_TEMP/commits.txt" ]; then
+              groups "✨ New" "🐛 Fixes" "⚡ Performance" "🧹 Other"
+            else
+              echo "_No code changes._"
+              echo
+            fi
+            echo "## Artifacts"
+            echo
+            echo "- \`MiruTime-${TAG}-arm64-v8a.apk\` — for modern 64-bit devices (most phones); this is the normal download."
+            echo "- \`MiruTime-${TAG}-universal.apk\` — for x86_64 targets (emulators, Chromebooks, WSA) and 32-bit-only devices; it contains all four ABIs, so it is larger."
+            echo "- \`mirutime-core-maven-${CORE_VERSION}.zip\` — Maven repository with the core JVM JAR and Android AAR for the plugin tester."
+            echo "- \`mirutime-core-jvm-${CORE_VERSION}.jar\`, \`mirutime-core-android-${CORE_VERSION}.aar\` — raw core artifacts."
+            echo "- R8 mapping — for deobfuscating crash stack traces."
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo "[Full changelog](https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${TAG})."
+              echo
+            fi
+            echo "</details>"
+            echo
+            echo "<!-- Draft: add release highlights, screenshots and known issues before publishing. -->"
+          } > "$RUNNER_TEMP/release-body.md"
+
+          cat "$RUNNER_TEMP/release-body.md"
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3
         with:
@@ -148,12 +278,4 @@ jobs:
           draft: true
           prerelease: false
           files: release-artifacts/*
-          body: |
-            Release build from tag `${{ github.ref_name }}`.
-
-            - `MiruTime-${{ github.ref_name }}-arm64-v8a.apk` — for modern 64-bit devices (most phones); this is the normal download.
-            - `MiruTime-${{ github.ref_name }}-universal.apk` — for x86_64 targets (Android emulators, Chromebooks, Windows Subsystem for Android) and 32-bit-only devices; it contains all four ABIs, so it is larger.
-            - `mirutime-core-maven-${{ env.CORE_VERSION }}.zip` — Maven repository with the core JVM JAR and Android AAR for the plugin tester.
-            - `mirutime-core-jvm-${{ env.CORE_VERSION }}.jar`, `mirutime-core-android-${{ env.CORE_VERSION }}.aar` — raw core artifacts.
-            - R8 mapping, both APKs and the core artifacts are attached.
-            - Please back up the library before upgrading; Room migrations are one-way.
+          body_path: ${{ runner.temp }}/release-body.md
