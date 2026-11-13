@@ -129,7 +129,7 @@
 
     <!-- Finder -->
     <string name="finder_import_title">Import local file</string>
-    <string name="finder_import_desc">EPUB or FB2 from your device.</string>
+    <string name="finder_import_desc">EPUB, FB2 or PDF from your device.</string>
     <string name="finder_import_button">Import local books</string>
     <string name="finder_imported_fmt">Imported %1$s — find it on Reading</string>
 
@@ -301,7 +301,7 @@
     <string name="lib_search_hint">Search title, author, source…</string>
     <string name="lib_cd_filters">Library filters</string>
     <string name="lib_cd_scroll_top">Scroll to top</string>
-    <string name="lib_import">Import EPUB / FB2</string>
+    <string name="lib_import">Import EPUB / FB2 / PDF</string>
     <string name="lib_empty_title">Nothing here</string>
     <string name="lib_empty_hint">Try another shelf, query or filter.</string>
     <string name="lib_resume_eyebrow">PICK UP WHERE YOU LEFT OFF</string>
@@ -442,9 +442,9 @@
 
     <!-- Import sheet -->
     <string name="import_title">Import local books</string>
-    <string name="import_desc">Add EPUB or FB2 books to the local library. Book files remain on this device; single or batch.</string>
+    <string name="import_desc">Add EPUB, FB2 or PDF books to the local library. Book files remain on this device; single or batch.</string>
     <string name="import_from_storage">From storage</string>
-    <string name="import_choose">Choose EPUB or FB2 files</string>
+    <string name="import_choose">Choose EPUB, FB2 or PDF files</string>
     <string name="import_multi">Single or multiple files · stays on this device</string>
     <string name="import_samples">Sample files</string>
 
@@ -1759,7 +1759,7 @@
     <string name="opds_err_malformed">The catalog sent data that could not be read.</string>
     <string name="opds_err_too_large_fmt">The file is larger than %1$d MB — download it manually.</string>
     <string name="opds_open_failed">Couldn\'t add the book</string>
-    <string name="opds_no_format">No EPUB, FB2 or CBZ file — nothing to open.</string>
+    <string name="opds_no_format">No EPUB, FB2, PDF or CBZ file — nothing to open.</string>
     <string name="opds_opening_book">Adding to the library…</string>
     <string name="opds_add_to_library">Add to library</string>
     <string name="opds_open">Open</string>

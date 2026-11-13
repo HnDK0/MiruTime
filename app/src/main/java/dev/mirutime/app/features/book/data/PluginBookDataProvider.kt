@@ -26,6 +26,7 @@ import dev.mirutime.app.features.library.data.DirectSafParserVersion
 import dev.mirutime.app.features.library.data.LocalBookProvider
 import dev.mirutime.app.features.library.data.LocalBooksInstallId
 import dev.mirutime.app.features.library.data.LocalMangaInstallId
+import dev.mirutime.app.features.library.data.isLocalManga
 import dev.mirutime.app.features.library.data.resolveStoredCover
 import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.app.features.reader.document.chapterKey
@@ -736,7 +737,7 @@ class PluginBookDataProvider(
             installId = row?.installId ?: "local",
             author = author,
             originLanguage = row?.originLanguage,
-            contentType = if (row?.installId == LocalMangaInstallId) {
+            contentType = if (isLocalManga(row?.installId ?: LocalBooksInstallId, origin?.format)) {
                 ContentType.Manga
             } else {
                 ContentType.Novel

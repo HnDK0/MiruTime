@@ -15,6 +15,7 @@ import dev.mirutime.app.features.opds.domain.OpdsPage
 import dev.mirutime.app.features.opds.domain.OpdsUnavailableReason
 import dev.mirutime.core.api.Outcome
 import dev.mirutime.core.opds.OpdsFormat
+import dev.mirutime.core.opds.OpdsMediaTypes
 import dev.mirutime.data.library.LibraryDao
 import dev.mirutime.data.library.LibraryRepository
 import dev.mirutime.data.library.OpdsCatalogEntity
@@ -145,7 +146,7 @@ class OpdsControllerTest {
     }
 
     @Test
-    fun `OPDS 2 publications become book cards, pdf-only stays unavailable`() = runTest {
+    fun `OPDS 2 publications become book cards, a pdf-only entry stays downloadable`() = runTest {
         val transport = FakeTransport()
         transport.respond(200, OPDS2_PUBLICATIONS, "https://final.test/opds/catalog")
         val controller = controller(transport)
@@ -159,12 +160,15 @@ class OpdsControllerTest {
         val pdfOnly = page.books[0]
         assertEquals("Kirkland, Thomas", pdfOnly.author)
         assertEquals("https://final.test/opds/publications/1", pdfOnly.entryUrl)
-        assertNull(pdfOnly.format)
-        assertNull(pdfOnly.downloadUrl)
-        assertTrue(!pdfOnly.isDownloadable)
+        assertEquals(OpdsFormat.PDF, pdfOnly.format)
+        assertEquals(
+            "https://final.test/opds/book/1?glob_pattern=*pdf",
+            pdfOnly.downloadUrl,
+        )
+        assertTrue(pdfOnly.isDownloadable)
         // The Readium manifest is a landing document, never an option.
         assertTrue(pdfOnly.options.none { it.url.contains("action=webpub") })
-        assertTrue(pdfOnly.options.none { it.isDownloadable })
+        assertTrue(pdfOnly.options.any { it.format == OpdsFormat.PDF && it.isDownloadable })
 
         val epub = page.books[1]
         assertEquals(OpdsFormat.EPUB, epub.format)
@@ -186,17 +190,35 @@ class OpdsControllerTest {
     }
 
     @Test
-    fun `unsupported formats yield a book with no download url`() = runTest {
+    fun `pdf media types and extensions map to the pdf format`() {
+        fun formatOf(type: String?, href: String) = OpdsMediaTypes.formatOf(
+            dev.mirutime.core.opds.OpdsLink(
+                rel = "http://opds-spec.org/acquisition",
+                href = href,
+                type = type,
+                title = null,
+            ),
+        )
+
+        assertEquals(OpdsFormat.PDF, formatOf("application/pdf", "books/1.pdf"))
+        assertEquals(OpdsFormat.PDF, formatOf("application/x-pdf", "books/1"))
+        assertEquals(OpdsFormat.PDF, formatOf(null, "https://c.test/books/1.PDF?x=1"))
+        assertEquals(".pdf", OpdsFormat.PDF.fileNameSuffix)
+    }
+
+    @Test
+    fun `a pdf-only entry is a downloadable option`() = runTest {
         val transport = FakeTransport()
-        transport.respond(200, UNSUPPORTED_FEED, "https://final.test/opds/")
+        transport.respond(200, PDF_ONLY_FEED, "https://final.test/opds/")
         val controller = controller(transport)
         val catalog = (controller.add("c", "https://final.test/opds", "", "") as Outcome.Ok).value
         val page = (controller.page(catalog.id, null) as Outcome.Ok).value
         val book = page.books.single()
         assertEquals("Pdf Book", book.title)
-        assertNull(book.format)
-        assertNull(book.downloadUrl)
-        assertTrue(!book.isDownloadable)
+        assertEquals(OpdsFormat.PDF, book.format)
+        assertEquals("https://final.test/opds/books/1.pdf", book.downloadUrl)
+        assertTrue(book.isDownloadable)
+        assertEquals("PDF", book.options.single().label)
     }
 
     @Test
@@ -259,6 +281,7 @@ class OpdsControllerTest {
             listOf(
                 OpdsFormat.EPUB to null,
                 OpdsFormat.FB2 to null,
+                OpdsFormat.PDF to null,
                 OpdsFormat.EPUB to OpdsUnavailableReason.Sample,
                 OpdsFormat.EPUB to OpdsUnavailableReason.Buy,
                 OpdsFormat.EPUB to OpdsUnavailableReason.Borrow,
@@ -676,8 +699,9 @@ class OpdsControllerTest {
         assertEquals("http://opds-spec.org/acquisition/open-access", epub.rel)
         assertEquals("https://archive.org/download/item1/item1.epub", epub.url)
         assertTrue(epub.isDownloadable)
-        // The catalogue's own pdf stays listed, with its reason.
-        assertEquals(OpdsUnavailableReason.UnsupportedType, options.last().unavailableReason)
+        // The catalogue's own pdf stays listed as a real, downloadable option.
+        assertEquals(OpdsFormat.PDF, options.last().format)
+        assertNull(options.last().unavailableReason)
 
         // One feed + one probe; the detail page does not probe again.
         assertEquals(2, transport.gets)
@@ -700,7 +724,7 @@ class OpdsControllerTest {
     }
 
     @Test
-    fun `an archive probe that finds no epub leaves the list as served`() = runTest {
+    fun `an archive probe that finds no epub leaves the served pdf downloadable`() = runTest {
         val transport = FakeTransport()
         transport.respond(200, ARCHIVE_ENTRY_FEED, ARCHIVE_ENTRY)
         // No match: the endpoint answers with an empty location.
@@ -711,7 +735,7 @@ class OpdsControllerTest {
         val options = (controller.resolveEntry(catalog.url, ARCHIVE_ENTRY) as Outcome.Ok).value
 
         assertTrue(options.none { it.format == OpdsFormat.EPUB })
-        assertTrue(options.all { it.unavailableReason != null })
+        assertTrue(options.any { it.format == OpdsFormat.PDF && it.isDownloadable })
     }
 
     @Test
@@ -962,7 +986,7 @@ private val FEED_WITH_SEARCH = """
     </feed>
 """.trimIndent()
 
-private val UNSUPPORTED_FEED = """
+private val PDF_ONLY_FEED = """
     <?xml version="1.0" encoding="UTF-8"?>
     <feed xmlns="http://www.w3.org/2005/Atom">
       <title>Pdf only</title>

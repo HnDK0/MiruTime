@@ -8,6 +8,9 @@ import dev.mirutime.app.features.reader.data.AppReaderTranslationPort
 import dev.mirutime.app.features.reader.data.ChapterRetranslator
 import dev.mirutime.app.features.reader.data.DefaultReaderRepository
 import dev.mirutime.app.features.reader.data.MangaPageFileCache
+import dev.mirutime.app.features.reader.data.PdfPageFiles
+import dev.mirutime.app.features.reader.data.PdfPageUrlScheme
+import dev.mirutime.app.pdf.PdfPageRenderer
 import dev.mirutime.app.features.reader.data.PrefsReaderConfigStore
 import dev.mirutime.app.features.reader.data.PrefsReadingPositionRepository
 import dev.mirutime.app.features.reader.data.ReadingPositionRepository
@@ -66,6 +69,8 @@ class ReaderGraph(
     cfGate: CfGate,
     // Process-wide system-DNS engine: translation may target a LAN provider.
     plainEngine: HttpClientEngine,
+    // Shared with the importer: one bound isolated renderer for the app.
+    private val pdfPageRenderer: PdfPageRenderer? = null,
 ) : ReaderUiGraph {
     private val appContext = context.applicationContext
     // Data work (parsing, disk, translation) and UI/TTS work have different
@@ -213,7 +218,26 @@ class ReaderGraph(
         ),
     )
 
-    override suspend fun mangaPageFile(url: String): java.io.File? = mangaPageFiles.file(url)
+    // Imported PDFs render lazily in an isolated process; the JPEGs land in
+    // cacheDir/pdf_pages and are evicted by the page-file cache itself.
+    private val pdfPageFiles: PdfPageFiles? =
+        libraryRepository?.let { repo ->
+            pdfPageRenderer?.let { renderer ->
+                PdfPageFiles(
+                    localBookFile = repo::localBookFile,
+                    baseDir = appContext.filesDir,
+                    root = java.io.File(appContext.cacheDir, "pdf_pages"),
+                    render = renderer::renderPage,
+                )
+            }
+        }
+
+    override suspend fun mangaPageFile(url: String): java.io.File? =
+        if (url.startsWith(PdfPageUrlScheme)) {
+            pdfPageFiles?.file(url)
+        } else {
+            mangaPageFiles.file(url)
+        }
 
     /** Keeps TTS alive in the background; idempotent while already running. */
     override fun startTtsPlayback(

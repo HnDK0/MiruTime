@@ -54,6 +54,7 @@ data class OpdsBookOption(
             OpdsFormat.EPUB -> "EPUB"
             OpdsFormat.FB2, OpdsFormat.FB2_ZIP -> "FB2"
             OpdsFormat.CBZ -> "CBZ"
+            OpdsFormat.PDF -> "PDF"
             null -> rel.substringAfterLast('/').uppercase().ifBlank { "FILE" }
         }
 }

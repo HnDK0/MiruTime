@@ -489,6 +489,8 @@ class LocalSafBookSource(
         hash: String,
     ): DirectPlan {
         val extension = document.name.substringAfterLast('.', "").lowercase()
+        // PDF is not planned here: its pages render lazily through the isolated
+        // renderer in an imported copy, not from a scanned document.
         val format = when (extension) {
             "epub" -> "EPUB"
             "fb2" -> "FB2"

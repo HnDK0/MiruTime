@@ -5,6 +5,36 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
+/** Page reference scheme of an imported PDF: `pdfpage://<bookId>/<index>`. */
+const val PdfPageReferenceScheme = "pdfpage://"
+
+/**
+ * A PDF page row is a reference, not a file: the renderer resolves it against
+ * `local_book_files.copyPath`. Restore must keep it and never test it as a path.
+ */
+fun isPdfPageReference(path: String): Boolean = path.startsWith(PdfPageReferenceScheme)
+
+/**
+ * The book id is part of a PDF page reference and a restore remaps it. Both
+ * spellings occur because the importer writes the row with `org.json`, which
+ * escapes `/`, while a backup may carry an already-normalised array.
+ * Any other path list is returned untouched.
+ */
+fun remapPdfPagePaths(
+    pagePathsJson: String,
+    oldBookId: Long,
+    newBookId: Long,
+): String {
+    // Match the scheme without its slashes: `org.json` stores `pdfpage:\/\/`.
+    if (oldBookId == newBookId || !pagePathsJson.contains("pdfpage:")) return pagePathsJson
+    return pagePathsJson
+        .replace("\"$PdfPageReferenceScheme$oldBookId/", "\"$PdfPageReferenceScheme$newBookId/")
+        .replace(
+            "\"pdfpage:\\/\\/$oldBookId\\/",
+            "\"pdfpage:\\/\\/$newBookId\\/",
+        )
+}
+
 /**
  * Restores a backup database into the live database without replacing its
  * file. All writes happen inside one write transaction, so a failure leaves
@@ -177,9 +207,12 @@ private suspend fun importLibraryBackupRows(
     val localBookTargetIds = localBookIds.mapNotNull { bookIds[it] }.toHashSet()
     val chapterIds = LinkedHashMap<Long, Long>()
     val chapterBookIds = HashMap<Long, Long>()
+    // PDF page rows embed their book id; the archive id must be rewritten.
+    val chapterOldBookIds = HashMap<Long, Long>()
     forEachPage(pageSize, ChapterEntity::chapterId, source::backupChapters) { chapter ->
         val bookId = bookIds[chapter.bookId] ?: return@forEachPage
         chapterBookIds[chapter.chapterId] = bookId
+        chapterOldBookIds[chapter.chapterId] = chapter.bookId
         val existing = target.chapterByUrl(bookId, chapter.url)
         chapterIds[chapter.chapterId] = if (existing == null) {
             target.upsertChapter(chapter.copy(chapterId = 0, bookId = bookId))
@@ -316,7 +349,16 @@ private suspend fun importLibraryBackupRows(
         val chapterId = chapterIds[page.chapterId] ?: return@forEachPage
         val bookId = chapterBookIds[page.chapterId] ?: return@forEachPage
         if (bookId !in localBookTargetIds) return@forEachPage
-        target.upsertChapterPage(page.copy(chapterId = chapterId))
+        target.upsertChapterPage(
+            page.copy(
+                chapterId = chapterId,
+                pagePathsJson = remapPdfPagePaths(
+                    pagePathsJson = page.pagePathsJson,
+                    oldBookId = chapterOldBookIds[page.chapterId] ?: bookId,
+                    newBookId = bookId,
+                ),
+            ),
+        )
     }
 
     // A restored plugin chapter has no local body/page, so it must not claim to

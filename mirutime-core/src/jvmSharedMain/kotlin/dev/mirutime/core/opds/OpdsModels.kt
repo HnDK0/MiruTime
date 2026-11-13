@@ -8,6 +8,7 @@ enum class OpdsFormat {
     FB2_ZIP,
     FB2,
     CBZ,
+    PDF,
     ;
 
     /** Suffix for the temp file name; matches LocalImportFormat's extensions. */
@@ -16,6 +17,7 @@ enum class OpdsFormat {
             EPUB -> ".epub"
             FB2_ZIP, FB2 -> ".fb2"
             CBZ -> ".cbz"
+            PDF -> ".pdf"
         }
 
     internal val priority: Int
@@ -24,6 +26,7 @@ enum class OpdsFormat {
             FB2_ZIP -> 1
             FB2 -> 2
             CBZ -> 3
+            PDF -> 4
         }
 }
 

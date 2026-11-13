@@ -170,6 +170,8 @@ class LocalSourceFolders(
 
     // Kept for bulk import and folder counts: every supported document in the
     // tree, flattened (folders are a catalogue concept only).
+    // PDF is deliberately absent: an imported PDF stores `pdfpage://` chapter
+    // rows, which this scan (page files on disk) cannot produce yet.
     fun files(kind: String, uri: Uri): List<LocalFolderFile> {
         val warnings = mutableListOf<String>()
         val root = runCatching { walkTree(uri, displayName(uri), warnings) }.getOrNull()

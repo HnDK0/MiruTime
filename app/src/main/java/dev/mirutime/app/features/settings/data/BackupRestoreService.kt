@@ -10,6 +10,7 @@ import dev.mirutime.data.library.LibrarySchemaVersion
 import dev.mirutime.data.library.MinimumRestorableBackupSchemaVersion
 import dev.mirutime.data.library.RestoreJournalStatus
 import dev.mirutime.data.library.importLibraryBackup
+import dev.mirutime.data.library.isPdfPageReference
 import dev.mirutime.data.library.inspectBackupDatabase
 import dev.mirutime.data.library.libraryDatabaseAt
 import dev.mirutime.data.library.migrateBackupDatabase
@@ -54,7 +55,9 @@ internal suspend fun LibraryDao.pruneMissingRestoredContent(
 ) {
     restorePageRows().forEach { row ->
         val paths = pagePaths(row.pagePathsJson)
-        if (paths.isEmpty() || paths.any { !exists(it) }) {
+        // A PDF page row is a reference (`pdfpage://`) resolved through the
+        // book's own copy, not a file: testing it as a path would drop it.
+        if (paths.isEmpty() || paths.any { !isPdfPageReference(it) && !exists(it) }) {
             deleteChapterPages(listOf(row.chapterId))
         }
     }

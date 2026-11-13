@@ -20,6 +20,9 @@ import dev.mirutime.app.features.finder.data.firstComicInfoUri
 import dev.mirutime.app.features.local.data.MAX_LOCAL_SCAN_DEPTH
 import dev.mirutime.app.features.local.data.PageImageExtensions
 import dev.mirutime.app.features.local.data.naturalSortKey
+import dev.mirutime.app.features.reader.data.MaxPdfPages
+import dev.mirutime.app.features.reader.data.pdfPageRefs
+import dev.mirutime.app.pdf.PdfPageRenderer
 import dev.mirutime.data.library.BookEntity
 import dev.mirutime.data.library.BookTagEntity
 import dev.mirutime.data.library.ChapterBodyEntity
@@ -51,12 +54,15 @@ internal enum class LocalImportFormat(
     EPUB(LocalBooksInstallId, "EPUB", "epub"),
     FB2(LocalBooksInstallId, "FB2", "fb2"),
     CBZ(LocalMangaInstallId, "CBZ", "cbz"),
+    // A PDF stays on the Books shelf (installId) but is read page by page, so
+    // the reader must treat it as manga.
+    PDF(LocalBooksInstallId, "PDF", "pdf"),
     ;
 
     val contentType: ContentType
-        get() = if (this == CBZ) ContentType.MANGA else ContentType.NOVEL
+        get() = if (isManga) ContentType.MANGA else ContentType.NOVEL
 
-    val isManga: Boolean get() = this == CBZ
+    val isManga: Boolean get() = this == CBZ || this == PDF
 
     companion object {
         // OPDS/Calibre catalogs hand out fb2 both zipped and as XML, under
@@ -80,6 +86,7 @@ internal enum class LocalImportFormat(
                 "application/epub+zip" -> EPUB
                 in FB2_MIME -> FB2
                 "application/vnd.comicbook+zip", "application/x-cbz" -> CBZ
+                "application/pdf", "application/x-pdf" -> PDF
                 else -> null
             }
         }
@@ -165,6 +172,8 @@ private const val MAX_COMIC_INFO_BYTES = 512L * 1024
 private const val MAX_IMPORT_BYTES = 128L * 1024 * 1024
 private const val MAX_PAGE_BYTES = 32L * 1024 * 1024
 private const val MAX_FOLDER_BYTES = 512L * 1024 * 1024
+
+private const val PDF_COVER_WIDTH = 1600
 
 
 internal fun sha256Hex(bytes: ByteArray): String =
@@ -396,6 +405,9 @@ class LocalBookImporter(
     private val now: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val maxBytes: Long = MAX_IMPORT_BYTES,
+    // One renderer for the whole app: the reader uses the same bound service,
+    // so an import never starts a second isolated process.
+    private val pdfRenderer: PdfPageRenderer,
 ) : LocalImportPort {
     private val resolver = context.applicationContext.contentResolver
 
@@ -607,6 +619,95 @@ class LocalBookImporter(
             // The first natural page is the CBZ cover.
             storeCover(bookId, staged.coverBytes)
             PersistedBook(bookId, title)
+        }
+
+        // Kept out of this `when` body: D8 fails on the grown suspend method.
+        LocalImportFormat.PDF -> persistPdfBook(
+            format = format,
+            file = file,
+            bookUrl = bookUrl,
+            fallbackTitle = fallbackTitle,
+            uri = uri,
+            displayName = displayName,
+            mime = mime,
+            size = size,
+            sha256 = sha256,
+            target = target,
+            timestamp = timestamp,
+            addToLibrary = addToLibrary,
+            origin = origin,
+        )
+    }
+
+    /**
+     * One PDF is one chapter whose pages are `pdfpage://` references: nothing
+     * is rendered at import time except the cover, so the import stays fast and
+     * the renderer is only needed when a page is actually opened.
+     */
+    private suspend fun persistPdfBook(
+        format: LocalImportFormat,
+        file: File,
+        bookUrl: String,
+        fallbackTitle: String,
+        uri: Uri,
+        displayName: String,
+        mime: String?,
+        size: Long,
+        sha256: String,
+        target: String,
+        timestamp: Long,
+        addToLibrary: Boolean,
+        origin: ImportOrigin?,
+    ): PersistedBook = try {
+        // Count before any row exists: an unreadable document leaves no trace.
+        val pageCount = pdfRenderer.pageCount(file)
+            ?: throw IllegalStateException("Unreadable PDF")
+        if (pageCount > MaxPdfPages) throw IllegalStateException("PDF has too many pages")
+        val title = fallbackTitle
+        val bookId = saveBook(
+            format = format,
+            bookUrl = bookUrl,
+            title = title,
+            author = "Unknown",
+            description = "",
+            genres = emptyList(),
+            timestamp = timestamp,
+            inLibrary = addToLibrary,
+            origin = origin,
+        )
+        saveFileRow(bookId, uri, displayName, format, mime, size, sha256, target, timestamp, origin)
+        val seed = ChapterSeed(
+            index = 1,
+            url = LocalBookProvider.chapterUrl(bookUrl, 1),
+            title = title,
+        )
+        val chapterId = library.replaceChapters(bookId, listOf(seed), timestamp)
+            .firstOrNull { it.idx == seed.index }?.chapterId
+            ?: throw IllegalStateException("Missing PDF chapter")
+        library.saveChapterPage(
+            ChapterPageEntity(
+                chapterId = chapterId,
+                format = "pdf",
+                pagePathsJson = JSONArray(pdfPageRefs(bookId, pageCount)).toString(),
+                totalBytes = 0,
+                parserVersion = FolderParserVersion,
+            ),
+        )
+        library.updateTotalChapters(bookId, 1)
+        storeCover(bookId, pdfCoverBytes(file))
+        PersistedBook(bookId, title)
+    } finally {
+        // The renderer is shared with the reader: release the isolated process
+        // when the import is done instead of waiting for the idle timeout.
+        pdfRenderer.close()
+    }
+
+    private suspend fun pdfCoverBytes(file: File): ByteArray? {
+        val temp = File(context.applicationContext.cacheDir, "pdf-cover-${newId()}.jpg")
+        return try {
+            if (pdfRenderer.renderPage(file, 0, PDF_COVER_WIDTH, temp)) temp.readBytes() else null
+        } finally {
+            temp.delete()
         }
     }
 

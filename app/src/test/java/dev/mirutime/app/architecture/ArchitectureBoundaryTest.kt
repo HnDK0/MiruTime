@@ -87,6 +87,30 @@ class ArchitectureBoundaryTest {
         )
     }
 
+    @Test
+    fun `the platform pdf renderer only lives in the isolated service package`() {
+        val appSource = File(root, "app/src/main/java/dev/mirutime/app")
+        if (!appSource.isDirectory) fail("Missing source: ${appSource.path}")
+        val violations = appSource.walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .filterNot { it.path.contains("/dev/mirutime/app/pdf/") }
+            .filter { file ->
+                file.readLines().any { line ->
+                    val value = line.trim()
+                    value.startsWith("import android.graphics.pdf") ||
+                        "android.graphics.pdf.PdfRenderer" in value
+                }
+            }
+            .map { it.relativeTo(root).path }
+            .toList()
+        if (violations.isNotEmpty()) {
+            fail(
+                "android.graphics.pdf must stay inside dev.mirutime.app.pdf " +
+                    "(the isolated renderer):\n${violations.joinToString("\n")}",
+            )
+        }
+    }
+
     private fun assertNoImports(
         module: String,
         forbidden: List<String>,

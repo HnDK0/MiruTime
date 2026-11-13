@@ -45,6 +45,7 @@ fun formatForFileName(fileName: String): String = when (
 ) {
     "fb2" -> "FB2"
     "cbz", "cbr", "zip" -> "CBZ"
+    "pdf" -> "PDF"
     else -> "EPUB"
 }
 
@@ -140,6 +141,8 @@ fun ImportSheet(
                                     "application/x-fictionbook+xml",
                                     "application/x-cbz",
                                     "application/x-cbr",
+                                    "application/pdf",
+                                    "application/x-pdf",
                                     "application/zip",
                                 ),
                             )

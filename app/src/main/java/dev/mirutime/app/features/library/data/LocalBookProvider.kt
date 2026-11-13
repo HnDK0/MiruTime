@@ -29,6 +29,14 @@ internal const val FolderParserVersion = 2
 // the document stays in the user's folder.
 internal const val DirectSafParserVersion = 3
 
+// A PDF import stays on the books shelf (its install id is `local-books`) but
+// is read page by page, so the reader must see it as manga.
+internal fun isLocalManga(installId: String, format: String?): Boolean =
+    installId == LocalMangaInstallId || format == "PDF"
+
+internal fun localBookContentType(installId: String, format: String?): ContentType =
+    if (isLocalManga(installId, format)) ContentType.MANGA else ContentType.NOVEL
+
 /**
  * Resolves an opaque `local://<uuid>` book through `local_book_files.copyPath`
  * and serves it with the core [LocalSource] parser. The imported copy is
@@ -38,6 +46,8 @@ class LocalBookProvider(
     private val library: LibraryRepository,
     private val fileSystem: FileSystem,
     private val baseDir: File,
+    // Rendered PDF pages live in the evictable cache, not under baseDir.
+    private val cacheDir: File? = null,
 ) {
     suspend fun book(bookUrl: String): BookMeta? {
         val row = library.book(bookUrl) ?: return null
@@ -163,8 +173,10 @@ class LocalBookProvider(
      * the user's original SAF document. Folder imports own their copy tree,
      * single-file imports own the file plus its content-addressed directory.
      */
-    suspend fun removeFiles(files: List<LibraryBookFiles>) =
+    suspend fun removeFiles(files: List<LibraryBookFiles>) {
         removeLibraryFiles(fileSystem, files)
+        withContext(Dispatchers.IO) { files.forEach { deletePdfPageCache(it.bookId) } }
+    }
 
     /**
      * Removes an imported book from the app: DB row cascade + copied file +
@@ -207,7 +219,12 @@ class LocalBookProvider(
                 "paths" to leftovers.size,
             )
         }
+        deletePdfPageCache(row.bookId)
         true
+    }
+
+    private fun deletePdfPageCache(bookId: Long) {
+        cacheDir?.let { File(File(it, "pdf_pages"), bookId.toString()).deleteRecursively() }
     }
 
     private fun deleteTree(path: String): Boolean {
@@ -222,8 +239,7 @@ class LocalBookProvider(
         val row = library.book(bookUrl) ?: return null
         val file = library.localBookFile(row.bookId) ?: return null
         val path = file.copyPath?.takeIf { it.isNotBlank() } ?: return null
-        val contentType =
-            if (row.installId == LocalMangaInstallId) ContentType.MANGA else ContentType.NOVEL
+        val contentType = localBookContentType(row.installId, file.format)
         return LocalSource(
             fileSystem = fileSystem,
             libraryDir = path.substringBeforeLast('/'),
@@ -271,10 +287,14 @@ private fun deleteFileTree(fileSystem: FileSystem, path: String) {
     runCatching { fileSystem.delete(path) }
 }
 
-/** Ordered <img> blocks for one chapter_pages row (CBZ or folder import). */
+/** Ordered <img> blocks for one chapter_pages row (CBZ, folder import or PDF). */
 internal fun pageImagesHtml(baseDir: File, paths: List<String>): String =
     paths.joinToString("") { path ->
-        "<p><img src=\"${htmlAttribute(File(baseDir, path).toURI().toString())}\"/></p>"
+        // Only a rendered-PDF reference is already a URL; every other row is a
+        // path relative to the book directory.
+        val src = if (path.startsWith("pdfpage://")) path
+        else File(baseDir, path).toURI().toString()
+        "<p><img src=\"${htmlAttribute(src)}\"/></p>"
     }
 
 internal data class InlinePage(val position: Int, val url: String)

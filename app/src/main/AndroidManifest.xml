@@ -84,6 +84,13 @@
             android:stopWithTask="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Untrusted PDF parsing: no permissions, no network, no app files.
+        Only duplicated file descriptors cross the boundary. -->
+        <service
+            android:name=".pdf.PdfRenderService"
+            android:exported="false"
+            android:isolatedProcess="true" />
+
         <!-- Offline video: media3 DownloadManager runs in a dataSync FGS. -->
         <service
             android:name=".features.video.VideoDownloadService"

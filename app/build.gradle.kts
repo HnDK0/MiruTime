@@ -47,6 +47,8 @@ android {
         // The real update check compares the GitHub tag with this app's
         // version; the About screen uses the same value at runtime.
         buildConfig = true
+        // Isolated PDF renderer: AIDL is off by default in AGP 9.
+        aidl = true
     }
 
     testOptions {

@@ -1,9 +1,11 @@
 package dev.mirutime.app.features.library.data
 
+import dev.mirutime.core.api.ContentType
 import java.io.ByteArrayInputStream
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 // Pure JVM coverage for the pieces of the importer that do not need Android:
@@ -16,7 +18,30 @@ class LocalBookImportHelpersTest {
         assertEquals(LocalImportFormat.EPUB, LocalImportFormat.forFile("Book.EPUB"))
         assertEquals(LocalImportFormat.FB2, LocalImportFormat.forFile("book.fb2"))
         assertEquals(LocalImportFormat.CBZ, LocalImportFormat.forFile("comic.cbz"))
+        assertEquals(LocalImportFormat.PDF, LocalImportFormat.forFile("x.pdf"))
         assertNull(LocalImportFormat.forFile("notes.txt"))
+    }
+
+    @Test
+    fun `pdf is a books-shelf manga read page by page`() {
+        val pdf = LocalImportFormat.forFile("x.pdf", "application/pdf")
+
+        assertEquals(LocalImportFormat.PDF, pdf)
+        assertEquals(LocalImportFormat.PDF, LocalImportFormat.forFile("x", "application/x-pdf"))
+        assertEquals(LocalImportFormat.PDF, LocalImportFormat.forFile("x", "application/pdf; charset=binary"))
+        assertEquals(LocalBooksInstallId, pdf?.installId)
+        assertEquals(ContentType.MANGA, pdf?.contentType)
+        assertTrue(pdf?.isManga == true)
+    }
+
+    @Test
+    fun `a pdf row is manga even though it sits on the books shelf`() {
+        // The reader dispatches on the content type, not on the install id.
+        assertTrue(isLocalManga(LocalBooksInstallId, "PDF"))
+        assertTrue(isLocalManga(LocalMangaInstallId, "CBZ"))
+        assertTrue(!isLocalManga(LocalBooksInstallId, "EPUB"))
+        assertEquals(ContentType.MANGA, localBookContentType(LocalBooksInstallId, "PDF"))
+        assertEquals(ContentType.NOVEL, localBookContentType(LocalBooksInstallId, "FB2"))
     }
 
     @Test

@@ -130,7 +130,7 @@
 
     <!-- Finder -->
     <string name="finder_import_title">Импорт локального файла</string>
-    <string name="finder_import_desc">EPUB или FB2 с вашего устройства.</string>
+    <string name="finder_import_desc">EPUB, FB2 или PDF с вашего устройства.</string>
     <string name="finder_import_button">Импортировать локальные книги</string>
     <string name="finder_imported_fmt">«%1$s» импортировано — ищите на полке «Читаю»</string>
 
@@ -297,7 +297,7 @@
     <string name="lib_search_hint">Название, автор, источник…</string>
     <string name="lib_cd_filters">Фильтры библиотеки</string>
     <string name="lib_cd_scroll_top">Наверх</string>
-    <string name="lib_import">Импорт EPUB / FB2</string>
+    <string name="lib_import">Импорт EPUB / FB2 / PDF</string>
     <string name="lib_empty_title">Здесь пусто</string>
     <string name="lib_empty_hint">Попробуйте другую полку, запрос или фильтр.</string>
     <string name="lib_resume_eyebrow">ПРОДОЛЖИТЬ ЧТЕНИЕ</string>
@@ -438,9 +438,9 @@
 
     <!-- Import sheet -->
     <string name="import_title">Импорт локальных книг</string>
-    <string name="import_desc">Добавьте книги EPUB или FB2 в локальную библиотеку. Файлы остаются на устройстве; по одному или пакетом.</string>
+    <string name="import_desc">Добавьте книги EPUB, FB2 или PDF в локальную библиотеку. Файлы остаются на устройстве; по одному или пакетом.</string>
     <string name="import_from_storage">Из хранилища</string>
-    <string name="import_choose">Выберите файлы EPUB или FB2</string>
+    <string name="import_choose">Выберите файлы EPUB, FB2 или PDF</string>
     <string name="import_multi">Один или несколько файлов · остаются на устройстве</string>
     <string name="import_samples">Примеры файлов</string>
 
@@ -1780,7 +1780,7 @@
     <string name="opds_err_malformed">Каталог прислал данные, которые не удалось прочитать.</string>
     <string name="opds_err_too_large_fmt">Файл больше %1$d МБ — скачайте его вручную.</string>
     <string name="opds_open_failed">Не удалось добавить книгу</string>
-    <string name="opds_no_format">Нет EPUB, FB2 или CBZ — открыть нечего.</string>
+    <string name="opds_no_format">Нет EPUB, FB2, PDF или CBZ — открыть нечего.</string>
     <string name="opds_opening_book">Добавляем в библиотеку…</string>
     <string name="opds_add_to_library">Добавить в библиотеку</string>
     <string name="opds_open">Открыть</string>

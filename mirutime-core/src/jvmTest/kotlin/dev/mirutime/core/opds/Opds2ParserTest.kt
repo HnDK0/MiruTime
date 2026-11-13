@@ -110,13 +110,13 @@ class Opds2ParserTest {
         assertTrue(book.isPublication)
 
         // Sample page and the Readium manifest are not files; the pdf is the
-        // only acquisition, and no reader opens it.
+        // only real acquisition, so it is the default.
         assertEquals(
             listOf("http://opds-spec.org/acquisition/sample", "http://opds-spec.org/acquisition/open-access"),
             book.acquisitionLinks.map { it.rel },
         )
         assertTrue(book.acquisitionLinks.none { it.type == "application/opds-publication+json" })
-        assertNull(book.bestAcquisition())
+        assertEquals(OpdsFormat.PDF, book.bestAcquisition()?.first)
 
         // The manifest type is never a format, even when the href looks like one.
         assertNull(

@@ -31,8 +31,7 @@ class InlineChapterHtmlTest {
     }
 
     @Test
-    fun `image urls are attribute-escaped and extension follows magic bytes`() {
-        val html = interleaveChapterText(
+    fun `image urls are attribute-escaped and extension follows magic bytes`() {        val html = interleaveChapterText(
             "",
             listOf(InlinePage(0, "file:///a%20b&c.png")),
         )
@@ -41,5 +40,18 @@ class InlineChapterHtmlTest {
         assertEquals("png", imageExtension(null, byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47)))
         assertEquals("jpg", imageExtension(null, byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte())))
         assertEquals("webp", imageExtension("image/webp", ByteArray(0)))
+    }
+
+    @Test
+    fun `only a pdf page reference skips the book-directory resolution`() {
+        val html = pageImagesHtml(
+            java.io.File("/data/books"),
+            listOf("pdfpage://7/0", "chapters/1/00002.jpg"),
+        )
+        assertEquals(
+            "<p><img src=\"pdfpage://7/0\"/></p>" +
+                "<p><img src=\"file:/data/books/chapters/1/00002.jpg\"/></p>",
+            html,
+        )
     }
 }

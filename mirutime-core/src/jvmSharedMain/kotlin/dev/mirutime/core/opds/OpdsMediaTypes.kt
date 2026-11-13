@@ -19,6 +19,7 @@ object OpdsMediaTypes {
             "application/fb2", "text/fb2+xml",
             -> OpdsFormat.FB2
             "application/vnd.comicbook+zip", "application/x-cbz" -> OpdsFormat.CBZ
+            "application/pdf", "application/x-pdf" -> OpdsFormat.PDF
             // OPDS 2 catalogue and publication documents are pages, not books,
             // whatever their href happens to end with.
             "application/opds+json", "application/opds-publication+json" -> null
@@ -34,6 +35,7 @@ object OpdsMediaTypes {
             path.endsWith(".epub") -> OpdsFormat.EPUB
             path.endsWith(".fb2") -> OpdsFormat.FB2
             path.endsWith(".cbz") -> OpdsFormat.CBZ
+            path.endsWith(".pdf") -> OpdsFormat.PDF
             else -> null
         }
     }

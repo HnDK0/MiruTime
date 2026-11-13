@@ -24,6 +24,7 @@ import dev.mirutime.app.di.PluginGraph
 import dev.mirutime.app.di.ReaderGraph
 import dev.mirutime.app.di.TranslationGraph
 import dev.mirutime.app.di.host.AndroidFileSystem
+import dev.mirutime.app.pdf.PdfPageRenderer
 import dev.mirutime.app.features.book.data.BookEpubExporter
 import dev.mirutime.app.features.book.data.BookCbzExporter
 import dev.mirutime.app.features.book.data.CbzBookInfo
@@ -261,7 +262,7 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
     }
     private val localFileSystem by lazy { AndroidFileSystem(filesDir) }
     val localBookProvider: LocalBookProvider by lazy {
-        LocalBookProvider(libraryRepository, localFileSystem, filesDir)
+        LocalBookProvider(libraryRepository, localFileSystem, filesDir, cacheDir)
     }
     // Persisted SAF folders; one store shared by the local catalogue scan and
     // the folder management screen.
@@ -300,6 +301,9 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             metadataCache = localCatalogMetadata,
         )
     }
+    // One isolated-PDF client for the app: the importer and the reader share
+    // it, so only one renderer process is ever bound.
+    val pdfPageRenderer: PdfPageRenderer by lazy { PdfPageRenderer(this) }
     // SAF import entry point for ImportSheet and the local catalogue.
     val localBookImporter: LocalBookImporter by lazy {
         LocalBookImporter(
@@ -308,6 +312,7 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             fileSystem = localFileSystem,
             baseDir = filesDir,
             coverStore = coverStore,
+            pdfRenderer = pdfPageRenderer,
         )
     }
     // OPDS catalogs: rows in the library DB, credentials in noBackupFilesDir,
@@ -337,6 +342,7 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
             },
             pluginGraph.cfGate,
             pluginGraph.plainEngine,
+            pdfPageRenderer,
         )
     }
     val downloadEngine: DownloadEngine by lazy {
@@ -638,8 +644,24 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
         TranslationGraph(this, pluginGraph.cfGate, pluginGraph.plainEngine)
     }
 
+    // The isolated PDF renderer process instantiates this Application too, so
+    // its initialisation must be skipped there (SharedPreferences is closed to
+    // an isolated process). Process.isIsolated() is API 28; on 26-27 the AOSP
+    // isolated uid range is the fallback.
+    private fun isIsolatedProcess(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            android.os.Process.isIsolated()
+        } else {
+            // shortcut: fixed AOSP range until the API-28 flag is available.
+            android.os.Process.myUid() in 99_000..99_999
+        }
+
     override fun onCreate() {
         super.onCreate()
+        // The isolated PDF renderer process instantiates this Application too,
+        // where SharedPreferences/Room are unavailable by design. It only hosts
+        // the renderer, so no app initialisation may run there.
+        if (isIsolatedProcess()) return
         installStrictMode()
         // Verbose network/diagnostic lines exist in debug builds only; release
         // keeps warn/error/event. Core/KMP cannot read BuildConfig.
