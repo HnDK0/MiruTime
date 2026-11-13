@@ -16,9 +16,10 @@ Free and open source reader for novels, manga and video on Android.
 [![License: GPL-3.0](https://img.shields.io/github/license/HnDK0/MiruTime?style=flat-square&labelColor=27303D&color=0D1117)](LICENSE)
 [![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-brightgreen?style=flat-square&labelColor=27303D&color=3DDC84&logo=android&logoColor=white)](https://github.com/HnDK0/MiruTime/releases/latest)
 
-> ⭐️ **If you find MiruTime useful, please consider giving it a star!** It helps the project grow.
-
 </div>
+
+> [!WARNING]
+> ⭐️ **If you find MiruTime useful, please consider giving it a star!** It helps the project grow.
 
 ---
 
