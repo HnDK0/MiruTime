@@ -1,6 +1,6 @@
 <!--
-  android reader, novel reader android, manga reader android, video player android, light novel reader, ranobe reader, epub reader android, fb2 reader android, tts reader, llm translation
-  андроид читалка, читалка ранобэ андроид, читалка манги андроид, видеоплеер андроид, читалка новелл, epub читалка андроид, озвучка книг, перевод книг llm
+  android reader, novel reader android, manga reader android, video player android, light novel reader, ranobe reader, epub reader android, fb2 reader android, pdf reader android, opds catalog, tts reader, llm translation
+  андроид читалка, читалка ранобэ андроид, читалка манги андроид, видеоплеер андроид, читалка новелл, epub читалка андроид, fb2 читалка андроид, pdf читалка андроид, opds каталог, аудиокниги андроид, озвучка книг, перевод книг llm
 -->
 <div align="center">
 <img src="app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="88" height="88" alt="MiruTime"/>
@@ -41,7 +41,9 @@ git clone https://github.com/HnDK0/MiruTime
 
 - Источники на Lua-плагинах с установкой из репозитория или файла `.lua`
 - Каталог источников с фильтрами, закреплёнными источниками и поиском
-- Локальная библиотека EPUB и FB2 — по одной книге или пакетом
+- Локальная библиотека EPUB, FB2 и PDF — по одной книге или пакетом; PDF читаются постранично
+- Каталоги OPDS как источники библиотеки — Atom 1.2 (XML) и OPDS 2.0 (JSON), с фасетами, поиском, постраничной навигацией и Basic-авторизацией
+- Аудиокниги из каталогов OPDS — потоковое воспроизведение по трекам в плеере с сохранением прогресса
 - Читалка с настройками шрифта, темы, фона и межстрочного интервала
 - Перевод прямо в читалке: обычный и параллельный режим (оригинал рядом с переводом)
 - Перевод для отдельной книги или выбранных глав, не трогая глобальные настройки

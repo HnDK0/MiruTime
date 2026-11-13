@@ -1,6 +1,6 @@
 <!--
-  android reader, novel reader android, manga reader android, video player android, light novel reader, ranobe reader, epub reader android, fb2 reader android, tts reader, llm translation
-  андроид читалка, читалка ранобэ андроид, читалка манги андроид, видеоплеер андроид, читалка новелл, epub читалка андроид, озвучка книг, перевод книг llm
+  android reader, novel reader android, manga reader android, video player android, light novel reader, ranobe reader, epub reader android, fb2 reader android, pdf reader android, opds catalog, audiobook player android, tts reader, llm translation
+  андроид читалка, читалка ранобэ андроид, читалка манги андроид, видеоплеер андроид, читалка новелл, epub читалка андроид, fb2 читалка андроид, pdf читалка андроид, opds каталог, озвучка книг, перевод книг llm
 -->
 <div align="center">
 <img src="app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="88" height="88" alt="MiruTime"/>
@@ -41,7 +41,9 @@ git clone https://github.com/HnDK0/MiruTime
 
 - Sources as Lua plugins, installed from a repository or a local `.lua` file
 - Source catalog with filters, pinned sources and search
-- Local EPUB and FB2 library — single books or bulk import
+- Local EPUB, FB2 and PDF library — single books or bulk import; PDFs read page by page
+- OPDS catalogues as library sources — Atom 1.2 (XML) and OPDS 2.0 (JSON), with facets, search, paging and optional Basic auth
+- Audiobooks from OPDS catalogues — streamed track by track in the player, with saved progress
 - Reader with font, theme, background and line-spacing settings
 - In-reader translation with standard and parallel (original next to translation) modes
 - Translation for a single book or selected chapters without touching global settings
