@@ -53,7 +53,7 @@ fun ShelfTabsRow(
             ) {
                 shelves.forEach { shelf ->
                     MiruTabPill(
-                        label = shelf.label,
+                        label = shelfLabel(shelf),
                         selected = shelf.id == selectedId,
                         onClick = { onSelect(shelf.id) },
                         onLongClick = { onTabLongPress(shelf) },

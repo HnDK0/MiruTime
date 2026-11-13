@@ -14,6 +14,8 @@ import android.os.Build
 import androidx.work.ForegroundInfo
 import dev.mirutime.app.MainActivity
 import dev.mirutime.app.R
+import dev.mirutime.app.features.settings.data.AppLanguage
+import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.settings.data.RestoreProgress
 import dev.mirutime.app.features.settings.data.RestoreStage
 import kotlin.math.roundToInt
@@ -73,15 +75,19 @@ object BackupNotifications {
     private const val CancelRequestCode = 4204
     const val PermissionRequestCode = 4205
 
+    private fun localized(context: Context): Context =
+        AppLanguage.wrap(context, AppSettings.appLanguage)
+
     fun ensureChannel(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        val ui = localized(context)
+        val manager = ui.getSystemService(NotificationManager::class.java) ?: return
         manager.createNotificationChannel(
             NotificationChannel(
                 ChannelId,
-                context.getString(R.string.backup_channel_name),
+                ui.getString(R.string.backup_channel_name),
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = context.getString(R.string.backup_channel_desc)
+                description = ui.getString(R.string.backup_channel_desc)
                 setShowBadge(false)
             },
         )
@@ -110,11 +116,12 @@ object BackupNotifications {
         cancelable: Boolean,
     ): Notification {
         ensureChannel(context)
+        val ui = localized(context)
         val builder = Notification.Builder(context, ChannelId)
             .setSmallIcon(R.drawable.ic_stat_backup)
-            .setContentTitle(context.getString(content.titleRes))
-            .setContentText(context.getString(content.textRes))
-            .setSubText(context.getString(R.string.backup_notification_percent_fmt, content.percent))
+            .setContentTitle(ui.getString(content.titleRes))
+            .setContentText(ui.getString(content.textRes))
+            .setSubText(ui.getString(R.string.backup_notification_percent_fmt, content.percent))
             .setProgress(100, content.percent, false)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -123,7 +130,7 @@ object BackupNotifications {
             builder.addAction(
                 Notification.Action.Builder(
                     null,
-                    context.getString(R.string.backup_notification_cancel),
+                    ui.getString(R.string.backup_notification_cancel),
                     cancelIntent(context),
                 ).build(),
             )
@@ -155,6 +162,7 @@ object BackupNotifications {
         message: String,
     ): Notification {
         ensureChannel(context)
+        val ui = localized(context)
         val title = when {
             success && restore -> R.string.backup_notification_restore_done_title
             success -> R.string.backup_notification_done_title
@@ -163,7 +171,7 @@ object BackupNotifications {
         }
         return Notification.Builder(context, ChannelId)
             .setSmallIcon(R.drawable.ic_stat_backup)
-            .setContentTitle(context.getString(title))
+            .setContentTitle(ui.getString(title))
             .setContentText(message)
             .setStyle(Notification.BigTextStyle().bigText(message))
             .setAutoCancel(true)
@@ -211,7 +219,7 @@ object BackupNotifications {
             context,
             success = false,
             restore = restore,
-            message = context.getString(R.string.backup_notification_busy),
+            message = localized(context).getString(R.string.backup_notification_busy),
         )
     }
 
@@ -220,7 +228,7 @@ object BackupNotifications {
             context,
             success = false,
             restore = false,
-            message = context.getString(R.string.backup_notification_auto_disabled),
+            message = localized(context).getString(R.string.backup_notification_auto_disabled),
         )
     }
 

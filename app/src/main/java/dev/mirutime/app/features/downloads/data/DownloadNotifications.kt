@@ -14,6 +14,8 @@ import androidx.work.ForegroundInfo
 import dev.mirutime.app.MainActivity
 import dev.mirutime.app.R
 import dev.mirutime.app.features.network.cf.CfSolveActivity
+import dev.mirutime.app.features.settings.data.AppLanguage
+import dev.mirutime.app.features.settings.data.AppSettings
 
 object DownloadNotificationActions {
     const val ACTION_PAUSE = "dev.mirutime.app.downloads.PAUSE"
@@ -35,27 +37,32 @@ object DownloadNotifications {
     private const val RetryRequestBase = 5304
     private const val SourceRequestBase = 5305
 
+    private fun localized(context: Context): Context =
+        AppLanguage.wrap(context, AppSettings.appLanguage)
+
     fun ensureChannel(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        val ui = localized(context)
+        val manager = ui.getSystemService(NotificationManager::class.java) ?: return
         manager.createNotificationChannel(
             NotificationChannel(
                 ChannelId,
-                context.getString(R.string.dl_channel_name),
+                ui.getString(R.string.dl_channel_name),
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = context.getString(R.string.dl_channel_desc)
+                description = ui.getString(R.string.dl_channel_desc)
                 setShowBadge(false)
             },
         )
     }
 
     fun active(context: Context, progress: DownloadProgress, bookTitle: String): Notification {
+        val ui = localized(context)
         ensureChannel(context)
         val percent = (progress.fraction * 100).toInt().coerceIn(0, 100)
         return base(context)
-            .setContentTitle(bookTitle.ifBlank { context.getString(R.string.dl_notification_downloading) })
+            .setContentTitle(bookTitle.ifBlank { ui.getString(R.string.dl_notification_downloading) })
             .setContentText(
-                context.getString(
+                ui.getString(
                     R.string.dl_notification_progress_fmt,
                     progress.completed,
                     progress.total,
@@ -63,21 +70,21 @@ object DownloadNotifications {
             )
             .setSubText(
                 progress.chapterTitle?.takeIf { it.isNotBlank() }
-                    ?: context.getString(R.string.dl_tab_queue),
+                    ?: ui.getString(R.string.dl_tab_queue),
             )
             .setProgress(100, percent, false)
             .setOngoing(true)
             .addAction(
                 Notification.Action.Builder(
                     null,
-                    context.getString(R.string.dl_action_pause),
+                    ui.getString(R.string.dl_action_pause),
                     action(context, DownloadNotificationActions.ACTION_PAUSE, progress.bookId, PauseRequestBase),
                 ).build(),
             )
             .addAction(
                 Notification.Action.Builder(
                     null,
-                    context.getString(R.string.dl_action_cancel),
+                    ui.getString(R.string.dl_action_cancel),
                     action(context, DownloadNotificationActions.ACTION_CANCEL, progress.bookId, CancelRequestBase),
                 ).build(),
             )
@@ -95,26 +102,28 @@ object DownloadNotifications {
     }
 
     fun paused(context: Context, bookId: Long, bookTitle: String, progress: Float) {
+        val ui = localized(context)
         val percent = (progress * 100).toInt().coerceIn(0, 100)
         post(
             context = context,
             bookId = bookId,
             bookTitle = bookTitle,
             state = DownloadState.PAUSED,
-            title = context.getString(R.string.dl_notification_paused),
-            text = context.getString(R.string.dl_notification_paused_fmt, percent),
+            title = ui.getString(R.string.dl_notification_paused),
+            text = ui.getString(R.string.dl_notification_paused_fmt, percent),
             progress = progress,
         )
     }
 
     fun failed(context: Context, bookId: Long, bookTitle: String, message: String) {
+        val ui = localized(context)
         post(
             context = context,
             bookId = bookId,
             bookTitle = bookTitle,
             state = DownloadState.FAILED,
-            title = context.getString(R.string.dl_notification_failed),
-            text = context.getString(R.string.dl_notification_failed_fmt, message),
+            title = ui.getString(R.string.dl_notification_failed),
+            text = ui.getString(R.string.dl_notification_failed_fmt, message),
         )
     }
 
@@ -125,26 +134,28 @@ object DownloadNotifications {
         progress: Float,
         sourceUrl: String?,
     ) {
+        val ui = localized(context)
         post(
             context = context,
             bookId = bookId,
             bookTitle = bookTitle,
             state = DownloadState.NEEDS_SOURCE_ACTION,
-            title = context.getString(R.string.dl_notification_source_action),
-            text = context.getString(R.string.dl_notification_source_action_text),
+            title = ui.getString(R.string.dl_notification_source_action),
+            text = ui.getString(R.string.dl_notification_source_action_text),
             progress = progress,
             sourceUrl = sourceUrl,
         )
     }
 
     fun waitingNetwork(context: Context, bookId: Long, bookTitle: String, progress: Float) {
+        val ui = localized(context)
         post(
             context = context,
             bookId = bookId,
             bookTitle = bookTitle,
             state = DownloadState.WAITING_NETWORK,
-            title = context.getString(R.string.dl_notification_waiting_network),
-            text = context.getString(R.string.dl_notification_waiting_network_text),
+            title = ui.getString(R.string.dl_notification_waiting_network),
+            text = ui.getString(R.string.dl_notification_waiting_network_text),
             progress = progress,
         )
     }
@@ -160,6 +171,7 @@ object DownloadNotifications {
         sourceUrl: String? = null,
     ) {
         if (!canPost(context)) return
+        val ui = localized(context)
         ensureChannel(context)
         val safeSource = sourceUrl?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
         val builder = base(context)
@@ -174,7 +186,7 @@ object DownloadNotifications {
             builder.addAction(
                 Notification.Action.Builder(
                     null,
-                    context.getString(action.labelRes()),
+                    ui.getString(action.labelRes()),
                     pendingIntent(context, action, bookId, safeSource),
                 ).build(),
             )

@@ -189,6 +189,7 @@ import dev.mirutime.app.features.downloads.data.EnqueueResult
 import dev.mirutime.app.features.library.data.LibraryDataProvider
 import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.app.features.library.domain.Shelf
+import dev.mirutime.app.features.library.ui.shelfLabel
 import dev.mirutime.app.features.migration.ui.MigrationBookSheet
 import dev.mirutime.app.features.opds.domain.OpdsFailure
 import dev.mirutime.app.features.opds.ui.opdsFailureText
@@ -2242,7 +2243,7 @@ internal fun BookScreen(
                         reload()
                         bookToast(
                             context,
-                            resources.getString(R.string.book_moved_fmt, shelf.label),
+                            resources.getString(R.string.book_moved_fmt, shelfLabel(shelf, resources)),
                         )
                     }
                 },

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Book/chapter labels: short, labeled actions instead of icon-only
+     affordances. -->
+<resources>
+    <string name="book_sel_action_translate">Çevir</string>
+    <string name="book_sel_action_download">İndir</string>
+    <string name="book_sel_action_mark_read">Okundu olarak işaretle</string>
+    <string name="book_sel_action_mark_unread">Okunmadı işaretle</string>
+    <string name="book_sel_action_delete_translations">Çevirileri sil</string>
+    <string name="book_sel_action_delete_downloads">İndirmeleri sil</string>
+    <string name="book_ch_size_cd">Bölüm boyutu: %1$s</string>
+    <plurals name="book_sel_delete_translations_desc_plural">
+        <item quantity="one">Seçilen %1$d bölümün kayıtlı çevirisi kaldırılsın mı?</item>
+        <item quantity="other">Seçilen %1$d bölümün kayıtlı çevirileri kaldırılsın mı?</item>
+    </plurals>
+    <string name="book_continue_title_fmt">Devam · %1$s</string>
+    <string name="book_read_again_title_fmt">Yeniden oku · %1$s</string>
+</resources>

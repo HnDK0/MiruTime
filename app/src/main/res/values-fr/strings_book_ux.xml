@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Book/chapter labels: short, labeled actions instead of icon-only
+     affordances. -->
+<resources>
+    <string name="book_sel_action_translate">Traduire</string>
+    <string name="book_sel_action_download">Télécharger</string>
+    <string name="book_sel_action_mark_read">Marquer comme lu</string>
+    <string name="book_sel_action_mark_unread">Marquer comme non lu</string>
+    <string name="book_sel_action_delete_translations">Supprimer les traductions</string>
+    <string name="book_sel_action_delete_downloads">Supprimer les téléchargements</string>
+    <string name="book_ch_size_cd">Taille du chapitre : %1$s</string>
+    <plurals name="book_sel_delete_translations_desc_plural">
+        <item quantity="one">Supprimer la traduction enregistrée pour %1$d chapitre sélectionné ?</item>
+        <item quantity="many">Supprimer les traductions enregistrées pour %1$d chapitres sélectionnés ?</item>
+        <item quantity="other">Supprimer les traductions enregistrées pour %1$d chapitres sélectionnés ?</item>
+    </plurals>
+    <string name="book_continue_title_fmt">Continuer · %1$s</string>
+    <string name="book_read_again_title_fmt">Relire · %1$s</string>
+</resources>

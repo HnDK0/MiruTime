@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Supported UI languages: English (default) + Russian. -->
+<!-- Supported UI languages: English (default), Russian, and the community
+     translations. Indonesian is "id" here (BCP 47); the resource folder is
+     values-in, which the platform maps to it. -->
 <locale-config xmlns:android="http://schemas.android.com/apk/res/android">
     <locale android:name="en" />
     <locale android:name="ru" />
+    <locale android:name="es" />
+    <locale android:name="pt" />
+    <locale android:name="in" />
+    <locale android:name="vi" />
+    <locale android:name="fr" />
+    <locale android:name="de" />
+    <locale android:name="it" />
+    <locale android:name="tr" />
 </locale-config>

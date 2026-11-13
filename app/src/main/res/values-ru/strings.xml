@@ -431,7 +431,10 @@
     <string name="shelf_delete_nonempty_fmt">На полке «%1$s» %2$s. Они вернутся на «Читаю» — ничего не удалится.</string>
     <string name="shelf_delete_empty_fmt">Полка «%1$s» пуста и исчезнет. «Читаю» и «Прочитано» останутся.</string>
     <string name="shelf_system">Системная · </string>
-    <string name="shelf_updates_off"> · без обновлений</string>
+    <!-- Labels of the seeded system shelves; the data layer stores English -->
+    <string name="shelf_system_reading">Читаю</string>
+    <string name="shelf_system_completed">Прочитано</string>
+    <string name="shelf_updates_off">\u0020· без обновлений</string>
     <string name="shelf_cd_up">Выше</string>
     <string name="shelf_cd_down">Ниже</string>
     <string name="shelf_cd_edit">Изменить полку</string>
@@ -913,7 +916,7 @@
     <string name="st_language_system">Как в системе</string>
     <string name="st_theme">Тема</string>
     <string name="st_scale">Масштаб</string>
-    <string name="st_scale_desc">Размер текста и интерфейса от 50% до 150% с шагом 5%. 100% — системный размер.</string>
+    <string name="st_scale_desc" formatted="false">Размер текста и интерфейса от 50% до 150% с шагом 5%. 100% — системный размер.</string>
     <string name="st_text_scale">Масштаб текста</string>
     <string name="st_ui_scale">Масштаб интерфейса</string>
     <string name="st_scale_value_fmt">%1$d%%</string>

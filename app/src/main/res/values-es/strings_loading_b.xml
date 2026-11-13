@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Honest loading/busy labels. Kept in a dedicated file so new labels never
+     touch the shared strings.xml. -->
+<resources>
+    <string name="loading_exporting">Exportando…</string>
+    <string name="loading_translating">Traduciendo…</string>
+    <string name="loading_installing">Instalando…</string>
+    <string name="loading_adding_folder">Añadiendo carpeta…</string>
+    <string name="loading_pinning">Actualizando fijación…</string>
+    <string name="loading_adding_to_queue">Añadiendo a la cola…</string>
+</resources>

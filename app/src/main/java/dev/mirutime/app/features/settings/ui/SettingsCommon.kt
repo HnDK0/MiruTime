@@ -5,6 +5,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import dev.mirutime.app.R
 import dev.mirutime.uikit.ChoiceOption
+import dev.mirutime.app.features.settings.data.AppLanguage
+import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.settings.data.SettingsLanguages
 import java.util.Locale
 
@@ -57,12 +59,17 @@ fun nativeLanguageName(code: String): String {
         .ifBlank { code }
 }
 
+// The language the interface is actually in. Locale.getDefault() is the device
+// locale, so it ignores the in-app override.
+fun uiLocale(): Locale = AppLanguage.localeFor(AppSettings.appLanguage) ?: Locale.getDefault()
+
 // Language name in the UI language ("Russian" / "Русский") for the
 // translation pickers, where the user reads names in their own language.
 fun uiLanguageName(code: String): String {
     val tag = if (code == "in") "id" else code
-    return Locale.forLanguageTag(tag).getDisplayLanguage(Locale.getDefault())
-        .replaceFirstChar { it.titlecase(Locale.getDefault()) }
+    val ui = uiLocale()
+    return Locale.forLanguageTag(tag).getDisplayLanguage(ui)
+        .replaceFirstChar { it.titlecase(ui) }
         .ifBlank { code }
 }
 
@@ -82,7 +89,10 @@ fun formatBytes(bytes: Long): String {
 @Composable
 fun appLanguageOptions(): List<ChoiceOption<String>> =
     listOf(ChoiceOption("system", stringResource(R.string.st_language_system))) +
-        SettingsLanguages.app.map { ChoiceOption(it, nativeLanguageName(it)) }
+        SettingsLanguages.app
+            .map { code -> code to nativeLanguageName(code) }
+            .sortedBy { (_, name) -> name.lowercase(Locale.ROOT) }
+            .map { (code, name) -> ChoiceOption(code, name) }
 
 @Composable
 fun appLanguageLabel(code: String): String =

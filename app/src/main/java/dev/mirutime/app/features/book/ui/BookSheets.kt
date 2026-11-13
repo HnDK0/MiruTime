@@ -35,6 +35,7 @@ import dev.mirutime.uikit.SheetSection
 import dev.mirutime.app.features.book.domain.BookDetails
 import dev.mirutime.app.features.library.domain.Shelf
 import dev.mirutime.app.features.library.ui.isSystemShelf
+import dev.mirutime.app.features.library.ui.shelfLabel
 import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.app.features.settings.data.TranslationConfig
 import dev.mirutime.app.features.settings.ui.TranslationConfigContent
@@ -79,9 +80,9 @@ fun ShelfMoveSheet(
             ) {
                 Text(
                     text = if (shelf.isSystemShelf()) {
-                        stringResource(R.string.shelf_system) + shelf.label
+                        stringResource(R.string.shelf_system) + shelfLabel(shelf)
                     } else {
-                        shelf.label
+                        shelfLabel(shelf)
                     },
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface,

@@ -212,7 +212,7 @@ fun BulkMoveShelfSheet(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = shelf.label,
+                        text = shelfLabel(shelf),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,

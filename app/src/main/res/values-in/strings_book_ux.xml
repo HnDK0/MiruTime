@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Book/chapter labels: short, labeled actions instead of icon-only
+     affordances. -->
+<resources>
+    <string name="book_sel_action_translate">Terjemahkan</string>
+    <string name="book_sel_action_download">Unduh</string>
+    <string name="book_sel_action_mark_read">Tandai dibaca</string>
+    <string name="book_sel_action_mark_unread">Tandai belum dibaca</string>
+    <string name="book_sel_action_delete_translations">Hapus terjemahan</string>
+    <string name="book_sel_action_delete_downloads">Hapus unduhan</string>
+    <string name="book_ch_size_cd">Ukuran bab: %1$s</string>
+    <plurals name="book_sel_delete_translations_desc_plural">
+        <item quantity="other">Hapus terjemahan tersimpan untuk %1$d bab yang dipilih?</item>
+    </plurals>
+    <string name="book_continue_title_fmt">Lanjutkan · %1$s</string>
+    <string name="book_read_again_title_fmt">Baca lagi · %1$s</string>
+</resources>

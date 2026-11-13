@@ -1,5 +1,7 @@
 package dev.mirutime.app.features.library.ui
 
+import android.content.res.Resources
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -54,6 +56,22 @@ import dev.mirutime.app.features.library.domain.Shelf
 
 // System shelves are pinned: no rename, no delete, no reorder.
 fun Shelf.isSystemShelf(): Boolean = id == "reading" || id == "completed"
+
+// Display-only names of the seeded system shelves. The data layer stores them
+// with English labels, so match by id — never by label.
+@StringRes
+private fun systemShelfLabelRes(id: String): Int? = when (id) {
+    "reading" -> R.string.shelf_system_reading
+    "completed" -> R.string.shelf_system_completed
+    else -> null
+}
+
+@Composable
+fun shelfLabel(shelf: Shelf): String =
+    systemShelfLabelRes(shelf.id)?.let { stringResource(it) } ?: shelf.label
+
+fun shelfLabel(shelf: Shelf, resources: Resources): String =
+    systemShelfLabelRes(shelf.id)?.let { resources.getString(it) } ?: shelf.label
 
 private enum class ShelfManagerMode { List, Nested, Thumbnail }
 
@@ -248,7 +266,7 @@ private fun ShelfListView(
                     ) {
                         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = MiruSpace.M)) {
                             Text(
-                                text = shelf.label,
+                                text = shelfLabel(shelf),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.bodyMedium,
@@ -290,7 +308,7 @@ private fun ShelfNestedView(
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         flat.forEach { shelf ->
             NestedLeaf(
-                label = shelf.label,
+                label = shelfLabel(shelf),
                 count = counts[shelf.id] ?: 0,
                 indented = false,
                 onPick = { onPick(shelf.id) },
@@ -395,7 +413,7 @@ private fun ShelfThumbnailView(
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         BookCover(
-                            title = coverFor[shelf.id]?.coverTitle ?: shelf.label,
+                            title = coverFor[shelf.id]?.coverTitle ?: shelfLabel(shelf),
                             coverUrl = coverFor[shelf.id]?.coverUrl,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -403,7 +421,7 @@ private fun ShelfThumbnailView(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = shelf.label,
+                            text = shelfLabel(shelf),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.bodySmall,
@@ -442,7 +460,7 @@ private fun ManageShelfRow(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = shelf.label,
+                text = shelfLabel(shelf),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyMedium,

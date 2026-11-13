@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Honest loading/busy labels. Kept in a dedicated file so new labels never
+     touch the shared strings.xml. -->
+<resources>
+    <string name="loading_value">…</string>
+    <string name="loading_updates">Güncellemeler yükleniyor…</string>
+    <string name="loading_history">Geçmiş yükleniyor…</string>
+    <string name="loading_searching">Aranıyor…</string>
+    <string name="loading_importing">Dosyalar içe aktarılıyor…</string>
+    <string name="loading_downloads">İndirmeler yükleniyor…</string>
+    <string name="loading_deleting">Siliniyor…</string>
+    <string name="loading_cleaning">Temizleniyor…</string>
+    <string name="loading_queueing">Sıraya ekleniyor…</string>
+</resources>

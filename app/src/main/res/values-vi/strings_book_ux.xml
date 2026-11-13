@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Book/chapter labels: short, labeled actions instead of icon-only
+     affordances. -->
+<resources>
+    <string name="book_sel_action_translate">Dịch</string>
+    <string name="book_sel_action_download">Tải xuống</string>
+    <string name="book_sel_action_mark_read">Đánh dấu đã đọc</string>
+    <string name="book_sel_action_mark_unread">Đánh dấu chưa đọc</string>
+    <string name="book_sel_action_delete_translations">Xóa bản dịch</string>
+    <string name="book_sel_action_delete_downloads">Xóa mục tải xuống</string>
+    <string name="book_ch_size_cd">Cỡ chương: %1$s</string>
+    <plurals name="book_sel_delete_translations_desc_plural">
+        <item quantity="other">Xóa bản dịch đã lưu của %1$d chương đã chọn?</item>
+    </plurals>
+    <string name="book_continue_title_fmt">Tiếp tục · %1$s</string>
+    <string name="book_read_again_title_fmt">Đọc lại · %1$s</string>
+</resources>

@@ -1,5 +1,6 @@
 package dev.mirutime.app.features.settings.data
 
+import java.io.File
 import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -13,11 +14,30 @@ class AppLanguageTest {
         assertEquals("ru", AppLanguage.localeFor("ru")?.language)
         assertEquals("en", AppLanguage.localeFor("en")?.language)
         assertEquals("ru", AppLanguage.localeFor("ru-RU")?.language)
+        // The legacy code "in" is normalized to "id" on modern JDKs; older
+        // Android keeps "in". The platform resolves values-in from either.
+        assertTrue(AppLanguage.localeFor("in")?.language in setOf("in", "id"))
     }
 
     @Test
     fun `only resource-backed app languages are offered`() {
-        assertEquals(listOf("en", "ru"), SettingsLanguages.app)
+        assertEquals(
+            listOf("en", "ru", "es", "pt", "in", "vi", "fr", "de", "it", "tr"),
+            SettingsLanguages.app,
+        )
+    }
+
+    /**
+     * Every offered code must have a values-XX folder, otherwise the picker
+     * silently switches to English. "en" lives in the default values/ folder.
+     */
+    @Test
+    fun `every offered app language has string resources`() {
+        val res = File("src/main/res")
+        val missing = SettingsLanguages.app.filter { code ->
+            code != "en" && !File(res, "values-$code").isDirectory
+        }
+        assertEquals(emptyList<String>(), missing)
     }
 
     @Test

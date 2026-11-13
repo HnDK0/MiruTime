@@ -9,6 +9,9 @@ import java.util.Locale
  * the saved locale, so every Compose string and Toast resolves in the chosen
  * language; changing the setting recreates the activity so visible strings
  * update immediately.
+ *
+ * Precedence: an explicit in-app choice always wins over the OS per-app locale
+ * (`android:localeConfig`). Only [System] follows the platform.
  */
 object AppLanguage {
     const val System = "system"

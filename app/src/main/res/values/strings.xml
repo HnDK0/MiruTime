@@ -435,7 +435,10 @@
     <string name="shelf_delete_nonempty_fmt">“%1$s” holds %2$s. They move back to Reading — nothing is deleted.</string>
     <string name="shelf_delete_empty_fmt">“%1$s” is empty and goes away. Reading and Completed stay put.</string>
     <string name="shelf_system">System · </string>
-    <string name="shelf_updates_off"> · updates off</string>
+    <!-- Labels of the seeded system shelves; the data layer stores English -->
+    <string name="shelf_system_reading">Reading</string>
+    <string name="shelf_system_completed">Completed</string>
+    <string name="shelf_updates_off">\u0020· updates off</string>
     <string name="shelf_cd_up">Move up</string>
     <string name="shelf_cd_down">Move down</string>
     <string name="shelf_cd_edit">Edit shelf</string>
@@ -900,7 +903,7 @@
     <string name="st_language_system">System default</string>
     <string name="st_theme">Theme</string>
     <string name="st_scale">Scale</string>
-    <string name="st_scale_desc">Text and interface size from 50% to 150%, in 5% steps. 100% follows the system size.</string>
+    <string name="st_scale_desc" formatted="false">Text and interface size from 50% to 150%, in 5% steps. 100% follows the system size.</string>
     <string name="st_text_scale">Text scale</string>
     <string name="st_ui_scale">UI scale</string>
     <string name="st_scale_value_fmt">%1$d%%</string>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Honest loading/busy labels. Kept in a dedicated file so new labels never
+     touch the shared strings.xml. -->
+<resources>
+    <string name="loading_exporting">Mengekspor…</string>
+    <string name="loading_translating">Menerjemahkan…</string>
+    <string name="loading_installing">Memasang…</string>
+    <string name="loading_adding_folder">Menambahkan folder…</string>
+    <string name="loading_pinning">Memperbarui pin…</string>
+    <string name="loading_adding_to_queue">Menambahkan ke antrean…</string>
+</resources>
