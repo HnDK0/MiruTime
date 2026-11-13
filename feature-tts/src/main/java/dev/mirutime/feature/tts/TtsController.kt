@@ -206,6 +206,10 @@ class TtsController(
     private var voiceId: String? = _settings.value.voiceId
     private var speed = _settings.value.speed
     private var pitch = _settings.value.pitch
+    // Language slot the engine was last configured for, null until the first
+    // apply. Settings edits come through updateSettings(), so a seek inside the
+    // same slot must not reload prefs or re-hit the TTS binders.
+    private var appliedVoiceSlot: Boolean? = null
     private var sleepTimerJob: Job? = null
     private var sleepDeadline = 0L
     // Set when a chapter hand-off is requested and not yet applied. Stop, pause,
@@ -321,7 +325,9 @@ class TtsController(
             return
         }
         sessionTranslated = language == TtsLanguage.Translation
-        applySavedSettings(sessionTranslated)
+        // Same slot = same voice/engine/speed, already applied: a paused chapter
+        // crossing must not reload settings or hit the engine binders again.
+        if (appliedVoiceSlot != sessionTranslated) applySavedSettings(sessionTranslated)
         stopInternal(keepStatus = true)
         pending = null
         chunks = next
@@ -830,6 +836,7 @@ class TtsController(
     }
 
     private fun applySavedSettings(translated: Boolean = false) {
+        appliedVoiceSlot = translated
         val saved = settingsStore.load().sanitized()
         _settings.value = saved
         val selection = sessionVoiceSelection(saved, translated)

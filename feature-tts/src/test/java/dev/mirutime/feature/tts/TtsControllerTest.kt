@@ -64,6 +64,11 @@ class TtsControllerTest {
         var voice: String? = null
         var appliedRate = 1f
         var appliedPitch = 1f
+        // Engine binder traffic a paused chapter crossing must not repeat.
+        var voiceCatalogReads = 0
+        var voiceSets = 0
+        var rateSets = 0
+        var pitchSets = 0
         var deferEngineReady = false
         var pendingEngineId: String? = null
         var refreshCount = 0
@@ -75,8 +80,11 @@ class TtsControllerTest {
         override val defaultEngineId: String? = "default"
 
         override val voices: List<TtsVoice>
-            get() = availableVoices.map { name ->
-                TtsVoice(name, name, java.util.Locale.US, 400, currentEngineId)
+            get() {
+                voiceCatalogReads += 1
+                return availableVoices.map { name ->
+                    TtsVoice(name, name, java.util.Locale.US, 400, currentEngineId)
+                }
             }
 
         override val engines: List<TtsEngineInfo>
@@ -103,16 +111,19 @@ class TtsControllerTest {
         }
 
         override fun setVoice(name: String?): Boolean {
+            voiceSets += 1
             if (name != null && name !in availableVoices) return false
             voice = name
             return true
         }
 
         override fun setRate(rate: Float) {
+            rateSets += 1
             appliedRate = rate
         }
 
         override fun setPitch(pitch: Float) {
+            pitchSets += 1
             appliedPitch = pitch
         }
 
@@ -383,6 +394,46 @@ class TtsControllerTest {
 
         assertEquals(TtsStatus.Playing, controller.state.value.status)
         assertEquals(0, controller.state.value.currentChunk)
+    }
+
+    /**
+     * A paused chapter crossing used to reload settings and re-apply the engine
+     * voice: the voice catalog twice plus rate/pitch/voice binders on the
+     * scroll path, although the spoken language slot did not change.
+     */
+    @Test
+    fun `seek in the same language leaves the engine alone`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        val translations = mapOf(0 to "Первый. Второй.")
+        controller.play(document, translations)
+        controller.pause()
+        engine.voiceCatalogReads = 0
+        engine.voiceSets = 0
+        engine.rateSets = 0
+        engine.pitchSets = 0
+
+        controller.seekToBlock(document, translations, blockIndex = 0)
+
+        assertEquals(0, engine.voiceCatalogReads)
+        assertEquals(0, engine.voiceSets)
+        assertEquals(0, engine.rateSets)
+        assertEquals(0, engine.pitchSets)
+        assertEquals(TtsStatus.Paused, controller.state.value.status)
+    }
+
+    /** The other slot has its own voice/engine, so a switch must re-apply them. */
+    @Test
+    fun `language switch re-applies the voice slot`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        controller.play(document, mapOf(0 to "Первый. Второй."))
+        controller.pause()
+        engine.voiceSets = 0
+
+        controller.switchLanguage(document, emptyMap(), blockIndex = 0, language = TtsLanguage.Original)
+
+        assertTrue(engine.voiceSets > 0)
     }
 
     @Test
