@@ -453,8 +453,17 @@ class ReaderSessionStore(
         // While a prev/next load is in flight the list still shows the previous
         // chapter and keeps emitting its anchors. Adopting them here would move
         // activeChapterIndex back and make the reader jump backwards.
-        if (current.navigatingTo != null) return
-        val chapter = current.chapters.firstOrNull { it.chapterUrl == anchor.chapterUrl } ?: return
+        if (current.navigatingTo != null) {
+            MiruLog.event("reader", "anchor-ignored", "reason" to "navigating")
+            return
+        }
+        val chapter = current.chapters.firstOrNull { it.chapterUrl == anchor.chapterUrl }
+        if (chapter == null) {
+            // A document outside `chapters` cannot own the active index: the
+            // translation targets never reach it.
+            MiruLog.event("reader", "anchor-ignored", "reason" to "unknown-chapter")
+            return
+        }
         val chapterChanged = chapter.index != current.activeChapterIndex
         _state.update {
             it.copy(anchor = anchor, offsetPx = offsetPx, activeChapterIndex = chapter.index)
@@ -651,6 +660,7 @@ class ReaderSessionStore(
             "chapter-load",
             "chapter" to index,
             "ok" to true,
+            "active" to makeActive,
             "blocks" to document.blocks.size,
             "chars" to document.blocks.sumOf { it.original.length },
             "ms" to (System.currentTimeMillis() - startedAtMs),

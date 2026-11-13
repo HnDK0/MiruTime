@@ -360,7 +360,17 @@ class TtsChapterCoordinator(
                 val (documentKeys, bookUrl) = documentsAndBook
                 if (bookUrl.isNullOrBlank()) return@collect
                 val documents = session.state.value.documents
-                translationEnsureTargets(active, documentKeys).forEach { index ->
+                val targets = translationEnsureTargets(active, documentKeys)
+                // The visible chapter never gets translated when `active` lags
+                // behind the chapter on screen: show both sides here.
+                MiruLog.event(
+                    "tts",
+                    "ensure-targets",
+                    "active" to active,
+                    "targets" to targets.joinToString(","),
+                    "loaded" to documentKeys.sorted().joinToString(","),
+                )
+                targets.forEach { index ->
                     documents[index]?.let { translation.ensureChapter(bookUrl, index, it) }
                 }
             }

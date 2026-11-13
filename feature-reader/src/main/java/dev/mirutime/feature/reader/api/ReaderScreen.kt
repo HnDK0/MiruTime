@@ -63,6 +63,7 @@ import dev.mirutime.app.features.reader.document.ReaderBlock
 import dev.mirutime.app.features.reader.document.ReaderDocument
 import dev.mirutime.app.features.reader.document.ReadingAnchor
 import dev.mirutime.app.features.reader.document.mangaPages
+import dev.mirutime.core.log.MiruLog
 import dev.mirutime.feature.reader.ChapterLoadStatus
 import dev.mirutime.feature.reader.MangaFeedPage
 import dev.mirutime.feature.reader.MangaFeedPlanner
@@ -236,22 +237,57 @@ fun ReaderScreen(
     val ttsSessionActive = ttsState.status == TtsStatus.Playing ||
         ttsState.status == TtsStatus.Loading ||
         ttsState.status == TtsStatus.Paused
-    // While TTS owns a cursor, a stale feed scroll from the previous chapter
-    // must not pull the session (and the guard) back. The TTS effect still
-    // adopts its own chapter and within-chapter offsets.
+    // While speech runs, a stale feed scroll from the previous chapter must not
+    // pull the session (and the guard) back. The TTS effect still adopts its own
+    // chapter and within-chapter offsets. A paused session is not speech: it
+    // follows the reader, so its anchor must land — dropping it froze the active
+    // chapter and left the visible one without a translation request.
+    // A dropped anchor is otherwise silent: when the visible chapter never
+    // becomes active, this line is the only evidence why.
+    var loggedAnchorDrop by remember { mutableStateOf("") }
+    var loggedAnchorAccept by remember { mutableStateOf("") }
     val onReaderAnchor: (ReadingAnchor, Int) -> Unit = { anchor, offset ->
         // A style preview reflows the page; persisting the reflowed anchor
         // would lose the pre-preview reading position.
         if (stylePreview.preview == null) {
+            // Live controller values: the collected state can lag a pause by a
+            // frame, and the guard must not decide on a stale status.
+            val liveStatus = graph.tts.state.value.status
             val spokenUrl = graph.tts.state.value.blockId?.chapterUrl
+            val guardsCursor = ttsGuardsReaderAnchor(liveStatus)
             if (shouldApplyReaderAnchor(
-                    ttsOwnsCursor = ttsSessionActive,
+                    ttsOwnsCursor = guardsCursor,
                     handoffInProgress = handoffInProgress,
                     spokenChapterUrl = spokenUrl,
                     anchorChapterUrl = anchor.chapterUrl,
                 )
             ) {
+                if (loggedAnchorAccept != anchor.chapterUrl) {
+                    loggedAnchorAccept = anchor.chapterUrl
+                    MiruLog.event(
+                        "reader",
+                        "anchor-accept",
+                        "chapter" to (state.chapters.firstOrNull { it.chapterUrl == anchor.chapterUrl }?.index ?: -1),
+                        "spoken" to (state.chapters.firstOrNull { it.chapterUrl == spokenUrl }?.index ?: -1),
+                        "guard" to guardsCursor,
+                        "status" to liveStatus.name.lowercase(),
+                    )
+                }
+                loggedAnchorDrop = ""
                 store.onAnchorChanged(anchor, offset)
+            } else if (loggedAnchorDrop != anchor.chapterUrl) {
+                loggedAnchorDrop = anchor.chapterUrl
+                // A later accept of the same chapter is a new decision.
+                loggedAnchorAccept = ""
+                MiruLog.event(
+                    "reader",
+                    "anchor-drop",
+                    "reason" to if (handoffInProgress) "handoff" else "tts-cursor",
+                    "chapter" to (state.chapters.firstOrNull { it.chapterUrl == anchor.chapterUrl }?.index ?: -1),
+                    "spoken" to (state.chapters.firstOrNull { it.chapterUrl == spokenUrl }?.index ?: -1),
+                    "active" to state.activeChapterIndex,
+                    "status" to liveStatus.name.lowercase(),
+                )
             }
         }
     }
@@ -534,6 +570,9 @@ fun ReaderScreen(
         state.restorePhase,
         sessionCaptured,
         handoffInProgress,
+        // Pause after the reader moved on: the chapter keys did not change, so
+        // without the status the paused cursor never catches up.
+        ttsState.status,
     ) {
         // Wait for the restore candidate to be copied into memory: stop()
         // clears the persisted slot, and must not erase it before that.
@@ -554,24 +593,40 @@ fun ReaderScreen(
             visibleChapterUrl = document.chapterUrl,
             bookChapterUrls = state.chapters.map { it.chapterUrl },
         )
+        MiruLog.event(
+            "tts",
+            "paused-follow",
+            "action" to follow.name.lowercase(),
+            "status" to status.name.lowercase(),
+            "visible" to document.chapterIndex,
+            "spoken" to (state.chapters.firstOrNull { it.chapterUrl == spokenUrl }?.index ?: -1),
+            "active" to state.activeChapterIndex,
+        )
         if (follow == PausedFollow.Seek) {
             // shortcut: block-level blank check; the chunker can still refuse
             // exotic documents. Nothing speakable would turn the pause into a
             // Failed session, so the old cursor stays.
-            if (document.blocks.none { it.original.isNotBlank() }) return@LaunchedEffect
+            if (document.blocks.none { it.original.isNotBlank() }) {
+                MiruLog.event("tts", "paused-follow-skip", "reason" to "no-speakable-block")
+                return@LaunchedEffect
+            }
             // A paused session follows the user's chapter instead of dying
             // there: move only the cursor, keep Paused and start no speech.
+            // The cursor lands on the block the reader sees, not on block 0:
+            // the feed follows the highlight, so block 0 would yank the page.
+            val visible = state.anchor?.takeIf { it.chapterUrl == document.chapterUrl }
             val source = ttsSource(document)
-            dev.mirutime.core.log.MiruLog.event(
+            MiruLog.event(
                 "tts",
                 "follow-paused-chapter",
                 "chapter" to document.chapterIndex,
+                "block" to (visible?.blockId?.index ?: 0),
             )
             graph.tts.seekToBlock(
                 document = document,
                 translations = source.translations,
-                blockIndex = 0,
-                charOffset = 0,
+                blockIndex = visible?.blockId?.index ?: 0,
+                charOffset = visible?.charOffset ?: 0,
                 language = source.language,
             )
         } else if (follow == PausedFollow.Stop) {
@@ -1710,6 +1765,14 @@ internal fun shouldApplyReaderAnchor(
     anchorChapterUrl: String,
 ): Boolean = !handoffInProgress &&
     (!ttsOwnsCursor || spokenChapterUrl == null || anchorChapterUrl == spokenChapterUrl)
+
+/**
+ * Only speech that is actually moving owns the cursor. A paused session follows
+ * the reader instead, so its anchor must be applied: dropping it froze the
+ * active chapter, which in turn stopped the translation of the visible chapter.
+ */
+internal fun ttsGuardsReaderAnchor(status: TtsStatus): Boolean =
+    status == TtsStatus.Playing || status == TtsStatus.Loading
 
 /**
  * What a chapter change does to the TTS session: [Seek] moves a paused cursor
