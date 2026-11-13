@@ -105,6 +105,9 @@ private data class RepoCatalogEntryModel(
     val contentType: String? = null,
     val language: String? = null,
     val icon: String? = null,
+    // Declared shared-library deps: dropping them here would silently disable
+    // the install gate for every catalog read from this cache.
+    val requires: List<String> = emptyList(),
 )
 
 private fun IndexEntry.toDiskModel(): RepoCatalogEntryModel = RepoCatalogEntryModel(
@@ -117,6 +120,7 @@ private fun IndexEntry.toDiskModel(): RepoCatalogEntryModel = RepoCatalogEntryMo
     contentType = contentType,
     language = language,
     icon = icon,
+    requires = requires,
 )
 
 private fun RepoCatalogEntryModel.toIndexEntry(): IndexEntry? {
@@ -133,5 +137,9 @@ private fun RepoCatalogEntryModel.toIndexEntry(): IndexEntry? {
         contentType = contentType,
         language = language,
         icon = icon,
+        requires = requires.trimmed().distinct(),
     )
 }
+
+private fun List<String>.trimmed(): List<String> =
+    mapNotNull { it.trim().takeIf(String::isNotEmpty) }

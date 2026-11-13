@@ -29,6 +29,7 @@ class RepoCatalogStoreTest {
                         contentType = "manga",
                         language = "ru",
                         icon = "https://cdn.example/beta.png",
+                        requires = listOf("urls", "catalog"),
                     ),
                 ),
             ),
@@ -47,6 +48,7 @@ class RepoCatalogStoreTest {
         assertEquals("manga", beta.contentType)
         assertEquals("ru", beta.language)
         assertEquals("https://cdn.example/beta.png", beta.icon)
+        assertEquals(listOf("urls", "catalog"), beta.requires)
         assertEquals("https://example.com/beta.lua", beta.url)
     }
 
@@ -167,6 +169,7 @@ class RepoCatalogStoreTest {
         contentType: String? = null,
         language: String? = null,
         icon: String? = null,
+        requires: List<String> = emptyList(),
     ) = IndexEntry(
         id = id,
         name = name,
@@ -176,6 +179,7 @@ class RepoCatalogStoreTest {
         contentType = contentType,
         language = language,
         icon = icon,
+        requires = requires,
     )
 
     private class MapFileSystem : FileSystem {

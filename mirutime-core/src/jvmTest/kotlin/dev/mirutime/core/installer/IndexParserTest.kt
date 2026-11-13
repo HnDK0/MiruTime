@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class IndexParserTest {
 
@@ -160,6 +161,27 @@ class IndexParserTest {
         assertNull(plain.contentType)
         assertNull(plain.language)
         assertNull(plain.icon)
+    }
+
+    @Test
+    fun `requires list is parsed and normalized`() {
+        val index = parsePluginIndex(
+            """
+            sources:
+              - id: "a"
+                url: "https://example.com/a.lua"
+                requires:
+                  - "catalog"
+                  - " urls "
+                  - ""
+                  - "catalog"
+              - id: "b"
+                url: "https://example.com/b.lua"
+            """.trimIndent(),
+        )
+
+        assertEquals(listOf("catalog", "urls"), index.sources.first { it.id == "a" }.requires)
+        assertTrue(index.sources.first { it.id == "b" }.requires.isEmpty())
     }
 
     @Test
