@@ -1,7 +1,6 @@
 package dev.mirutime.app.di
 
 import dev.mirutime.core.installer.IndexEntry
-import dev.mirutime.core.installer.InstallResult
 import dev.mirutime.core.installer.parsePluginIndex
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -17,11 +16,6 @@ class PluginGraphLibrariesTest {
         url = "https://example.com/$id.lua",
         sha256 = sha256,
     )
-
-    private fun fetchFrom(scripts: Map<String, String>): suspend (String) -> ByteArray = { url ->
-        val id = url.substringAfterLast('/').removeSuffix(".lua")
-        scripts[id]?.encodeToByteArray() ?: error("404 $url")
-    }
 
     @Test
     fun `catalog keeps root and language-index libraries`() {
@@ -113,173 +107,80 @@ class PluginGraphLibrariesTest {
     }
 
     @Test
-    fun `closure includes direct and transitive libraries but no unrelated one`() = runBlocking {
-        val scripts = mapOf(
-            "a" to """local b = require_lib("b")""",
-            "b" to "return {}",
-        )
-        val libraries = listOf(entry("a"), entry("b"), entry("unused"))
+    fun `only the failed ids are retried and a clean retry wins`() = runBlocking {
+        val libraries = listOf(entry("a"), entry("b"), entry("c"))
+        val passes = mutableListOf<List<String>>()
 
-        val closure = resolveLibraryClosure(
-            scripts = listOf("""local a = require_lib("a")"""),
-            libraries = libraries,
-            fetch = fetchFrom(scripts),
-        )
+        val failures = syncLibrariesWithRetry(libraries) { requested ->
+            passes += requested.map { it.id }
+            // First pass: one blip. Second pass: clean.
+            if (passes.size == 1) listOf("b" to "timeout") else emptyList()
+        }
 
-        assertEquals(listOf("b", "a"), closure.entries.map { it.id })
-        assertTrue(closure.failures.isEmpty())
-    }
-
-    @Test
-    fun `missing require_lib is reported`() = runBlocking {
-        val closure = resolveLibraryClosure(
-            scripts = listOf("""require_lib("absent")"""),
-            libraries = emptyList(),
-            fetch = fetchFrom(emptyMap()),
-        )
-
-        assertTrue(closure.entries.isEmpty())
-        assertEquals("absent", closure.failures.single().first)
-    }
-
-    @Test
-    fun `library cycle is reported`() = runBlocking {
-        val scripts = mapOf(
-            "a" to """require_lib("b")""",
-            "b" to """require_lib("a")""",
-        )
-        val closure = resolveLibraryClosure(
-            scripts = listOf("""require_lib("a")"""),
-            libraries = listOf(entry("a"), entry("b")),
-            fetch = fetchFrom(scripts),
-        )
-
-        assertEquals(listOf("b", "a"), closure.entries.map { it.id })
-        assertTrue(closure.failures.any { it.second == "library cycle detected" })
-    }
-
-    @Test
-    fun `installed-only refresh syncs just the installed closure`() = runBlocking {
-        val scripts = mapOf("a" to "return {}")
-        val installedScripts = listOf("""require_lib("a")""")
-        val libraries = listOf(entry("a"), entry("unused"))
-        var synced: List<IndexEntry>? = null
-
-        val failures = syncInstalledLibraryClosure(
-            pluginScripts = installedScripts,
-            libraries = libraries,
-            fetch = fetchFrom(scripts),
-            install = { entries ->
-                synced = entries
-                emptyList()
-            },
-        )
-
-        assertEquals(listOf("a"), synced?.map { it.id })
+        assertEquals(listOf(listOf("a", "b", "c"), listOf("b")), passes)
         assertTrue(failures.isEmpty())
     }
 
     @Test
-    fun `installed-only refresh without installed scripts downloads nothing`() = runBlocking {
-        var synced: List<IndexEntry>? = null
-        val failures = syncInstalledLibraryClosure(
-            pluginScripts = emptyList(),
-            libraries = listOf(entry("a")),
-            fetch = fetchFrom(emptyMap()),
-            install = { entries ->
-                synced = entries
-                emptyList()
-            },
+    fun `a library that keeps failing is reported after one retry`() = runBlocking {
+        val libraries = listOf(entry("a"), entry("b"))
+        val passes = mutableListOf<List<String>>()
+
+        val failures = syncLibrariesWithRetry(libraries) { requested ->
+            passes += requested.map { it.id }
+            requested.filter { it.id == "b" }.map { it.id to "404" }
+        }
+
+        assertEquals(listOf(listOf("a", "b"), listOf("b")), passes)
+        assertEquals(listOf("b" to "404"), failures)
+    }
+
+    @Test
+    fun `declared libraries gate only the entry that needs them`() {
+        val entry = IndexEntry(
+            id = "p",
+            name = null,
+            version = null,
+            url = "https://example.com/p.lua",
+            sha256 = null,
+            requires = listOf("catalog", "missing"),
         )
 
-        assertEquals(null, synced)
+        assertEquals(listOf("missing"), missingRequires(entry, setOf("catalog", "urls")))
+        assertTrue(missingRequires(entry, setOf("catalog", "missing")).isEmpty())
+        // An index without `requires` (old repository) is never gated.
+        assertTrue(missingRequires(entry.copy(requires = emptyList()), emptySet()).isEmpty())
+    }
+
+    @Test
+    fun `batch gate holds back only entries whose libraries are absent`() {
+        val ready = IndexEntry(
+            id = "ready", name = null, version = null,
+            url = "https://example.com/ready.lua", sha256 = null,
+            requires = listOf("urls"),
+        )
+        val noDeps = ready.copy(id = "plain", requires = emptyList())
+        val broken = ready.copy(id = "broken", requires = listOf("urls", "catalog"))
+
+        val (allowed, blocked) = gatePendingInstalls(
+            listOf(ready, noDeps, broken),
+            setOf("urls"),
+        )
+
+        assertEquals(setOf("ready", "plain"), allowed)
+        assertEquals(listOf("broken" to "missing libraries: catalog"), blocked)
+    }
+
+    @Test
+    fun `a clean first pass does not retry`() = runBlocking {
+        var calls = 0
+
+        val failures = syncLibrariesWithRetry(listOf(entry("a"))) {
+            calls++
+            emptyList()
+        }
+
+        assertEquals(1, calls)
         assertTrue(failures.isEmpty())
-    }
-
-    // Fail-closed: a plugin whose library closure cannot be satisfied must not
-    // be committed. Otherwise it looks installed and breaks only at load time.
-
-    @Test
-    fun `missing required library blocks the commit`() = runBlocking {
-        var committed = false
-        val result = installWithLibraries(
-            scriptCode = """require_lib("absent")""",
-            libraries = emptyList(),
-            fetch = fetchFrom(emptyMap()),
-            installLibraries = { emptyList() },
-            commit = {
-                committed = true
-                InstallResult.Success("lua_plugins/p.lua", null)
-            },
-        )
-
-        assertTrue(!committed)
-        val reason = (result as InstallResult.Failed).reason
-        assertTrue(reason, reason.contains("absent"))
-    }
-
-    @Test
-    fun `library cycle blocks the commit`() = runBlocking {
-        val scripts = mapOf(
-            "a" to """require_lib("b")""",
-            "b" to """require_lib("a")""",
-        )
-        var committed = false
-        val result = installWithLibraries(
-            scriptCode = """require_lib("a")""",
-            libraries = listOf(entry("a"), entry("b")),
-            fetch = fetchFrom(scripts),
-            installLibraries = { emptyList() },
-            commit = {
-                committed = true
-                InstallResult.Success("lua_plugins/p.lua", null)
-            },
-        )
-
-        assertTrue(!committed)
-        val reason = (result as InstallResult.Failed).reason
-        assertTrue(reason, reason.contains("cycle"))
-    }
-
-    @Test
-    fun `failed library install blocks the commit`() = runBlocking {
-        var committed = false
-        var installedLibraries: List<IndexEntry>? = null
-        val result = installWithLibraries(
-            scriptCode = """require_lib("a")""",
-            libraries = listOf(entry("a")),
-            fetch = fetchFrom(mapOf("a" to "return {}")),
-            installLibraries = { libraries ->
-                installedLibraries = libraries
-                listOf("a" to "offline")
-            },
-            commit = {
-                committed = true
-                InstallResult.Success("lua_plugins/p.lua", null)
-            },
-        )
-
-        assertEquals(listOf("a"), installedLibraries?.map { it.id })
-        assertTrue(!committed)
-        val reason = (result as InstallResult.Failed).reason
-        assertTrue(reason, reason.contains("offline"))
-    }
-
-    @Test
-    fun `satisfied closure commits the script`() = runBlocking {
-        var committed = false
-        val result = installWithLibraries(
-            scriptCode = """require_lib("a")""",
-            libraries = listOf(entry("a")),
-            fetch = fetchFrom(mapOf("a" to "return {}")),
-            installLibraries = { emptyList() },
-            commit = {
-                committed = true
-                InstallResult.Success("lua_plugins/p.lua", null)
-            },
-        )
-
-        assertTrue(committed)
-        assertTrue(result is InstallResult.Success)
     }
 }

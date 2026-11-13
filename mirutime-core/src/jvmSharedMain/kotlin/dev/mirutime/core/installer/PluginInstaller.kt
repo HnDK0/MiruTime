@@ -99,8 +99,8 @@ class PluginInstaller(
     // before ANY fetch. URL-only: the engine's SafeDns hook owns address checks.
     private val ssrfGuard: SsrfGuard? = SsrfGuard(),
 ) {
-    // Download + gates without writing anything. Callers that must inspect the
-    // script first (require_lib closure) commit the same bytes afterwards.
+    // Download + gates without writing anything. The graph commits the same
+    // bytes afterwards, once the shared library section is in place.
     suspend fun fetchSource(entry: IndexEntry): SourceFetch {
         preflightFailure(entry)?.let { return SourceFetch.Failed(it) }
         val expected = entry.sha256
@@ -152,8 +152,8 @@ class PluginInstaller(
         // Same URL-level preflight as source install, before the sha shortcut:
         // a hostile index URL is refused even when the local copy matches.
         ssrfRefusal(entry.url)?.let { return InstallResult.Failed(it) }
-        // Already at the published content: no network, no rewrite. Refresh
-        // passes rescan the installed closure, so unchanged libs stay cheap.
+        // Already at the published content: no network, no rewrite, so a
+        // refresh over unchanged libs stays cheap.
         if (expected.equals(installedLibrarySha256(entry.id), ignoreCase = true)) {
             return InstallResult.Success("$libDir/${entry.id}.lua", expected)
         }
@@ -170,7 +170,7 @@ class PluginInstaller(
         }
     }
 
-    // Installs exactly the given libraries (a resolved require_lib closure).
+    // Installs exactly the given libraries (the repository's shared section).
     suspend fun installLibraries(libraries: List<IndexEntry>): List<InstallResult> =
         libraries.map { installLibrary(it) }
 

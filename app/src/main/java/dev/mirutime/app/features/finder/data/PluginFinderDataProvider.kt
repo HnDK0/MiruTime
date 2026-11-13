@@ -682,7 +682,7 @@ class PluginFinderDataProvider(
             installed = graph.installed.value,
             fresh = fresh,
             cached = cached,
-            syncLibraries = graph::syncLibrariesForInstalled,
+            syncLibraries = graph::syncLibraries,
         )
     }
 
@@ -727,8 +727,8 @@ class PluginFinderDataProvider(
     override fun defaultRepoUrl(): String = graph.defaultRepoUrl
 
     // Persist + reload the catalog only. Installing is an explicit action.
-    // Only the already-installed scripts' require_lib closures are synced, so
-    // switching repositories never downloads the whole library section.
+    // Libraries are synced so installed plugins that resolve them dynamically
+    // keep working after a repository switch.
     override suspend fun refreshRepo(url: String): InstallReport {
         graph.setRepoUrl(url)
         val fresh = graph.repoCatalog(force = true)
@@ -737,7 +737,7 @@ class PluginFinderDataProvider(
         } else {
             null
         }
-        val libraryFailures = graph.syncLibrariesForInstalled(
+        val libraryFailures = graph.syncLibraries(
             fresh.libraries.ifEmpty { cached?.libraries.orEmpty() },
         )
         val repoFailures = fresh.error?.let { listOf(REPO_FAILURE_KEY to it) }.orEmpty()
@@ -1438,9 +1438,9 @@ internal fun refreshRepoEntries(fresh: RepoCatalog, cached: RepoCatalog?): List<
         fresh.entries
     }
 
-// Refresh = sync the require_lib closure of installed scripts only, then merge
-// the rows. Not every repository library is installed: only what an installed
-// plugin actually requires (or reports as missing/cyclic). Fresh libs win; the
+// Refresh = sync the repository library section, then merge the rows. The whole
+// section is installed (sha-gated, so unchanged libs cost no network): plugins
+// reach libs through dynamic wrappers the host cannot scan. Fresh libs win; the
 // cached snapshot only supplies them when the network failed before the root
 // index was parsed.
 internal suspend fun refreshExtensionsWithLibraries(

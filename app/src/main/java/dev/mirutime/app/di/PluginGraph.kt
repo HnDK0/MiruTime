@@ -47,7 +47,6 @@ import dev.mirutime.core.installer.ScriptMetadataParser
 import dev.mirutime.core.installer.SourceFetch
 import java.nio.charset.Charset
 import dev.mirutime.core.installer.parsePluginIndex
-import dev.mirutime.core.installer.resolveRequireLibClosure
 import dev.mirutime.core.installer.toPluginMetadata
 import dev.mirutime.core.network.HostOptionsRegistry
 import dev.mirutime.core.network.NetworkTraceEvent
@@ -74,6 +73,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -333,6 +333,9 @@ class PluginGraph(
     @Volatile
     private var scanned = false
     private val scanMutex = Mutex()
+    private val libsMutex = Mutex()
+    @Volatile
+    private var bootstrapJob: Job? = null
 
     fun repoUrl(): String = _repoUrl.value
 
@@ -418,7 +421,7 @@ class PluginGraph(
 
     // Runs the initial disk scan once, off the caller's thread.
     fun bootstrap() {
-        scope.launch { scan() }
+        bootstrapJob = scope.launch { scan() }
     }
 
     // Enumerates installed scripts and rebuilds the list. Never throws: a
@@ -662,14 +665,49 @@ class PluginGraph(
         fileSystem.read("$INSTALL_DIR/$id.lua")?.decodeToString()
     }
 
-    // Installs exactly the given library entries (a resolved require_lib
-    // closure) and reports every failure. Unchanged libs are a no-op inside
-    // the installer (sha match = no network). Any lib that actually changed
-    // invalidates all loaded handles: they compiled and bound the previous
-    // content, so new sessions must reload from disk. Targeted by design:
-    // callers pass the closure, never the repository's whole library list.
-    internal suspend fun syncLibraries(libraries: List<IndexEntry>): List<Pair<String, String>> {
-        if (libraries.isEmpty()) return emptyList()
+    // Installs the repository library section and reports every failure.
+    // Unchanged libs are a no-op inside the installer (sha match = no network).
+    // A single retry of the failed ids covers a blip in the N-request burst.
+    // Serialized so the startup heal and an install/refresh cannot fetch the
+    // same missing libs twice. Off the caller's thread: the sha gate reads
+    // every installed lib file.
+    internal suspend fun syncLibraries(libraries: List<IndexEntry>): List<Pair<String, String>> =
+        if (libraries.isEmpty()) {
+            emptyList()
+        } else withContext(Dispatchers.IO) {
+            val failures = libsMutex.withLock {
+                syncLibrariesWithRetry(libraries) { installLibraryPass(it) }
+            }
+            MiruLog.event(
+                "plugins",
+                "libs-sync",
+                "ok" to failures.isEmpty(),
+                "failed" to failures.size,
+            )
+            failures
+        }
+
+    // Self-heal for installs whose libraries never landed (interrupted sync,
+    // or a build that only installed declared dependencies). Runs in the
+    // background at startup: the disk catalog and the sha gate mean a healthy
+    // library dir costs no network at all.
+    // Startup heal waits for the warming scan instead of racing it into a
+    // second full disk pass.
+    suspend fun ensureLibraries() {
+        // bootstrap() may not have run yet when this step starts: scan directly
+        // instead of silently skipping the heal for the whole session.
+        val warming = bootstrapJob
+        if (warming != null) warming.join() else scan()
+        if (installed.value.isEmpty()) return
+        syncLibraries(repoCatalogCached().libraries)
+    }
+
+    // Any lib that actually changed invalidates all loaded handles: they
+    // compiled and bound the previous content, so new sessions must reload
+    // from disk.
+    private suspend fun installLibraryPass(
+        libraries: List<IndexEntry>,
+    ): List<Pair<String, String>> {
         val pending = librariesNeedingInstall(libraries, installer::installedLibrarySha256)
             .mapTo(mutableSetOf()) { it.id }
         val results = try {
@@ -702,18 +740,6 @@ class PluginGraph(
         return failed
     }
 
-    // Refresh/URL-change path: only the installed scripts are scanned, and
-    // only their require_lib closure is synced. Libraries used by catalog
-    // entries that are not installed are never downloaded.
-    internal suspend fun syncLibrariesForInstalled(
-        libraries: List<IndexEntry>,
-    ): List<Pair<String, String>> = withContext(Dispatchers.IO) {
-        val scripts = fileSystem.list(INSTALL_DIR)
-            .filter { it.endsWith(".lua") }
-            .mapNotNull { fileSystem.read(it)?.decodeToString() }
-        syncInstalledLibraryClosure(scripts, libraries, ::fetchBytes, ::syncLibraries)
-    }
-
     private suspend fun installEntries(
         entries: List<IndexEntry>,
         libraries: List<IndexEntry>,
@@ -740,32 +766,32 @@ class PluginGraph(
             }
         }
         if (pending.isNotEmpty()) {
-            // Library code is fetched once per URL and reused by every
-            // script's own closure resolution (per-script attribution: one
-            // broken dependency must not fail unrelated plugins).
-            val libraryCode = mutableMapOf<String, String>()
-            val libraryErrors = mutableMapOf<String, String>()
-            val cachedFetch: suspend (String) -> ByteArray = { libUrl ->
-                libraryErrors[libUrl]?.let { error("library fetch failed: $it") }
-                libraryCode[libUrl]?.let { it.encodeToByteArray() } ?: run {
-                    try {
-                        fetchBytes(libUrl).also { libraryCode[libUrl] = it.decodeToString() }
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        libraryErrors[libUrl] = e.message ?: "fetch failed"
-                        throw e
-                    }
-                }
-            }
-            for ((entry, source) in pending) {
-                val result = installWithLibraries(
-                    scriptCode = source.code,
-                    libraries = libraries,
-                    fetch = cachedFetch,
-                    installLibraries = ::syncLibraries,
-                    commit = { installer.commitSource(entry, source) },
+            // Libraries are a shared bundle: install the section best-effort
+            // (sha-gated, one retry). A failure here only matters to the
+            // plugins that declare that id in `requires` — the repository
+            // generates that list from each script's own require_lib sites, so
+            // attribution is exact without any host-side guessing.
+            val libFailures = syncLibraries(libraries)
+            if (libFailures.isNotEmpty()) {
+                MiruCoreLogger.w(
+                    TAG,
+                    "library sync incomplete: " +
+                        libFailures.joinToString("; ") { "${it.first}: ${it.second}" },
                 )
+            }
+            // What is actually on disk wins over the catalog: a library the
+            // index does not list (repo switch, partial index) still satisfies
+            // require_lib. Stale bytes are accepted on purpose — a plugin that
+            // already works with the installed copy must not be blocked.
+            val installedLibs = fileSystem.list(LIB_DIR)
+                .filter { it.endsWith(".lua") }
+                .mapTo(HashSet()) { it.substringAfterLast('/').removeSuffix(".lua") }
+            val (allowedIds, blocked) = gatePendingInstalls(pending.map { it.first }, installedLibs)
+            failed += blocked
+            blocked.forEach { (id, reason) -> MiruCoreLogger.w(TAG, "install '$id' failed: $reason") }
+            for ((entry, source) in pending) {
+                if (entry.id !in allowedIds) continue
+                val result = installer.commitSource(entry, source)
                 when (result) {
                     is InstallResult.Success -> {
                         installed += entry.id
@@ -1136,99 +1162,6 @@ internal fun decodeFetchedText(
         .getOrElse { bytes.decodeToString() }
 }
 
-internal data class LibraryClosure(
-    val entries: List<IndexEntry>,
-    val failures: List<Pair<String, String>>,
-)
-
-// Fail-closed install of one already-fetched source: resolve its require_lib
-// closure, install the dependencies, then commit. A missing/cyclic/failed
-// library returns Failed WITHOUT writing the script — a committed script whose
-// library never landed would look installed and then break at load time.
-internal suspend fun installWithLibraries(
-    scriptCode: String,
-    libraries: List<IndexEntry>,
-    fetch: suspend (String) -> ByteArray,
-    installLibraries: suspend (List<IndexEntry>) -> List<Pair<String, String>>,
-    commit: () -> InstallResult,
-): InstallResult {
-    val closure = try {
-        resolveLibraryClosure(listOf(scriptCode), libraries, fetch)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        return InstallResult.Failed("required library scan failed: ${e.message ?: "unknown"}")
-    }
-    if (closure.failures.isNotEmpty()) {
-        return InstallResult.Failed(closure.failures.joinToString("; ") { "${it.first}: ${it.second}" })
-    }
-    val failures = try {
-        installLibraries(closure.entries)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        listOf(REPO_FAILURE_KEY to (e.message ?: "library install failed"))
-    }
-    if (failures.isNotEmpty()) {
-        return InstallResult.Failed(failures.joinToString("; ") { "${it.first}: ${it.second}" })
-    }
-    return commit()
-}
-
-// Resolves the require_lib closure of [scripts] against the catalog
-// [libraries]. Libraries outside the closure are never fetched or installed.
-// Missing ids and cycles become failures; the remaining entries stay in
-// dependency order.
-internal suspend fun resolveLibraryClosure(
-    scripts: List<String>,
-    libraries: List<IndexEntry>,
-    fetch: suspend (String) -> ByteArray,
-): LibraryClosure {
-    val byId = libraries.associateBy { it.id }
-    val fetchFailures = mutableMapOf<String, String>()
-    val closure = resolveRequireLibClosure(scripts) { id ->
-        val entry = byId[id] ?: return@resolveRequireLibClosure null
-        try {
-            fetch(entry.url).decodeToString()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            fetchFailures[id] = e.message ?: "fetch failed"
-            null
-        }
-    }
-    val failures = buildList {
-        for (id in closure.missing) {
-            add(
-                id to (
-                    fetchFailures[id]?.let { "library '$id' fetch failed: $it" }
-                        ?: "library '$id' is not in the repository"
-                    ),
-            )
-        }
-        for (cycle in closure.cycles) {
-            add(cycle.joinToString(" -> ") to "library cycle detected")
-        }
-    }
-    return LibraryClosure(
-        entries = closure.order.mapNotNull { byId[it] },
-        failures = failures,
-    )
-}
-
-// Installed-only refresh: sync the closure of the scripts that are actually on
-// disk. A repository library no installed plugin requires is never downloaded.
-internal suspend fun syncInstalledLibraryClosure(
-    pluginScripts: List<String>,
-    libraries: List<IndexEntry>,
-    fetch: suspend (String) -> ByteArray,
-    install: suspend (List<IndexEntry>) -> List<Pair<String, String>>,
-): List<Pair<String, String>> {
-    if (pluginScripts.isEmpty()) return emptyList()
-    val closure = resolveLibraryClosure(pluginScripts, libraries, fetch)
-    return closure.failures + install(closure.entries)
-}
-
 // Canonical plugin repository (external-sources, main branch).
 const val DEFAULT_REPO_URL =
     "https://raw.githubusercontent.com/HnDK0/external-sources/main/index.yaml"
@@ -1293,6 +1226,46 @@ internal fun librariesNeedingInstall(
 ): List<IndexEntry> = libraries.filter { entry ->
     val expected = entry.sha256
     expected == null || !expected.equals(installedSha256(entry.id), ignoreCase = true)
+}
+
+// Declared-but-missing shared libraries for one entry: empty when the index
+// carries no `requires` (old repositories) or every id is on disk.
+internal fun missingRequires(entry: IndexEntry, installedIds: Set<String>): List<String> =
+    entry.requires.filterNot { it in installedIds }
+
+// Splits a pending batch into the ids that may commit and the ones held back
+// because a declared library has no file on disk (id -> report reason).
+internal fun gatePendingInstalls(
+    pending: List<IndexEntry>,
+    installedLibraryIds: Set<String>,
+): Pair<Set<String>, List<Pair<String, String>>> {
+    val allowed = HashSet<String>(pending.size)
+    val blocked = mutableListOf<Pair<String, String>>()
+    for (entry in pending) {
+        val missing = missingRequires(entry, installedLibraryIds)
+        if (missing.isEmpty()) {
+            allowed += entry.id
+        } else {
+            blocked += entry.id to "missing libraries: ${missing.joinToString(", ")}"
+        }
+    }
+    return allowed to blocked
+}
+
+// One retry of just the ids that failed: a dropped request in a 40-file burst
+// is transient, while a real 404/sha problem fails both passes.
+internal suspend fun syncLibrariesWithRetry(
+    libraries: List<IndexEntry>,
+    pass: suspend (List<IndexEntry>) -> List<Pair<String, String>>,
+): List<Pair<String, String>> {
+    val first = pass(libraries)
+    if (first.isEmpty()) return first
+    val retryIds = first.mapTo(HashSet()) { it.first }
+    val retry = libraries.filter { it.id in retryIds }
+    // A failure keyed by something outside the list (a repo-level marker) is
+    // not retryable; report the first pass as is.
+    if (retry.isEmpty()) return first
+    return pass(retry)
 }
 
 // Same lookup as PluginGraph.imageHeadersFor, kept pure so the header port can

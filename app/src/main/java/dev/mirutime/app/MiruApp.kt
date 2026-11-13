@@ -762,6 +762,10 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
                     translationScheduler.enqueue(bookId)
                 }
             }
+            // Plugins resolve their shared libs dynamically, so a missing lib
+            // cannot be attributed at install time; heal from the disk catalog
+            // on every launch. Last on purpose: it never delays other steps.
+            step("startup_plugin_libs_failed") { pluginGraph.ensureLibraries() }
         }
         // Warm the installed-plugin list once; screens read graph.installed.
         pluginGraph.bootstrap()
