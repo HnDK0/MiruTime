@@ -1166,9 +1166,10 @@ internal fun decodeFetchedText(
         .getOrElse { bytes.decodeToString() }
 }
 
-// Canonical plugin repository (external-sources, main branch).
+// Canonical plugin repository. v2 publishes the shared `libraries:` section
+// the plugin corpus resolves through require_lib; main predates it.
 const val DEFAULT_REPO_URL =
-    "https://raw.githubusercontent.com/HnDK0/external-sources/main/index.yaml"
+    "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/v2/index.yaml"
 
 private const val TAG = "PluginGraph"
 private const val ROOT_DIR = "mirutime_plugins"

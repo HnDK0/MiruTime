@@ -624,7 +624,7 @@ object FinderFixtures {
     )
 
     // Canonical plugin repository (external-sources, main branch).
-    const val DefaultRepo = "https://raw.githubusercontent.com/HnDK0/external-sources/main/index.yaml"
+    const val DefaultRepo = "https://raw.githubusercontent.com/HnDK0/external-sources/refs/heads/v2/index.yaml"
     var repoUrl = DefaultRepo
 
     // The repo: 9 installed (one disabled, two with updates) + 4 available.
