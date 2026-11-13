@@ -332,6 +332,47 @@ class TtsControllerTest {
     }
 
     @Test
+    fun `paused seek to another chapter persists the cursor and never speaks`() = runTest {
+        val engine = FakeEngine()
+        val sessions = InMemoryTtsSessionStore()
+        val controller = TtsController(engine, this, sessions)
+        controller.play(document, emptyMap())
+        controller.pause()
+        val spoken = engine.spokenTexts.size
+        val otherChapter = "local://book#chapter=2"
+        val other = ReaderDocument(
+            bookUrl = "local://book",
+            chapterUrl = otherChapter,
+            chapterIndex = 2,
+            title = "Chapter 2",
+            blocks = listOf(
+                ReaderBlock(
+                    id = BlockId(otherChapter, 0),
+                    kind = BlockKind.Paragraph,
+                    original = "Chapter two.",
+                    sentences = listOf(SentenceSpan(0, 11)),
+                ),
+                ReaderBlock(
+                    id = BlockId(otherChapter, 1),
+                    kind = BlockKind.Paragraph,
+                    original = "Second paragraph.",
+                    sentences = listOf(SentenceSpan(0, 17)),
+                ),
+            ),
+        )
+
+        controller.seekToBlock(other, emptyMap(), blockIndex = 1)
+
+        assertEquals(TtsStatus.Paused, controller.state.value.status)
+        assertEquals(spoken, engine.spokenTexts.size)
+        val saved = sessions.load()
+        assertEquals(2, saved?.chapterIndex)
+        assertEquals(otherChapter, saved?.chapterUrl)
+        assertEquals(1, saved?.blockIndex)
+        assertEquals(false, saved?.wasPlaying)
+    }
+
+    @Test
     fun `paragraph seek keeps a playing session playing`() = runTest {
         val controller = TtsController(FakeEngine(), this, InMemoryTtsSessionStore())
         controller.play(document, emptyMap())

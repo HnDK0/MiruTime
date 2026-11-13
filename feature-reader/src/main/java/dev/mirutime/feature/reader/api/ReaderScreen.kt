@@ -379,7 +379,9 @@ fun ReaderScreen(
     // these buttons (route replacement, process teardown).
     val exitReader: () -> Unit = {
         restoreReaderBarsNow(context)
-        graph.ttsCoordinator.stop()
+        // A paused session outlives Back so Continue can resume it; audio that
+        // is still running must not keep playing behind the shell.
+        if (shouldStopTtsOnExit(graph.tts.state.value.status)) graph.ttsCoordinator.stop()
         graph.stopTtsSession()
         onBack()
     }
@@ -439,28 +441,6 @@ fun ReaderScreen(
         val previous = view.keepScreenOn
         view.keepScreenOn = keepScreenOn
         onDispose { view.keepScreenOn = previous }
-    }
-    LaunchedEffect(
-        state.activeChapterIndex,
-        state.documents[state.activeChapterIndex]?.chapterUrl,
-        state.restorePhase,
-        sessionCaptured,
-        handoffInProgress,
-    ) {
-        // Wait for the restore candidate to be copied into memory: stop()
-        // clears the persisted slot, and must not erase it before that.
-        if (!sessionCaptured) return@LaunchedEffect
-        // A recreate reopens the session and briefly has no document for the
-        // active index; that is not a manual chapter change.
-        if (state.restorePhase != RestorePhase.Ready) return@LaunchedEffect
-        if (state.documents[state.activeChapterIndex] == null) return@LaunchedEffect
-        // The coordinator owns the hand-off; a chapter change it caused must
-        // not stop the speech it is about to restart. The key re-runs when the
-        // hand-off finishes, so a manual change during it is still caught.
-        if (handoffInProgress) return@LaunchedEffect
-        val spokenUrl = graph.tts.state.value.blockId?.chapterUrl
-        val visibleUrl = state.documents[state.activeChapterIndex]?.chapterUrl
-        if (spokenUrl != null && spokenUrl != visibleUrl) graph.tts.stop()
     }
     LaunchedEffect(isManga) {
         if (isManga) {
@@ -547,6 +527,57 @@ fun ReaderScreen(
             parallelOrder = graph.settings.parallelOrder,
             translations = visibleTranslations[document.chapterUrl]?.translations,
         )
+
+    LaunchedEffect(
+        state.activeChapterIndex,
+        state.documents[state.activeChapterIndex]?.chapterUrl,
+        state.restorePhase,
+        sessionCaptured,
+        handoffInProgress,
+    ) {
+        // Wait for the restore candidate to be copied into memory: stop()
+        // clears the persisted slot, and must not erase it before that.
+        if (!sessionCaptured) return@LaunchedEffect
+        // A recreate reopens the session and briefly has no document for the
+        // active index; that is not a manual chapter change.
+        if (state.restorePhase != RestorePhase.Ready) return@LaunchedEffect
+        val document = state.documents[state.activeChapterIndex] ?: return@LaunchedEffect
+        // The coordinator owns the hand-off; a chapter change it caused must
+        // not stop the speech it is about to restart. The key re-runs when the
+        // hand-off finishes, so a manual change during it is still caught.
+        if (handoffInProgress) return@LaunchedEffect
+        val status = graph.tts.state.value.status
+        val spokenUrl = graph.tts.state.value.blockId?.chapterUrl
+        val follow = pausedFollowAction(
+            status = status,
+            spokenChapterUrl = spokenUrl,
+            visibleChapterUrl = document.chapterUrl,
+            bookChapterUrls = state.chapters.map { it.chapterUrl },
+        )
+        if (follow == PausedFollow.Seek) {
+            // shortcut: block-level blank check; the chunker can still refuse
+            // exotic documents. Nothing speakable would turn the pause into a
+            // Failed session, so the old cursor stays.
+            if (document.blocks.none { it.original.isNotBlank() }) return@LaunchedEffect
+            // A paused session follows the user's chapter instead of dying
+            // there: move only the cursor, keep Paused and start no speech.
+            val source = ttsSource(document)
+            dev.mirutime.core.log.MiruLog.event(
+                "tts",
+                "follow-paused-chapter",
+                "chapter" to document.chapterIndex,
+            )
+            graph.tts.seekToBlock(
+                document = document,
+                translations = source.translations,
+                blockIndex = 0,
+                charOffset = 0,
+                language = source.language,
+            )
+        } else if (follow == PausedFollow.Stop) {
+            graph.tts.stop()
+        }
+    }
 
     // Enabling translation (or changing the pair) must translate everything the
     // feed can show now, not on the next navigation. A chapter scrolled into
@@ -1679,6 +1710,35 @@ internal fun shouldApplyReaderAnchor(
     anchorChapterUrl: String,
 ): Boolean = !handoffInProgress &&
     (!ttsOwnsCursor || spokenChapterUrl == null || anchorChapterUrl == spokenChapterUrl)
+
+/**
+ * What a chapter change does to the TTS session: [Seek] moves a paused cursor
+ * into the newly visible chapter, [Stop] ends running speech, [None] leaves
+ * the session alone.
+ */
+internal enum class PausedFollow { None, Seek, Stop }
+
+/**
+ * A paused session follows the reader inside its own book. A session that
+ * belongs to another book is left untouched: the controller is app-scoped and
+ * outlives Back, so opening another book must not move its cursor.
+ */
+internal fun pausedFollowAction(
+    status: TtsStatus,
+    spokenChapterUrl: String?,
+    visibleChapterUrl: String?,
+    bookChapterUrls: Collection<String>,
+): PausedFollow = when {
+    spokenChapterUrl == null || visibleChapterUrl == null -> PausedFollow.None
+    spokenChapterUrl == visibleChapterUrl -> PausedFollow.None
+    status == TtsStatus.Paused -> {
+        if (spokenChapterUrl in bookChapterUrls) PausedFollow.Seek else PausedFollow.None
+    }
+    else -> PausedFollow.Stop
+}
+
+/** Leaving the reader keeps a paused session alive; running audio must stop. */
+internal fun shouldStopTtsOnExit(status: TtsStatus): Boolean = status != TtsStatus.Paused
 
 /**
  * The button is available with an active language pair on a loaded chapter,

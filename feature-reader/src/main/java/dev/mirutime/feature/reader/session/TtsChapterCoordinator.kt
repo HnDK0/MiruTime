@@ -261,8 +261,21 @@ class TtsChapterCoordinator(
                     )
                 } ?: previousAnchor
                 revertAnchor?.let(session::adoptAnchor)
+                // The target chapter was never persisted; the reverted one is
+                // now the reader's real position.
+                session.persistPosition()
+                MiruLog.event(
+                    "tts",
+                    "handoff-revert",
+                    "chapter" to revertChapter,
+                    "target" to target,
+                )
                 _events.tryEmit(Event.Failed("handoff rejected"))
             } else {
+                // Speech owns the target chapter now: only this write makes the
+                // reader position follow it.
+                session.persistPosition()
+                MiruLog.event("tts", "handoff-commit", "chapter" to target)
                 MiruLog.event("tts", "handoff-start", "chapter" to target)
             }
         } catch (cancelled: CancellationException) {

@@ -13,6 +13,7 @@ import dev.mirutime.app.features.translation.data.cacheKey
 import dev.mirutime.app.features.translation.data.metadataConfigFor
 import dev.mirutime.app.features.translation.data.translationConfigKey
 import dev.mirutime.app.features.translation.data.translationPresentationFor
+import dev.mirutime.core.log.MiruLog
 import dev.mirutime.core.text.RegexRule
 import dev.mirutime.core.text.RegexRuleTarget
 import dev.mirutime.core.text.applyRulesFor
@@ -140,10 +141,32 @@ internal class AppReaderTranslationPort(
         chapterIndex: Int,
         document: ReaderDocument,
     ) {
-        if (!isTranslatable(document)) return
-        val mode = activeTranslationMode(bookUrl) ?: return
-        val config = ChapterTranslationPlanner.config(bookUrl, mode) ?: return
-        ChapterTranslationPlanner.request(document, config)?.let(controller::submit)
+        // A silent gate makes a missing translation look like a broken engine:
+        // every skip names its reason in the log.
+        var submit: (() -> Unit)? = null
+        var reason: String? = null
+        if (!isTranslatable(document)) {
+            reason = "not-translatable"
+        } else {
+            val mode = activeTranslationMode(bookUrl)
+            val config = mode?.let { ChapterTranslationPlanner.config(bookUrl, it) }
+            val request = config?.let { ChapterTranslationPlanner.request(document, it) }
+            reason = when {
+                mode == null -> "no-mode"
+                config == null -> "no-config"
+                request == null -> "no-request"
+                else -> null
+            }
+            if (request != null) submit = { controller.submit(request) }
+        }
+        submit?.invoke()
+        MiruLog.event(
+            "translation",
+            "target",
+            "chapter" to chapterIndex,
+            "result" to if (submit == null) "skipped" else "submitted",
+            *reason?.let { arrayOf<Pair<String, Any>>("reason" to it) }.orEmpty(),
+        )
     }
 
     override suspend fun retranslateChapter(bookUrl: String, chapterIndex: Int): Boolean =

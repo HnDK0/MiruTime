@@ -151,6 +151,9 @@ class ReaderGraph(
         preloadActiveChapter = { _, document ->
             translation.preloadChapter(document.bookUrl, document)
         },
+        prefetchTranslation = { _, document ->
+            translation.ensureChapter(document.bookUrl, document.chapterIndex, document)
+        },
     )
     override val settings: ReaderSettingsPort = AppReaderSettingsPort()
     override val rules: ReaderTextRules = AppReaderTextRules()

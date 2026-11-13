@@ -67,6 +67,11 @@ class ReaderSessionStore(
      * Optional: a miss is a no-op and the normal ensureChapter path remains.
      */
     private val preloadActiveChapter: (suspend (Int, ReaderDocument) -> Unit)? = null,
+    /**
+     * Requests the whole translation of a prefetched chapter. Optional: without
+     * it the reader screen still ensures the chapter it can see.
+     */
+    private val prefetchTranslation: (suspend (Int, ReaderDocument) -> Unit)? = null,
 ) {
     private val _state = MutableStateFlow(
         ReaderSessionState(mode = config.config.value.mode),
@@ -128,9 +133,8 @@ class ReaderSessionStore(
             reopened -> ReaderOpenResolver.forReopened(book, requestedChapterIndex, saved)
             else -> ReaderOpenResolver.forRequested(book, requestedChapterIndex, restoreSaved, saved)
         }
-        MiruLog.event(
-            "reader",
-            "open",
+        val source = continueSource(target, requestedChapterIndex, reopened)
+        val fields = mutableListOf<Pair<String, Any>>(
             "book" to MiruLog.idHash(bookUrl),
             "mode" to config.config.value.mode,
             "chapters" to book.chapters.size,
@@ -139,8 +143,16 @@ class ReaderSessionStore(
                 is ReaderOpenTarget.End -> "end:${target.chapterIndex}"
                 is ReaderOpenTarget.Chapter -> "chapter:${target.chapterIndex}"
             },
+            "source" to source,
             "restore" to restoreSaved,
         )
+        val targetChapter = when (target) {
+            ReaderOpenTarget.Empty -> null
+            is ReaderOpenTarget.End -> target.chapterIndex
+            is ReaderOpenTarget.Chapter -> target.chapterIndex
+        }
+        targetChapter?.let { fields += "chapter" to it }
+        MiruLog.event("reader", "open", *fields.toTypedArray())
         when (target) {
             ReaderOpenTarget.Empty -> {
                 _state.update {
@@ -161,6 +173,24 @@ class ReaderSessionStore(
         }
         sessionTracker?.start(bookUrl, _state.value.activeChapterIndex)
         launchPrefetch()
+    }
+
+    /**
+     * Which resolver branch produced the open target: continue, reopened,
+     * saved (the requested chapter restored from the saved anchor), requested
+     * or end.
+     */
+    private fun continueSource(
+        target: ReaderOpenTarget,
+        requestedChapterIndex: Int?,
+        reopened: Boolean,
+    ): String = when {
+        target is ReaderOpenTarget.End -> "end"
+        target is ReaderOpenTarget.Chapter && target.restoreAnchor &&
+            requestedChapterIndex != null && !reopened -> "saved"
+        requestedChapterIndex == null -> "continue"
+        reopened -> "reopened"
+        else -> "requested"
     }
 
     suspend fun goToChapter(
@@ -205,12 +235,22 @@ class ReaderSessionStore(
      * TTS hand-off path: load and activate a chapter without the restore
      * spinner or the hard anchor scroll. The feed follows the spoken block on
      * its own, so bumping [ReaderSessionState.scrollToken] here would race it.
+     *
+     * [persist] is false until the hand-off is accepted: writing the target
+     * position first would leave the reader in a chapter speech never entered
+     * when the controller rejects it.
      */
-    suspend fun goToChapterForTts(index: Int): ReaderDocument? {
+    suspend fun goToChapterForTts(index: Int, persist: Boolean = false): ReaderDocument? {
         if (_state.value.chapters.none { it.index == index }) return null
         sessionTracker?.stop()
         _state.update { it.copy(endOfBook = false) }
-        val document = loadChapter(index, saved = null, restoreAnchor = false, makeActive = true)
+        val document = loadChapter(
+            index,
+            saved = null,
+            restoreAnchor = false,
+            makeActive = true,
+            persist = persist,
+        )
         if (document != null) {
             sessionTracker?.start(bookUrl, index)
             launchPrefetch()
@@ -241,7 +281,7 @@ class ReaderSessionStore(
             )
         }
         rebuildFeed()
-        persistNow()
+        persistPosition()
         sessionTracker?.start(bookUrl, index)
         launchPrefetch()
     }
@@ -256,8 +296,14 @@ class ReaderSessionStore(
         if (_state.value.documents[next] != null) return
         val status = _state.value.statuses[next]
         if (status == ChapterLoadStatus.Ready || status == ChapterLoadStatus.Loading) return
-        if (loadChapter(next, null, false, false) != null) {
-            MiruLog.event("reader", "prefetch", "chapter" to next)
+        val document = loadChapter(next, null, false, false) ?: return
+        MiruLog.event("reader", "prefetch", "chapter" to next)
+        // Translate the whole chapter now, while the user is still reading the
+        // previous one: waiting for the screen or a TTS event leaves the first
+        // painted frame of the next chapter in the original language.
+        prefetchTranslation?.let { ensure ->
+            MiruLog.event("reader", "prefetch-translation", "chapter" to next)
+            ensure(next, document)
         }
     }
 
@@ -477,7 +523,7 @@ class ReaderSessionStore(
     fun flush() {
         saveJob?.cancel()
         scope.launch {
-            persistNow()
+            persistPosition()
             sessionTracker?.stop()
         }
     }
@@ -498,10 +544,11 @@ class ReaderSessionStore(
         makeActive: Boolean,
         atEnd: Boolean = false,
         nav: Int? = null,
+        persist: Boolean = true,
     ): ReaderDocument? {
         val owner = ++loadSeq
         return try {
-            loadChapterInternal(index, saved, restoreAnchor, makeActive, atEnd, nav, owner)
+            loadChapterInternal(index, saved, restoreAnchor, makeActive, atEnd, nav, persist, owner)
         } catch (cancelled: CancellationException) {
             // A cancelled load must not leave the chapter Loading forever: the
             // top gap would spin with no retry. Real Ready/Failed statuses are
@@ -518,6 +565,7 @@ class ReaderSessionStore(
         makeActive: Boolean,
         atEnd: Boolean = false,
         nav: Int? = null,
+        persist: Boolean = true,
         owner: Int = 0,
     ): ReaderDocument? {
         if (_state.value.chapters.none { it.index == index }) return null
@@ -654,7 +702,7 @@ class ReaderSessionStore(
             )
         }
         rebuildFeed()
-        if (makeActive) persistNow()
+        if (makeActive && persist) persistPosition()
         return document
     }
 
@@ -699,11 +747,12 @@ class ReaderSessionStore(
         saveJob?.cancel()
         saveJob = scope.launch {
             delay(500)
-            persistNow()
+            persistPosition()
         }
     }
 
-    private suspend fun persistNow() {
+    /** Writes the current position now, past the debounce. */
+    suspend fun persistPosition() {
         val current = _state.value
         val anchor = current.anchor ?: return
         if (bookUrl.isBlank()) return

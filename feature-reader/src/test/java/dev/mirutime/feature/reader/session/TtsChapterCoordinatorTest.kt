@@ -72,6 +72,7 @@ class TtsChapterCoordinatorTest {
 
     private class Positions : ReaderPositionStore {
         private val values = mutableMapOf<String, SavedReading>()
+        fun saved(bookUrl: String): SavedReading? = values[bookUrl]
         override suspend fun load(bookUrl: String): SavedReading? = values[bookUrl]
         override suspend fun save(bookUrl: String, saved: SavedReading) {
             values[bookUrl] = saved
@@ -117,12 +118,15 @@ class TtsChapterCoordinatorTest {
         var stops = 0
         var resumes = 0
         var accept = true
+        /** Runs when the controller is asked to accept, before it answers. */
+        var onPlayHandoff: () -> Unit = {}
 
         override fun playHandoff(
             document: ReaderDocument,
             translations: Map<Int, String>,
             language: TtsLanguage,
         ): Boolean {
+            onPlayHandoff()
             if (!accept) return false
             played += document.chapterUrl
             languages += language
@@ -232,6 +236,57 @@ class TtsChapterCoordinatorTest {
 
         assertEquals(1, store.state.value.activeChapterIndex)
         assertEquals(emptyList<String>(), tts.played)
+        coordinator.close()
+    }
+
+    @Test
+    fun `hand-off persists the target position only after the controller accepts it`() = runTest {
+        val repo = Repo(chapters, docs)
+        val positions = Positions()
+        val store = ReaderSessionStore(repo, positions, Cfg(), ReadTracker(repo), this)
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+        assertEquals("book#chapter=1", positions.saved("book")?.anchor?.chapterUrl)
+        val tts = FakeTts().apply { state.value = playing(1) }
+        var savedWhileAccepting: String? = null
+        tts.onPlayHandoff = {
+            savedWhileAccepting = positions.saved("book")?.anchor?.chapterUrl
+        }
+        val coordinator = coordinator(tts, store, this).also { it.start() }
+        runCurrent()
+
+        tts.request(TtsChapterDirection.Next)
+        advanceUntilIdle()
+
+        // The target chapter was loaded but still unsaved when the controller
+        // decided; only the acceptance writes it.
+        assertEquals("book#chapter=1", savedWhileAccepting)
+        assertEquals("book#chapter=2", positions.saved("book")?.anchor?.chapterUrl)
+        assertEquals(store.state.value.anchor, positions.saved("book")?.anchor)
+        coordinator.close()
+    }
+
+    @Test
+    fun `a rejected hand-off persists the spoken chapter again`() = runTest {
+        val repo = Repo(chapters, docs)
+        val positions = Positions()
+        val store = ReaderSessionStore(repo, positions, Cfg(), ReadTracker(repo), this)
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+        val tts = FakeTts().apply {
+            state.value = playing(1)
+            accept = false
+        }
+        val coordinator = coordinator(tts, store, this).also { it.start() }
+        runCurrent()
+
+        tts.request(TtsChapterDirection.Next)
+        advanceUntilIdle()
+
+        assertEquals(1, store.state.value.activeChapterIndex)
+        val saved = positions.saved("book")
+        assertEquals("book#chapter=1", saved?.anchor?.chapterUrl)
+        assertEquals(0, saved?.anchor?.blockId?.index)
         coordinator.close()
     }
 

@@ -319,6 +319,47 @@ class ReaderSessionStoreTest {
     }
 
     @Test
+    fun `prefetch requests the next chapter translation once and only when it loads`() = runTest {
+        val requested = mutableListOf<Pair<Int, String>>()
+        val repository = TestRepository(chapters, docs)
+        val store = ReaderSessionStore(
+            content = repository,
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(repository),
+            scope = this,
+            prefetchTranslation = { index, document -> requested += index to document.chapterUrl },
+        )
+
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+
+        // The prefetch of chapter 2 asks for its whole translation, with the
+        // document that was just loaded rather than a partial page range.
+        assertEquals(listOf(2 to "book#chapter=2"), requested)
+
+        // Already loaded: the early return must not request it again.
+        store.prefetch()
+        advanceUntilIdle()
+        assertEquals(listOf(2 to "book#chapter=2"), requested)
+        assertEquals(1, repository.calls(2))
+
+        // Last chapter: there is no next chapter to translate.
+        val lastRequested = mutableListOf<Int>()
+        val last = ReaderSessionStore(
+            content = TestRepository(chapters, docs),
+            positions = InMemoryPositionStore(),
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(TestRepository(chapters, docs)),
+            scope = this,
+            prefetchTranslation = { index, _ -> lastRequested += index },
+        )
+        last.open("book", 4, restoreSaved = false)
+        advanceUntilIdle()
+        assertTrue(lastRequested.isEmpty())
+    }
+
+    @Test
     fun `ensurePrevious loads the previous chapter once without moving the reader`() = runTest {
         val gate = CompletableDeferred<Unit>()
         val repository = TestRepository(chapters, docs, gate = 1 to gate)
@@ -790,6 +831,35 @@ class ReaderSessionStoreTest {
         assertEquals(null, document)
         assertEquals(before, store.state.value.activeChapterIndex)
         assertTrue(store.state.value.statuses[2] is ChapterLoadStatus.Failed)
+    }
+
+    @Test
+    fun `goToChapterForTts leaves the saved position until the hand-off is accepted`() = runTest {
+        val positions = InMemoryPositionStore()
+        val store = ReaderSessionStore(
+            content = TestRepository(chapters, docs),
+            positions = positions,
+            config = FakeConfigStore(),
+            readTracker = ReadTracker(TestRepository(chapters, docs)),
+            scope = this,
+        )
+        store.open("book", 1, restoreSaved = false)
+        advanceUntilIdle()
+        assertEquals("book#chapter=1", positions.load("book")?.anchor?.chapterUrl)
+
+        assertNotNull(store.goToChapterForTts(2))
+        advanceUntilIdle()
+
+        assertEquals(2, store.state.value.activeChapterIndex)
+        // Not yet accepted: the reader's saved position stays in the chapter
+        // speech still occupies, so a rejected hand-off needs no undo there.
+        assertEquals("book#chapter=1", positions.load("book")?.anchor?.chapterUrl)
+
+        store.persistPosition()
+
+        val committed = positions.load("book")?.anchor
+        assertEquals("book#chapter=2", committed?.chapterUrl)
+        assertEquals(store.state.value.anchor, committed)
     }
 
     @Test
