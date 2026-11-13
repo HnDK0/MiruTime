@@ -2571,7 +2571,8 @@ private fun AnnounceCard(
     val shelf = if (shelvesLoading) {
         stringResource(R.string.book_stat_unknown)
     } else {
-        shelfLabel(book.shelfId, shelves)
+        val known = shelves.firstOrNull { it.id == book.shelfId }
+        if (known == null) shelfLabel(book.shelfId, shelves) else shelfLabel(known)
     }
     val status = buildString {
         append(stringResource(if (book.ongoing) R.string.book_stat_ongoing else R.string.book_stat_completed))

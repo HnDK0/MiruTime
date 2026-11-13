@@ -40,18 +40,25 @@ import dev.mirutime.app.features.dashboard.domain.ReadingStats
 import java.time.LocalDate
 import java.time.format.TextStyle
 import java.util.Locale
+import dev.mirutime.uikit.LocalMiruLocale
+import dev.mirutime.uikit.miruDecimal
 import kotlin.math.abs
 
 // Duration with localized units (shared by the dashboard panels).
 @Composable
 internal fun formatDurationLocalized(ms: Long): String {
+    val locale = LocalMiruLocale.current
     val minutes = (ms / 60_000).toInt()
     val min = stringResource(R.string.dash_unit_min)
     val h = stringResource(R.string.dash_unit_h)
-    if (minutes < 60) return "$minutes $min"
+    if (minutes < 60) return "${miruDecimal(minutes, 0, locale)} $min"
     val hours = minutes / 60
     val rest = minutes % 60
-    return if (rest == 0) "$hours $h" else "$hours $h $rest $min"
+    return if (rest == 0) {
+        "${miruDecimal(hours, 0, locale)} $h"
+    } else {
+        "${miruDecimal(hours, 0, locale)} $h ${miruDecimal(rest, 0, locale)} $min"
+    }
 }
 
 private val WeekBarArea = 56.dp
