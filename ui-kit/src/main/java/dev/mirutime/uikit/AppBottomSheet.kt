@@ -15,9 +15,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -111,11 +114,11 @@ fun AppBottomSheet(
     doneDanger: Boolean = false,
     // Content-driven sheets cap at 70%; a caller can ask for less, never more.
     maxHeightFraction: Float = MiruSize.SheetMaxFraction,
-    // A list container (LazyColumn) owns its scrolling: the default
-    // verticalScroll wrapper would measure it with infinite height.
     // Optional top-right action in the title row (e.g. Reset). Sits on the
     // same baseline as the title with one spacing step from the edge.
     headerAction: (@Composable () -> Unit)? = null,
+    // A list container (LazyColumn) owns its scrolling: the default
+    // verticalScroll wrapper would measure it with infinite height.
     contentScrollable: Boolean = true,
     // Compact action panels (source/login, download) drop the drag handle and
     // tighten the header. Forms keep the handle and their opaque fields.
@@ -126,10 +129,10 @@ fun AppBottomSheet(
     var dragHandleHeightPx by remember(density, compact) {
         mutableIntStateOf(if (compact) 0 else with(density) { MiruSize.SheetHandleBox.roundToPx() })
     }
-    // Floating-sheet standard: 12dp margins all round so every corner shows
-    // the 23px radius (top AND bottom) and the footer always clears gesture
-    // nav. Width is capped inside the component: phones keep the full width,
-    // tablets get a 600dp sheet centred on the screen.
+    // Floating-sheet standard: 8dp margins on the sides and bottom so every
+    // corner shows the sheet radius (top AND bottom) and the footer always
+    // clears gesture nav. Width is capped inside the component: phones keep
+    // the full width, tablets get a 600dp sheet centred on the screen.
     ModalBottomSheet(
         onDismissRequest = onClose,
         modifier = modifier
@@ -265,19 +268,39 @@ fun AppBottomSheet(
                         content()
                     }
                 }
+                // Paired actions share the tallest height: MiruButton paints
+                // Secondary at 40dp and Primary at 48dp, and at large text a
+                // label that wraps would otherwise leave two different heights
+                // side by side (tops align, bottoms diverge). A lone Close
+                // keeps its own size. IntrinsicSize.Min sizes the row to the
+                // taller button, fillMaxHeight stretches the other to match.
+                val paired = doneLabel != null && onDone != null
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .then(if (paired) Modifier.height(IntrinsicSize.Min) else Modifier)
                         .padding(horizontal = hPad)
                         .padding(top = MiruSpace.S)
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         .padding(bottom = MiruSpace.S),
                     horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    val actionModifier = Modifier
+                        .weight(1f)
+                        .then(
+                            if (paired) {
+                                Modifier
+                                    .defaultMinSize(minHeight = MiruSize.ButtonPrimary)
+                                    .fillMaxHeight()
+                            } else {
+                                Modifier
+                            },
+                        )
                     // Visible secondary Close/Cancel; operation busy and enabled stay independent.
                     MiruButton(
                         onClick = onClose,
-                        modifier = Modifier.weight(1f),
+                        modifier = actionModifier,
                         style = MiruButtonStyle.Secondary,
                     ) {
                         Text(text = closeLabel ?: stringResource(R.string.lib_close))
@@ -287,7 +310,7 @@ fun AppBottomSheet(
                             onClick = onDone,
                             enabled = doneEnabled,
                             busy = doneBusy,
-                            modifier = Modifier.weight(1f),
+                            modifier = actionModifier,
                             style = if (doneDanger) MiruButtonStyle.Destructive else MiruButtonStyle.Primary,
                         ) {
                             Text(text = doneLabel)

@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -268,16 +267,18 @@ private fun SettingsError(message: String, onRetry: () -> Unit) {
     }
 }
 
-// Hairline + label separating app-owned settings from what the plugin itself
-// declared. Plugin labels stay in the plugin's own language (often English).
+// Label separating app-owned settings from what the plugin itself declared.
+// Plugin labels stay in the plugin's own language (often English).
 @Composable
 private fun PluginGroupHeader(text: String) {
+    // Label only, no rule of its own: the first setting's SheetSection draws a
+    // divider right after this label, and a second hairline above it made the
+    // pair read as an underline of the header.
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = MiruSpace.L),
+            .padding(top = MiruSpace.L, bottom = MiruSpace.S),
     ) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-        MiruPickerHeader(text, modifier = Modifier.padding(top = MiruSpace.M))
+        MiruPickerHeader(text)
     }
 }
