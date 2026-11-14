@@ -380,5 +380,6 @@ internal fun parseLocalBookFile(file: File, path: String): LocalBook = when {
     path.endsWith(".epub") -> EpubFileReader(file).use { it.readAll() }
     path.endsWith(".fb2") || path.endsWith(".fb2.zip") -> Fb2FileReader(file).book
     path.endsWith(".cbz") -> CbzFileReader(file).use { it.readAll() }
+    path.endsWith(".txt", ignoreCase = true) -> TxtFileReader(file).readAll()
     else -> throw IllegalStateException("Unsupported local format: $path")
 }

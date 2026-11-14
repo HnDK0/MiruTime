@@ -1,6 +1,7 @@
 package dev.mirutime.app.features.library.ui
 
 import android.content.Context
+import android.content.res.Resources
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -37,6 +38,7 @@ import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.uikit.SheetSection
 import dev.mirutime.app.features.library.data.PickedImportFile
+import dev.mirutime.app.features.library.data.ImportFailureReason
 
 // Picked-file handoff: the real SAF Uri plus the display name/format. The
 // importer copies the bytes by sha; the Uri is only stored for diagnostics.
@@ -44,6 +46,7 @@ fun formatForFileName(fileName: String): String = when (
     fileName.substringAfterLast(".", "").lowercase()
 ) {
     "fb2" -> "FB2"
+    "txt" -> "TXT"
     "cbz", "cbr", "zip" -> "CBZ"
     "pdf" -> "PDF"
     else -> "EPUB"
@@ -63,6 +66,25 @@ fun displayNameOf(context: Context, uri: Uri): String? {
     }
     return null
 }
+
+private const val BYTES_PER_MB = 1024L * 1024L
+
+// Ceiling so a file just over a limit never rounds down to the limit itself.
+private fun megabytes(bytes: Long): Long = (bytes + BYTES_PER_MB - 1) / BYTES_PER_MB
+
+/** One mapping for every surface that reports an import failure. */
+internal fun importFailureText(resources: Resources, reason: ImportFailureReason): String =
+    when (reason) {
+        is ImportFailureReason.SizeLimit -> resources.getString(
+            R.string.import_err_too_large_fmt,
+            megabytes(reason.actualBytes),
+            megabytes(reason.limitBytes),
+        )
+        is ImportFailureReason.InsufficientSpace -> resources.getString(
+            R.string.import_err_no_space_fmt,
+            megabytes(reason.requiredBytes),
+        )
+    }
 
 // Import flow: one SAF picker, single or multi. One picked file goes to the
 // single callback; several go to the batch callback. The importer itself
@@ -137,6 +159,7 @@ fun ImportSheet(
                             picker.launch(
                                 arrayOf(
                                     "application/epub+zip",
+                                    "text/plain",
                                     "text/xml",
                                     "application/x-fictionbook+xml",
                                     "application/x-cbz",

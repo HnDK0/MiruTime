@@ -42,7 +42,7 @@ git clone https://github.com/HnDK0/MiruTime
 
 - Sources as Lua plugins, installed from a repository or a local `.lua` file
 - Source catalog with filters, pinned sources and search
-- Local EPUB, FB2 and PDF library — single books or bulk import; PDFs read page by page
+- Local EPUB, FB2, TXT and PDF library — single books or bulk import; PDFs read page by page
 - OPDS catalogues as library sources — Atom 1.2 (XML) and OPDS 2.0 (JSON), with facets, search, paging and optional Basic auth
 - Audiobooks from OPDS catalogues — streamed track by track in the player, with saved progress
 - Reader with font, theme, background and line-spacing settings
@@ -62,6 +62,28 @@ git clone https://github.com/HnDK0/MiruTime
 - EPUB export from the book screen
 - Eleven interface languages: English, Russian, Spanish, Portuguese, French, German, Italian, Turkish, Vietnamese, Indonesian and Arabic
 - Light and dark themes, Material 3
+
+---
+
+## Local formats and size limits
+
+Each format has its own import cap because a different resource binds it. The numbers live in one place in the code (`LocalLimits`) and are mirrored here.
+
+| Format | Import limit | What bounds it |
+| --- | --- | --- |
+| EPUB | 128 MB | Parsed entry by entry: a single entry is capped at 32 MB and images at 64 MB per book, so memory does not grow with the archive |
+| FB2 | 64 MB | Read whole into memory for XML parsing; the same cap the parser applies |
+| TXT | 128 MB | Decoded while streaming: detection reads the first 64 KB, and memory holds one paragraph (up to 256k characters) plus one chapter (64k), so only disk bounds it |
+| CBZ | 512 MB | Pages are read one at a time, 32 MB each; the cap sits below the point where storage alone would stop the import |
+| PDF | 512 MB | Streamed to the isolated renderer; only a file descriptor and the rendered cover stay in memory |
+
+Import copies the file into a staging temp first; that temp is then moved into app storage, so the import needs about one extra copy of the file while it runs. A file above the limit, or one that does not fit, is rejected at import with a message naming the limit or the missing space.
+
+Importing a folder of loose manga pages has no fixed size cap: pages are copied one at a time (32 MB per page) and the only bound is free storage.
+
+Folders added as library sources are scanned for EPUB, FB2 and TXT; PDF files inside a folder are ignored — import those with the picker.
+
+TXT encoding comes from the BOM or a strict UTF-8 check; otherwise it is detected from the first 64 KB — CP1251, CP1256, CP1252 and KOI8-R by letter statistics, Shift_JIS, EUC-KR, EUC-JP, Big5 and GB18030 by strict validation.
 
 ---
 

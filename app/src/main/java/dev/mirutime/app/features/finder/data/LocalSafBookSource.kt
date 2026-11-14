@@ -16,6 +16,7 @@ import dev.mirutime.app.features.local.data.naturalSortKey
 import dev.mirutime.core.local.CbzFileReader
 import dev.mirutime.core.local.EpubFileReader
 import dev.mirutime.core.local.Fb2FileReader
+import dev.mirutime.core.local.TxtFileReader
 import dev.mirutime.core.log.MiruLog
 import java.io.File
 import java.io.FileOutputStream
@@ -419,8 +420,9 @@ class LocalSafBookSource(
             return LocalSafChapterContent(title = chapter.title, html = it, cacheHit = true)
         }
         val html = when {
-            plan.format == "EPUB" -> textHtml(plan, chapterIndex, epub = true)
-            plan.format == "FB2" -> textHtml(plan, chapterIndex, epub = false)
+            plan.format == "EPUB" -> textHtml(plan, chapterIndex, format = "EPUB")
+            plan.format == "FB2" -> textHtml(plan, chapterIndex, format = "FB2")
+            plan.format == "TXT" -> textHtml(plan, chapterIndex, format = "TXT")
             source.archiveUri != null -> cbzHtml(plan, source, chapterIndex)
             source.pages.isNotEmpty() -> imagePagesHtml(source.pages)
             else -> throw LocalSafException(SafFailure.Damaged, "Chapter has no content")
@@ -494,6 +496,7 @@ class LocalSafBookSource(
         val format = when (extension) {
             "epub" -> "EPUB"
             "fb2" -> "FB2"
+            "txt" -> "TXT"
             "cbz" -> "CBZ"
             else -> throw LocalSafException(
                 SafFailure.Unsupported,
@@ -517,6 +520,13 @@ class LocalSafBookSource(
         var parsedAuthor: String? = null
         var parsedDescription: String? = null
         var parsedCover: ByteArray? = null
+        fun seeds(titles: List<String>): List<LocalSafChapter> = titles.mapIndexed { index, title ->
+            LocalSafChapter(
+                index = index + 1,
+                title = title.ifBlank { "Chapter ${index + 1}" },
+                url = localFileChapterUrl(bookUrl, index + 1),
+            )
+        }
         val chapters = when (format) {
             "CBZ" -> {
                 if (metadataCache == null) {
@@ -543,6 +553,27 @@ class LocalSafBookSource(
                         url = localFileChapterUrl(bookUrl, 1),
                     ),
                 )
+            }
+            "TXT" -> {
+                val archive = cache.archive(
+                    document.uri,
+                    document.lastModified,
+                    document.sizeBytes,
+                    extension,
+                )
+                val titles = runCatching {
+                    // Titles only: the body is read again when a chapter opens.
+                    buildList { TxtFileReader(archive).forEachChapter { add(it.title) } }
+                }.getOrElse { e ->
+                    throw LocalSafException(
+                        SafFailure.Damaged,
+                        e.message ?: "Cannot parse ${document.name}",
+                    )
+                }
+                if (titles.isEmpty()) {
+                    throw LocalSafException(SafFailure.Damaged, "Book has no chapters")
+                }
+                seeds(titles)
             }
             else -> {
                 val archive = cache.archive(
@@ -577,13 +608,7 @@ class LocalSafBookSource(
                 if (titles.isEmpty()) {
                     throw LocalSafException(SafFailure.Damaged, "Book has no chapters")
                 }
-                titles.mapIndexed { index, title ->
-                    LocalSafChapter(
-                        index = index + 1,
-                        title = title.ifBlank { "Chapter ${index + 1}" },
-                        url = localFileChapterUrl(bookUrl, index + 1),
-                    )
-                }
+                seeds(titles)
             }
         }
         val source = ChapterSource(
@@ -732,7 +757,7 @@ class LocalSafBookSource(
     private suspend fun textHtml(
         plan: DirectPlan,
         chapterIndex: Int,
-        epub: Boolean,
+        format: String,
     ): String {
         val document = plan.document
         val extension = document.name.substringAfterLast('.', "").lowercase()
@@ -743,18 +768,29 @@ class LocalSafBookSource(
             extension,
         )
         val chapter = runCatching {
-            if (epub) {
-                var found: dev.mirutime.core.local.LocalChapter? = null
-                var current = 0
-                EpubFileReader(archive).use { reader ->
-                    reader.forEachChapter { item ->
+            when (format) {
+                "EPUB" -> {
+                    var found: dev.mirutime.core.local.LocalChapter? = null
+                    var current = 0
+                    EpubFileReader(archive).use { reader ->
+                        reader.forEachChapter { item ->
+                            current++
+                            if (current == chapterIndex) found = item
+                        }
+                    }
+                    found
+                }
+                // Streaming: only the requested chapter is kept in memory.
+                "TXT" -> {
+                    var found: dev.mirutime.core.local.LocalChapter? = null
+                    var current = 0
+                    TxtFileReader(archive).forEachChapter { item ->
                         current++
                         if (current == chapterIndex) found = item
                     }
+                    found
                 }
-                found
-            } else {
-                Fb2FileReader(archive).book.chapters.getOrNull(chapterIndex - 1)
+                else -> Fb2FileReader(archive).book.chapters.getOrNull(chapterIndex - 1)
             }
         }.getOrElse { e ->
             throw LocalSafException(SafFailure.Damaged, e.message ?: "Cannot parse chapter")

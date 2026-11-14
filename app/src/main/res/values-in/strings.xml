@@ -125,7 +125,7 @@
 
     <!-- Finder -->
     <string name="finder_import_title">Impor file lokal</string>
-    <string name="finder_import_desc">EPUB, FB2, atau PDF dari perangkat Anda.</string>
+    <string name="finder_import_desc">EPUB, FB2, TXT, atau PDF dari perangkat Anda.</string>
     <string name="finder_import_button">Impor buku lokal</string>
     <string name="finder_imported_fmt">Mengimpor %1$s — temukan di Membaca</string>
 
@@ -298,7 +298,7 @@
     <string name="lib_search_hint">Cari judul, penulis, sumber…</string>
     <string name="lib_cd_filters">Filter perpustakaan</string>
     <string name="lib_cd_scroll_top">Gulir ke atas</string>
-    <string name="lib_import">Impor EPUB / FB2 / PDF</string>
+    <string name="lib_import">Impor EPUB / FB2 / TXT / PDF</string>
     <string name="lib_empty_title">Tidak ada apa pun di sini</string>
     <string name="lib_empty_hint">Coba rak, kueri, atau filter lain.</string>
     <string name="lib_resume_eyebrow">LANJUTKAN DARI TEMPAT TERAKHIR</string>
@@ -443,9 +443,9 @@
 
     <!-- Import sheet -->
     <string name="import_title">Impor buku lokal</string>
-    <string name="import_desc">Tambahkan buku EPUB, FB2, atau PDF ke perpustakaan lokal. File buku tetap di perangkat ini; satu atau banyak sekaligus.</string>
+    <string name="import_desc">Tambahkan buku EPUB, FB2, TXT, atau PDF ke perpustakaan lokal. File buku tetap di perangkat ini; satu atau banyak sekaligus.</string>
     <string name="import_from_storage">Dari penyimpanan</string>
-    <string name="import_choose">Pilih file EPUB, FB2, atau PDF</string>
+    <string name="import_choose">Pilih file EPUB, FB2, TXT, atau PDF</string>
     <string name="import_multi">Satu atau beberapa file · tetap di perangkat ini</string>
     <string name="import_samples">Contoh file</string>
 
@@ -453,6 +453,8 @@
     <string name="toast_imported_fmt">%1$s diimpor ke Membaca</string>
     <string name="toast_imported_one">1 buku lokal ditambahkan ke perpustakaan Anda</string>
     <string name="toast_import_failed">Tidak dapat mengimpor file terpilih</string>
+    <string name="import_err_too_large_fmt">Berkas terlalu besar: %1$d MB (batas %2$d MB).</string>
+    <string name="import_err_no_space_fmt">Ruang kosong tidak cukup: impor membutuhkan %1$d MB.</string>
     <string name="book_toast_hint_caps">Tekan lama judul untuk menyalinnya</string>
     <string name="book_ch_cd_downloaded">Terunduh</string>
     <string name="book_ch_cd_translated">Diterjemahkan</string>
@@ -721,13 +723,13 @@
     <string name="finder_installed_label">Terpasang</string>
     <string name="finder_local_add_folder">Tambah folder</string>
     <string name="finder_local_books_title">Buku lokal</string>
-    <string name="finder_local_folder_books">EPUB, FB2</string>
+    <string name="finder_local_folder_books">EPUB, FB2, TXT</string>
     <string name="finder_local_folder_manga">CBZ</string>
     <string name="finder_local_folder_remove_cd">Hapus folder</string>
     <string name="finder_local_folders">Folder</string>
     <string name="finder_local_import_all">Impor semua</string>
     <string name="finder_local_manga_title">Manga lokal</string>
-    <string name="finder_local_meta_books_fmt">%1$d di perpustakaan · EPUB, FB2</string>
+    <string name="finder_local_meta_books_fmt">%1$d di perpustakaan · EPUB, FB2, TXT</string>
     <string name="finder_local_meta_manga_fmt">%1$d di perpustakaan · CBZ</string>
     <string name="finder_local_no_folders">Belum ada folder yang ditambahkan.</string>
     <string name="finder_local_format_title">Format</string>
@@ -742,11 +744,11 @@
     <string name="finder_local_open">Buka</string>
     <string name="finder_local_pages_short_fmt">%1$d halaman</string>
     <string name="finder_local_catalog_empty">Tidak ada file lokal</string>
-    <string name="finder_local_catalog_empty_desc">Tambahkan folder berisi file EPUB, FB2, atau CBZ, atau periksa apakah folder Anda masih dapat diakses.</string>
+    <string name="finder_local_catalog_empty_desc">Tambahkan folder berisi file EPUB, FB2, TXT, atau CBZ, atau periksa apakah folder Anda masih dapat diakses.</string>
     <string name="finder_local_folders_sheet_desc">Folder dipindai di tempatnya. Menghapus folder tidak pernah menghapus filenya.</string>
     <string name="finder_local_manga_hint">Tambahkan folder yang berisi karya-karyanya. Setiap folder tingkat pertama adalah satu buku; semua isinya adalah bab dari buku itu.</string>
     <string name="finder_local_folder_empty_fmt">Tidak ada file yang didukung · %1$s</string>
-    <string name="finder_local_folder_meta_books_fmt">%1$d file · Buku · EPUB, FB2</string>
+    <string name="finder_local_folder_meta_books_fmt">%1$d file · Buku · EPUB, FB2, TXT</string>
     <string name="finder_local_folder_meta_manga_fmt">%1$d file · Manga · CBZ</string>
     <string name="finder_local_folder_error">Tidak dapat memperbarui folder</string>
     <string name="finder_local_refresh_cd">Segarkan katalog</string>

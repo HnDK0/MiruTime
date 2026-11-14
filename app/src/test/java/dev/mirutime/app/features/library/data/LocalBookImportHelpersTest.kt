@@ -19,7 +19,18 @@ class LocalBookImportHelpersTest {
         assertEquals(LocalImportFormat.FB2, LocalImportFormat.forFile("book.fb2"))
         assertEquals(LocalImportFormat.CBZ, LocalImportFormat.forFile("comic.cbz"))
         assertEquals(LocalImportFormat.PDF, LocalImportFormat.forFile("x.pdf"))
-        assertNull(LocalImportFormat.forFile("notes.txt"))
+        assertEquals(LocalImportFormat.TXT, LocalImportFormat.forFile("notes.txt"))
+        assertEquals(LocalImportFormat.TXT, LocalImportFormat.forFile("Notes.TXT"))
+        assertNull(LocalImportFormat.forFile("notes.md"))
+    }
+
+    @Test
+    fun `a txt book is a novel on the books shelf`() {
+        val txt = LocalImportFormat.forFile("notes.txt")
+
+        assertEquals(LocalBooksInstallId, txt?.installId)
+        assertEquals(ContentType.NOVEL, txt?.contentType)
+        assertEquals(false, txt?.isManga)
     }
 
     @Test
@@ -225,5 +236,30 @@ class LocalBookImportHelpersTest {
         assertEquals(1, summary.duplicates)
         assertEquals(1, summary.failures)
         assertEquals(2, summary.accepted)
+    }
+
+    @Test
+    fun `import summary keeps the first failure reason only`() {
+        val sizeLimit = ImportFailureReason.SizeLimit(limitBytes = 1024, actualBytes = 2048)
+        val summary = summarizeImports(
+            listOf(
+                LocalImportResult.Success(1, "local://a", "A", duplicate = false),
+                LocalImportResult.Failure("too large", sizeLimit),
+                LocalImportResult.Failure(
+                    "no space",
+                    ImportFailureReason.InsufficientSpace(requiredBytes = 4096),
+                ),
+            ),
+        )
+        assertEquals(2, summary.failures)
+        assertEquals(sizeLimit, summary.firstFailureReason)
+    }
+
+    @Test
+    fun `import summary without failures has no reason`() {
+        val summary = summarizeImports(
+            listOf(LocalImportResult.Success(1, "local://a", "A", duplicate = false)),
+        )
+        assertNull(summary.firstFailureReason)
     }
 }

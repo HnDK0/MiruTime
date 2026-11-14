@@ -125,7 +125,7 @@
 
     <!-- Finder -->
     <string name="finder_import_title">Nhập tệp cục bộ</string>
-    <string name="finder_import_desc">EPUB, FB2 hoặc PDF từ thiết bị của bạn.</string>
+    <string name="finder_import_desc">EPUB, FB2, TXT hoặc PDF từ thiết bị của bạn.</string>
     <string name="finder_import_button">Nhập sách cục bộ</string>
     <string name="finder_imported_fmt">Đã nhập %1$s — tìm trong Đang đọc</string>
 
@@ -298,7 +298,7 @@
     <string name="lib_search_hint">Tìm tiêu đề, tác giả, nguồn…</string>
     <string name="lib_cd_filters">Bộ lọc thư viện</string>
     <string name="lib_cd_scroll_top">Cuộn lên đầu</string>
-    <string name="lib_import">Nhập EPUB / FB2 / PDF</string>
+    <string name="lib_import">Nhập EPUB / FB2 / TXT / PDF</string>
     <string name="lib_empty_title">Không có gì ở đây</string>
     <string name="lib_empty_hint">Thử kệ, từ khóa hoặc bộ lọc khác.</string>
     <string name="lib_resume_eyebrow">TIẾP TỤC TỪ CHỖ ĐÃ DỪNG</string>
@@ -443,9 +443,9 @@
 
     <!-- Import sheet -->
     <string name="import_title">Nhập sách cục bộ</string>
-    <string name="import_desc">Thêm sách EPUB, FB2 hoặc PDF vào thư viện cục bộ. Tệp sách nằm trên thiết bị này; một hoặc nhiều tệp.</string>
+    <string name="import_desc">Thêm sách EPUB, FB2, TXT hoặc PDF vào thư viện cục bộ. Tệp sách nằm trên thiết bị này; một hoặc nhiều tệp.</string>
     <string name="import_from_storage">Từ bộ nhớ</string>
-    <string name="import_choose">Chọn tệp EPUB, FB2 hoặc PDF</string>
+    <string name="import_choose">Chọn tệp EPUB, FB2, TXT hoặc PDF</string>
     <string name="import_multi">Một hoặc nhiều tệp · nằm trên thiết bị này</string>
     <string name="import_samples">Tệp mẫu</string>
 
@@ -453,6 +453,8 @@
     <string name="toast_imported_fmt">Đã nhập %1$s vào Đang đọc</string>
     <string name="toast_imported_one">Đã thêm 1 sách cục bộ vào thư viện</string>
     <string name="toast_import_failed">Không nhập được các tệp đã chọn</string>
+    <string name="import_err_too_large_fmt">Tệp quá lớn: %1$d MB (giới hạn %2$d MB).</string>
+    <string name="import_err_no_space_fmt">Không đủ dung lượng trống: cần %1$d MB để nhập.</string>
     <string name="book_toast_hint_caps">Nhấn giữ tiêu đề để sao chép</string>
     <string name="book_ch_cd_downloaded">Đã tải</string>
     <string name="book_ch_cd_translated">Đã dịch</string>
@@ -721,13 +723,13 @@
     <string name="finder_installed_label">Đã cài</string>
     <string name="finder_local_add_folder">Thêm thư mục</string>
     <string name="finder_local_books_title">Sách cục bộ</string>
-    <string name="finder_local_folder_books">EPUB, FB2</string>
+    <string name="finder_local_folder_books">EPUB, FB2, TXT</string>
     <string name="finder_local_folder_manga">CBZ</string>
     <string name="finder_local_folder_remove_cd">Xóa thư mục</string>
     <string name="finder_local_folders">Thư mục</string>
     <string name="finder_local_import_all">Nhập tất cả</string>
     <string name="finder_local_manga_title">Manga cục bộ</string>
-    <string name="finder_local_meta_books_fmt">%1$d trong thư viện · EPUB, FB2</string>
+    <string name="finder_local_meta_books_fmt">%1$d trong thư viện · EPUB, FB2, TXT</string>
     <string name="finder_local_meta_manga_fmt">%1$d trong thư viện · CBZ</string>
     <string name="finder_local_no_folders">Chưa thêm thư mục nào.</string>
     <string name="finder_local_format_title">Định dạng</string>
@@ -742,11 +744,11 @@
     <string name="finder_local_open">Mở</string>
     <string name="finder_local_pages_short_fmt">%1$d trang</string>
     <string name="finder_local_catalog_empty">Không có tệp cục bộ</string>
-    <string name="finder_local_catalog_empty_desc">Thêm thư mục chứa tệp EPUB, FB2 hoặc CBZ, hoặc kiểm tra xem các thư mục của bạn còn quyền truy cập không.</string>
+    <string name="finder_local_catalog_empty_desc">Thêm thư mục chứa tệp EPUB, FB2, TXT hoặc CBZ, hoặc kiểm tra xem các thư mục của bạn còn quyền truy cập không.</string>
     <string name="finder_local_folders_sheet_desc">Thư mục được quét tại chỗ. Xóa một thư mục không bao giờ xóa tệp của nó.</string>
     <string name="finder_local_manga_hint">Thêm thư mục chứa các tác phẩm. Mỗi thư mục cấp một là một sách; mọi thứ bên trong là chương của sách đó.</string>
     <string name="finder_local_folder_empty_fmt">Không có tệp được hỗ trợ · %1$s</string>
-    <string name="finder_local_folder_meta_books_fmt">%1$d tệp · Sách · EPUB, FB2</string>
+    <string name="finder_local_folder_meta_books_fmt">%1$d tệp · Sách · EPUB, FB2, TXT</string>
     <string name="finder_local_folder_meta_manga_fmt">%1$d tệp · Manga · CBZ</string>
     <string name="finder_local_folder_error">Không cập nhật được thư mục</string>
     <string name="finder_local_refresh_cd">Làm mới danh mục</string>

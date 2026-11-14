@@ -67,6 +67,19 @@ class PreparedChapterBodyTest {
     }
 
     @Test
+    fun `stream copy over the cap throws with limit and actual size`() {
+        val temp = File.createTempFile("mirutime-limit-", ".tmp").apply { deleteOnExit() }
+        try {
+            runBlocking { streamToTemp(ByteArrayInputStream(ByteArray(2048)), temp, 1024) }
+            fail("expected size limit")
+        } catch (e: ImportLimitException) {
+            assertEquals(1024L, e.limitBytes)
+            assertEquals(2048L, e.actualBytes)
+        }
+        assertFalse(temp.exists())
+    }
+
+    @Test
     fun `body html and inline image are written under the book directory`() {
         val fs = MapFileSystem()
         val chapter = LocalChapter(

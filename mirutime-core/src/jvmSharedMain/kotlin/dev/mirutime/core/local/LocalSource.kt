@@ -150,7 +150,7 @@ class LocalSource(
 
     private fun isSupportedBook(path: String): Boolean =
         path.endsWith(".epub") || path.endsWith(".fb2") || path.endsWith(".fb2.zip") ||
-            path.endsWith(".cbz")
+            path.endsWith(".cbz") || path.endsWith(".txt", ignoreCase = true)
 
     private fun pageOf(items: List<CatalogItem>, index: Int): Outcome<CatalogPage> {
         val from = index * PAGE_SIZE
@@ -181,6 +181,11 @@ class LocalSource(
                     path.endsWith(".epub") -> parseEpub(bytes)
                     path.endsWith(".fb2") || path.endsWith(".fb2.zip") -> parseFb2(bytes)
                     path.endsWith(".cbz") -> parseCbz(bytes)
+                    path.endsWith(".txt", ignoreCase = true) -> parseTxt(
+                        bytes,
+                        path.substringAfterLast('/').substringBeforeLast('.')
+                            .ifEmpty { "Untitled" },
+                    )
                     else -> return Outcome.Err(
                         PluginError.ScriptError("Unsupported local format: $path"),
                     )

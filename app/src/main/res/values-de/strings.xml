@@ -125,7 +125,7 @@
 
     <!-- Finder -->
     <string name="finder_import_title">Lokale Datei importieren</string>
-    <string name="finder_import_desc">EPUB, FB2 oder PDF von deinem Gerät.</string>
+    <string name="finder_import_desc">EPUB, FB2, TXT oder PDF von deinem Gerät.</string>
     <string name="finder_import_button">Lokale Bücher importieren</string>
     <string name="finder_imported_fmt">%1$s importiert — zu finden unter Lesen</string>
 
@@ -298,7 +298,7 @@
     <string name="lib_search_hint">Titel, Autor, Quelle suchen…</string>
     <string name="lib_cd_filters">Bibliotheksfilter</string>
     <string name="lib_cd_scroll_top">Nach oben scrollen</string>
-    <string name="lib_import">EPUB / FB2 / PDF importieren</string>
+    <string name="lib_import">EPUB / FB2 / TXT / PDF importieren</string>
     <string name="lib_empty_title">Hier ist nichts</string>
     <string name="lib_empty_hint">Versuche ein anderes Regal, einen anderen Suchbegriff oder Filter.</string>
     <string name="lib_resume_eyebrow">WEITERLESEN, WO DU AUFGEHÖRT HAST</string>
@@ -443,9 +443,9 @@
 
     <!-- Import sheet -->
     <string name="import_title">Lokale Bücher importieren</string>
-    <string name="import_desc">EPUB-, FB2- oder PDF-Bücher zur lokalen Bibliothek hinzufügen. Die Buchdateien bleiben auf diesem Gerät; einzeln oder in Stapeln.</string>
+    <string name="import_desc">EPUB-, FB2-, TXT- oder PDF-Bücher zur lokalen Bibliothek hinzufügen. Die Buchdateien bleiben auf diesem Gerät; einzeln oder in Stapeln.</string>
     <string name="import_from_storage">Aus dem Speicher</string>
-    <string name="import_choose">EPUB-, FB2- oder PDF-Dateien wählen</string>
+    <string name="import_choose">EPUB-, FB2-, TXT- oder PDF-Dateien wählen</string>
     <string name="import_multi">Einzelne oder mehrere Dateien · bleiben auf diesem Gerät</string>
     <string name="import_samples">Beispieldateien</string>
 
@@ -453,6 +453,8 @@
     <string name="toast_imported_fmt">%1$s nach Lesen importiert</string>
     <string name="toast_imported_one">1 lokales Buch zu deiner Bibliothek hinzugefügt</string>
     <string name="toast_import_failed">Die ausgewählten Dateien konnten nicht importiert werden</string>
+    <string name="import_err_too_large_fmt">Die Datei ist zu groß: %1$d MB (Grenze %2$d MB).</string>
+    <string name="import_err_no_space_fmt">Nicht genügend freier Speicher: der Import braucht %1$d MB.</string>
     <string name="book_toast_hint_caps">Halte den Titel gedrückt, um ihn zu kopieren</string>
     <string name="book_ch_cd_downloaded">Heruntergeladen</string>
     <string name="book_ch_cd_translated">Übersetzt</string>
@@ -732,13 +734,13 @@
     <string name="finder_installed_label">Installiert</string>
     <string name="finder_local_add_folder">Ordner hinzufügen</string>
     <string name="finder_local_books_title">Lokale Bücher</string>
-    <string name="finder_local_folder_books">EPUB, FB2</string>
+    <string name="finder_local_folder_books">EPUB, FB2, TXT</string>
     <string name="finder_local_folder_manga">CBZ</string>
     <string name="finder_local_folder_remove_cd">Ordner entfernen</string>
     <string name="finder_local_folders">Ordner</string>
     <string name="finder_local_import_all">Alle importieren</string>
     <string name="finder_local_manga_title">Lokaler Manga</string>
-    <string name="finder_local_meta_books_fmt">%1$d in der Bibliothek · EPUB, FB2</string>
+    <string name="finder_local_meta_books_fmt">%1$d in der Bibliothek · EPUB, FB2, TXT</string>
     <string name="finder_local_meta_manga_fmt">%1$d in der Bibliothek · CBZ</string>
     <string name="finder_local_no_folders">Noch keine Ordner hinzugefügt.</string>
     <string name="finder_local_format_title">Format</string>
@@ -753,11 +755,11 @@
     <string name="finder_local_open">Öffnen</string>
     <string name="finder_local_pages_short_fmt">%1$d Seiten</string>
     <string name="finder_local_catalog_empty">Keine lokalen Dateien</string>
-    <string name="finder_local_catalog_empty_desc">Füge einen Ordner mit EPUB-, FB2- oder CBZ-Dateien hinzu oder prüfe, ob deine Ordner noch erreichbar sind.</string>
+    <string name="finder_local_catalog_empty_desc">Füge einen Ordner mit EPUB-, FB2-, TXT- oder CBZ-Dateien hinzu oder prüfe, ob deine Ordner noch erreichbar sind.</string>
     <string name="finder_local_folders_sheet_desc">Ordner werden an Ort und Stelle durchsucht. Wird einer entfernt, werden seine Dateien nie gelöscht.</string>
     <string name="finder_local_manga_hint">Füge den Ordner hinzu, der die Werke enthält. Jeder Ordner der ersten Ebene ist ein Buch; alles darin sind die Kapitel dieses Buchs.</string>
     <string name="finder_local_folder_empty_fmt">Keine unterstützten Dateien · %1$s</string>
-    <string name="finder_local_folder_meta_books_fmt">%1$d Dateien · Bücher · EPUB, FB2</string>
+    <string name="finder_local_folder_meta_books_fmt">%1$d Dateien · Bücher · EPUB, FB2, TXT</string>
     <string name="finder_local_folder_meta_manga_fmt">%1$d Dateien · Manga · CBZ</string>
     <string name="finder_local_folder_error">Ordner konnten nicht aktualisiert werden</string>
     <string name="finder_local_refresh_cd">Katalog aktualisieren</string>

@@ -48,7 +48,7 @@ class LocalCatalogUiStateTest {
 
     @Test
     fun `local filter offers only the formats of its source kind`() {
-        assertEquals(listOf("EPUB", "FB2"), localCatalogFormats(LocalSources.Books))
+        assertEquals(listOf("EPUB", "FB2", "TXT"), localCatalogFormats(LocalSources.Books))
         assertEquals(listOf("CBZ", "IMAGES"), localCatalogFormats(LocalSources.Manga))
     }
 }

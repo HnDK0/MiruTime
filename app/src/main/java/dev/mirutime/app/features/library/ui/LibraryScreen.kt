@@ -1076,7 +1076,10 @@ fun LibraryScreen(
                         // A shelf change already starts its own page load.
                         if (wasReading) refreshPages()
                         val count = summary.accepted
-                        val message = if (count > 0) {
+                        val reason = summary.firstFailureReason
+                        val message = if (reason != null) {
+                            importFailureText(resources, reason)
+                        } else if (count > 0) {
                             if (count == 1) {
                                 resources.getString(R.string.toast_imported_one)
                             } else {

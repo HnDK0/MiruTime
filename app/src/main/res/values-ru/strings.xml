@@ -130,7 +130,7 @@
 
     <!-- Finder -->
     <string name="finder_import_title">Импорт локального файла</string>
-    <string name="finder_import_desc">EPUB, FB2 или PDF с вашего устройства.</string>
+    <string name="finder_import_desc">EPUB, FB2, TXT или PDF с вашего устройства.</string>
     <string name="finder_import_button">Импортировать локальные книги</string>
     <string name="finder_imported_fmt">«%1$s» импортировано — ищите на полке «Читаю»</string>
 
@@ -298,7 +298,7 @@
     <string name="lib_search_hint">Название, автор, источник…</string>
     <string name="lib_cd_filters">Фильтры библиотеки</string>
     <string name="lib_cd_scroll_top">Наверх</string>
-    <string name="lib_import">Импорт EPUB / FB2 / PDF</string>
+    <string name="lib_import">Импорт EPUB / FB2 / TXT / PDF</string>
     <string name="lib_empty_title">Здесь пусто</string>
     <string name="lib_empty_hint">Попробуйте другую полку, запрос или фильтр.</string>
     <string name="lib_resume_eyebrow">ПРОДОЛЖИТЬ ЧТЕНИЕ</string>
@@ -443,9 +443,9 @@
 
     <!-- Import sheet -->
     <string name="import_title">Импорт локальных книг</string>
-    <string name="import_desc">Добавьте книги EPUB, FB2 или PDF в локальную библиотеку. Файлы остаются на устройстве; по одному или пакетом.</string>
+    <string name="import_desc">Добавьте книги EPUB, FB2, TXT или PDF в локальную библиотеку. Файлы остаются на устройстве; по одному или пакетом.</string>
     <string name="import_from_storage">Из хранилища</string>
-    <string name="import_choose">Выберите файлы EPUB, FB2 или PDF</string>
+    <string name="import_choose">Выберите файлы EPUB, FB2, TXT или PDF</string>
     <string name="import_multi">Один или несколько файлов · остаются на устройстве</string>
     <string name="import_samples">Примеры файлов</string>
 
@@ -453,6 +453,8 @@
     <string name="toast_imported_fmt">«%1$s» импортировано на «Читаю»</string>
     <string name="toast_imported_one">1 локальная книга добавлена в библиотеку</string>
     <string name="toast_import_failed">Не удалось импортировать выбранные файлы</string>
+    <string name="import_err_too_large_fmt">Файл слишком большой: %1$d МБ (лимит %2$d МБ).</string>
+    <string name="import_err_no_space_fmt">Не хватает свободного места: для импорта нужно %1$d МБ.</string>
 
     <!-- Dashboard -->
     <string name="dash_today">Сегодня</string>
@@ -749,13 +751,13 @@
     <string name="finder_installed_label">Установлено</string>
     <string name="finder_local_add_folder">Добавить папку</string>
     <string name="finder_local_books_title">Локальные книги</string>
-    <string name="finder_local_folder_books">EPUB, FB2</string>
+    <string name="finder_local_folder_books">EPUB, FB2, TXT</string>
     <string name="finder_local_folder_manga">CBZ</string>
     <string name="finder_local_folder_remove_cd">Убрать папку</string>
     <string name="finder_local_folders">Папки</string>
     <string name="finder_local_import_all">Импортировать все</string>
     <string name="finder_local_manga_title">Локальная манга</string>
-    <string name="finder_local_meta_books_fmt">В библиотеке: %1$d · EPUB, FB2</string>
+    <string name="finder_local_meta_books_fmt">В библиотеке: %1$d · EPUB, FB2, TXT</string>
     <string name="finder_local_meta_manga_fmt">В библиотеке: %1$d · CBZ</string>
     <string name="finder_local_no_folders">Папки пока не добавлены.</string>
     <string name="finder_local_format_title">Формат</string>
@@ -770,11 +772,11 @@
     <string name="finder_local_open">Открыть</string>
     <string name="finder_local_pages_short_fmt">%1$d стр.</string>
     <string name="finder_local_catalog_empty">Нет локальных файлов</string>
-    <string name="finder_local_catalog_empty_desc">Добавьте папку с файлами EPUB, FB2 или CBZ или проверьте доступ к папкам.</string>
+    <string name="finder_local_catalog_empty_desc">Добавьте папку с файлами EPUB, FB2, TXT или CBZ или проверьте доступ к папкам.</string>
     <string name="finder_local_folders_sheet_desc">Папки читаются на месте. Удаление папки не удаляет файлы.</string>
     <string name="finder_local_manga_hint">Добавляйте папку, внутри которой лежат произведения. Каждая папка первого уровня — книга, всё внутри — её главы.</string>
     <string name="finder_local_folder_empty_fmt">Нет поддерживаемых файлов · %1$s</string>
-    <string name="finder_local_folder_meta_books_fmt">Файлов: %1$d · Книги · EPUB, FB2</string>
+    <string name="finder_local_folder_meta_books_fmt">Файлов: %1$d · Книги · EPUB, FB2, TXT</string>
     <string name="finder_local_folder_meta_manga_fmt">Файлов: %1$d · Манга · CBZ</string>
     <string name="finder_local_folder_error">Не удалось обновить папки</string>
     <string name="finder_local_refresh_cd">Обновить каталог</string>

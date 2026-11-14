@@ -201,8 +201,13 @@ class LocalSafBookSourceTest {
         return file
     }
 
-    private fun cbz(id: String, title: String, pages: List<Pair<String, ByteArray>>): File {
-        val file = temp.newFile("$id.cbz")
+    private fun txt(): File {
+        val file = temp.newFile("saf-notes.txt")
+        file.writeText("First paragraph of the text book.\n\nSecond paragraph.\n")
+        return file
+    }
+
+    private fun cbz(id: String, title: String, pages: List<Pair<String, ByteArray>>): File {        val file = temp.newFile("$id.cbz")
         zip(
             file,
             listOf(
@@ -247,6 +252,22 @@ class LocalSafBookSourceTest {
         assertEquals(2, book.chapterCount)
         assertEquals(listOf("One", "Two"), source.chapters(book.bookUrl).map { it.title })
         assertTrue(source.chapterContent(book.bookUrl, 2).html.contains("Second body."))
+    }
+
+    @Test
+    fun `txt direct source reads a text book as one part`() = runTest {
+        val resolver = FakeResolver()
+        val uri = addFile(resolver, "txt", "saf-notes.txt", txt())
+        val source = source(resolver)
+
+        val book = source.book(localCatalogUrl(uri))
+
+        assertEquals("saf-notes", book.title)
+        assertEquals(1, book.chapterCount)
+        assertEquals(listOf("Part 1"), source.chapters(book.bookUrl).map { it.title })
+        val html = source.chapterContent(book.bookUrl, 1).html
+        assertTrue(html.contains("<p>First paragraph of the text book.</p>"))
+        assertTrue(html.contains("<p>Second paragraph.</p>"))
     }
 
     @Test

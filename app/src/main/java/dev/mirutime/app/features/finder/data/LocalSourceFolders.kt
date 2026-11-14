@@ -24,6 +24,11 @@ private const val LOCAL_FOLDER_PREFS = "local_source_folders"
 private const val KIND_BOOKS = "books"
 private const val KIND_MANGA = "manga"
 
+// One list for both the folder scan and the bulk file list: they must agree,
+// otherwise a file is listed but never scanned (or the reverse).
+private val BookFolderExtensions = setOf("epub", "fb2", "txt")
+private val MangaFolderExtensions = setOf("cbz")
+
 /** Durable folder list seam; tests use an in-memory implementation. */
 interface LocalFolderStore {
     fun get(kind: String): Set<String>
@@ -176,7 +181,7 @@ class LocalSourceFolders(
         val warnings = mutableListOf<String>()
         val root = runCatching { walkTree(uri, displayName(uri), warnings) }.getOrNull()
             ?: return emptyList()
-        val extensions = if (kind == "manga") setOf("cbz") else setOf("epub", "fb2")
+        val extensions = if (kind == "manga") MangaFolderExtensions else BookFolderExtensions
         val result = mutableListOf<LocalFolderFile>()
         fun collect(node: ScannedNode) {
             for (child in node.children) {
@@ -206,7 +211,7 @@ class LocalSourceFolders(
                 continue
             }
             val ext = child.name.substringAfterLast('.', "").lowercase()
-            if (ext != "epub" && ext != "fb2") continue
+            if (ext !in BookFolderExtensions) continue
             out += ScannedLocalFile(
                 uri = child.uri,
                 name = child.name,

@@ -75,6 +75,7 @@ import dev.mirutime.app.features.finder.data.LOCAL_CATALOG_SCHEME
 import dev.mirutime.app.features.finder.domain.CatalogBook
 import dev.mirutime.app.features.finder.domain.LocalCatalogFolder
 import dev.mirutime.app.features.finder.domain.LocalSources
+import dev.mirutime.app.features.library.ui.importFailureText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -94,7 +95,7 @@ internal fun localCatalogFormats(sourceId: String): List<String> =
     if (LocalSources.kindOf(sourceId) == "manga") {
         listOf("CBZ", "IMAGES")
     } else {
-        listOf("EPUB", "FB2")
+        listOf("EPUB", "FB2", "TXT")
     }
 
 // One scanned file as a catalogue tile. Imported entries use their real local
@@ -268,7 +269,9 @@ internal fun LocalFoldersSheet(
         scope.launch {
             try {
                 val summary = provider.importLocalCatalogFolder(kind, folder.uri)
+                val reason = summary.firstFailureReason
                 val message = when {
+                    reason != null -> importFailureText(resources, reason)
                     summary.failures > 0 -> resources.getString(
                         R.string.finder_local_import_failed_count_fmt,
                         summary.failures,

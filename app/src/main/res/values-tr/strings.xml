@@ -125,7 +125,7 @@
 
     <!-- Finder -->
     <string name="finder_import_title">Yerel dosya içe aktar</string>
-    <string name="finder_import_desc">Cihazınızdan EPUB, FB2 veya PDF.</string>
+    <string name="finder_import_desc">Cihazınızdan EPUB, FB2, TXT veya PDF.</string>
     <string name="finder_import_button">Yerel kitap içe aktar</string>
     <string name="finder_imported_fmt">%1$s içe aktarıldı — Okuma bölümünde bulun</string>
 
@@ -298,7 +298,7 @@
     <string name="lib_search_hint">Başlık, yazar, kaynak ara…</string>
     <string name="lib_cd_filters">Kitaplık filtreleri</string>
     <string name="lib_cd_scroll_top">Başa kaydır</string>
-    <string name="lib_import">EPUB / FB2 / PDF içe aktar</string>
+    <string name="lib_import">EPUB / FB2 / TXT / PDF içe aktar</string>
     <string name="lib_empty_title">Burada bir şey yok</string>
     <string name="lib_empty_hint">Başka bir raf, arama veya filtre deneyin.</string>
     <string name="lib_resume_eyebrow">KALDIĞINIZ YERDEN DEVAM EDİN</string>
@@ -443,9 +443,9 @@
 
     <!-- Import sheet -->
     <string name="import_title">Yerel kitap içe aktar</string>
-    <string name="import_desc">Kitaplığa EPUB, FB2 veya PDF kitap ekleyin. Kitap dosyaları bu cihazda kalır; tek veya toplu.</string>
+    <string name="import_desc">Kitaplığa EPUB, FB2, TXT veya PDF kitap ekleyin. Kitap dosyaları bu cihazda kalır; tek veya toplu.</string>
     <string name="import_from_storage">Depolamadan</string>
-    <string name="import_choose">EPUB, FB2 veya PDF dosyaları seçin</string>
+    <string name="import_choose">EPUB, FB2, TXT veya PDF dosyaları seçin</string>
     <string name="import_multi">Tek veya birden fazla dosya · bu cihazda kalır</string>
     <string name="import_samples">Örnek dosyalar</string>
 
@@ -453,6 +453,8 @@
     <string name="toast_imported_fmt">%1$s Okuma bölümüne aktarıldı</string>
     <string name="toast_imported_one">Kitaplığınıza 1 yerel kitap eklendi</string>
     <string name="toast_import_failed">Seçilen dosyalar içe aktarılamadı</string>
+    <string name="import_err_too_large_fmt">Dosya çok büyük: %1$d MB (sınır %2$d MB).</string>
+    <string name="import_err_no_space_fmt">Yeterli boş alan yok: içe aktarma %1$d MB gerektiriyor.</string>
     <string name="book_toast_hint_caps">Kopyalamak için başlığa uzun basın</string>
     <string name="book_ch_cd_downloaded">İndirildi</string>
     <string name="book_ch_cd_translated">Çevrildi</string>
@@ -732,13 +734,13 @@
     <string name="finder_installed_label">Yüklü</string>
     <string name="finder_local_add_folder">Klasör ekle</string>
     <string name="finder_local_books_title">Yerel kitaplar</string>
-    <string name="finder_local_folder_books">EPUB, FB2</string>
+    <string name="finder_local_folder_books">EPUB, FB2, TXT</string>
     <string name="finder_local_folder_manga">CBZ</string>
     <string name="finder_local_folder_remove_cd">Klasörü kaldır</string>
     <string name="finder_local_folders">Klasörler</string>
     <string name="finder_local_import_all">Tümünü içe aktar</string>
     <string name="finder_local_manga_title">Yerel manga</string>
-    <string name="finder_local_meta_books_fmt">Kitaplıkta %1$d · EPUB, FB2</string>
+    <string name="finder_local_meta_books_fmt">Kitaplıkta %1$d · EPUB, FB2, TXT</string>
     <string name="finder_local_meta_manga_fmt">Kitaplıkta %1$d · CBZ</string>
     <string name="finder_local_no_folders">Henüz klasör eklenmedi.</string>
     <string name="finder_local_format_title">Biçim</string>
@@ -753,11 +755,11 @@
     <string name="finder_local_open">Aç</string>
     <string name="finder_local_pages_short_fmt">%1$d sayfa</string>
     <string name="finder_local_catalog_empty">Yerel dosya yok</string>
-    <string name="finder_local_catalog_empty_desc">EPUB, FB2 veya CBZ dosyaları içeren bir klasör ekleyin ya da klasörlerinizin hâlâ erişimi olduğunu kontrol edin.</string>
+    <string name="finder_local_catalog_empty_desc">EPUB, FB2, TXT veya CBZ dosyaları içeren bir klasör ekleyin ya da klasörlerinizin hâlâ erişimi olduğunu kontrol edin.</string>
     <string name="finder_local_folders_sheet_desc">Klasörler yerinde taranır. Bir klasörü kaldırmak dosyalarını asla silmez.</string>
     <string name="finder_local_manga_hint">Eserleri içeren klasörü ekleyin. Her birinci düzey klasör bir kitaptır; içindeki her şey o kitabın bölümleridir.</string>
     <string name="finder_local_folder_empty_fmt">Desteklenen dosya yok · %1$s</string>
-    <string name="finder_local_folder_meta_books_fmt">%1$d dosya · Kitaplar · EPUB, FB2</string>
+    <string name="finder_local_folder_meta_books_fmt">%1$d dosya · Kitaplar · EPUB, FB2, TXT</string>
     <string name="finder_local_folder_meta_manga_fmt">%1$d dosya · Manga · CBZ</string>
     <string name="finder_local_folder_error">Klasörler güncellenemedi</string>
     <string name="finder_local_refresh_cd">Kataloğu yenile</string>

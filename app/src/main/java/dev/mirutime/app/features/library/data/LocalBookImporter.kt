@@ -12,6 +12,7 @@ import dev.mirutime.core.local.CbzFileReader
 import dev.mirutime.core.local.ComicInfoMeta
 import dev.mirutime.core.local.EpubFileReader
 import dev.mirutime.core.local.Fb2FileReader
+import dev.mirutime.core.local.TxtFileReader
 import dev.mirutime.core.local.LocalChapter
 import dev.mirutime.core.local.parseComicInfo
 import dev.mirutime.app.features.finder.data.ScannedNode
@@ -53,6 +54,7 @@ internal enum class LocalImportFormat(
 ) {
     EPUB(LocalBooksInstallId, "EPUB", "epub"),
     FB2(LocalBooksInstallId, "FB2", "fb2"),
+    TXT(LocalBooksInstallId, "TXT", "txt"),
     CBZ(LocalMangaInstallId, "CBZ", "cbz"),
     // A PDF stays on the Books shelf (installId) but is read page by page, so
     // the reader must treat it as manga.
@@ -167,11 +169,11 @@ internal fun folderAuthor(comic: ComicInfoMeta?): String =
 private const val MAX_TREE_DEPTH = MAX_LOCAL_SCAN_DEPTH
 private const val MAX_COMIC_INFO_BYTES = 512L * 1024
 
-// Streamed per-file cap; the source is never materialized as one ByteArray.
-// Folder pages have their own smaller per-page cap and total budget.
-private const val MAX_IMPORT_BYTES = 128L * 1024 * 1024
+// Folder pages have their own smaller per-page cap; the streamed per-file cap
+// lives in LocalLimits per format.
 private const val MAX_PAGE_BYTES = 32L * 1024 * 1024
-private const val MAX_FOLDER_BYTES = 512L * 1024 * 1024
+// Kept free on the volume so a folder write never fills the disk completely.
+private const val IMPORT_SPACE_RESERVE = 16L * 1024 * 1024
 
 private const val PDF_COVER_WIDTH = 1600
 
@@ -281,7 +283,29 @@ sealed class LocalImportResult {
         val duplicate: Boolean,
     ) : LocalImportResult()
 
-    data class Failure(val message: String) : LocalImportResult()
+    data class Failure(
+        val message: String,
+        val reason: ImportFailureReason? = null,
+    ) : LocalImportResult()
+}
+
+/** A file exceeded [limitBytes]; [actualBytes] is the size seen when it did. */
+internal class ImportLimitException(val limitBytes: Long, val actualBytes: Long) :
+    IllegalStateException("File too large")
+
+/** [requiredBytes] is the free space the import would need to finish. */
+internal class ImportNoSpaceException(val requiredBytes: Long) :
+    IllegalStateException("Not enough free space")
+
+private fun failureReason(e: Throwable): ImportFailureReason? = when (e) {
+    is ImportLimitException -> ImportFailureReason.SizeLimit(e.limitBytes, e.actualBytes)
+    is ImportNoSpaceException -> ImportFailureReason.InsufficientSpace(e.requiredBytes)
+    else -> null
+}
+
+private fun reasonName(reason: ImportFailureReason): String = when (reason) {
+    is ImportFailureReason.SizeLimit -> "size-limit"
+    is ImportFailureReason.InsufficientSpace -> "no-space"
 }
 
 // Streaming copy with digest/cap. Deletes its temp file on any failure or
@@ -302,7 +326,7 @@ internal suspend fun streamToTemp(
                 val n = input.read(buffer)
                 if (n < 0) break
                 total += n
-                if (total > maxBytes) throw IllegalStateException("File too large")
+                if (total > maxBytes) throw ImportLimitException(maxBytes, total)
                 digest.update(buffer, 0, n)
                 out.write(buffer, 0, n)
                 onChunk()
@@ -404,7 +428,6 @@ class LocalBookImporter(
     private val coverStore: BookCoverStore? = null,
     private val now: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = { UUID.randomUUID().toString() },
-    private val maxBytes: Long = MAX_IMPORT_BYTES,
     // One renderer for the whole app: the reader uses the same bound service,
     // so an import never starts a second isolated process.
     private val pdfRenderer: PdfPageRenderer,
@@ -445,12 +468,25 @@ class LocalBookImporter(
         var createdBookId: Long? = null
         var copyPath: String? = null
         var bookDir: String? = null
+        val limit = importLimit(format)
+        val known = fileSize(uri)
         try {
-            val known = fileSize(uri)
-            if (known != null && known > maxBytes) {
-                throw IllegalStateException("File too large ($known bytes)")
+            if (known != null && known > limit) {
+                throw ImportLimitException(limit, known)
             }
-            val (sha256, size) = copyToTemp(uri, temp)
+            // Only the temp copy is extra: commitTemp renames it into filesDir on
+            // the same volume, so no second copy appears. The FileOutputStream
+            // fallback (cross-volume) would instead fail later as a plain
+            // IOException, without the typed no-space reason.
+            if (known != null) {
+                val required = known + 8L * 1024 * 1024
+                // usableSpace is 0 when the platform cannot report it.
+                val usable = baseDir.usableSpace
+                if (usable > 0 && required > usable) {
+                    throw ImportNoSpaceException(requiredBytes = required)
+                }
+            }
+            val (sha256, size) = copyToTemp(uri, temp, limit)
             update(job, progress = 0.25)
 
             val existing = library.localBookFileBySha(sha256)
@@ -518,8 +554,17 @@ class LocalBookImporter(
         } catch (e: Exception) {
             cleanupImport(createdBookId, copyPath, bookDir)
             val message = e.message ?: e::class.simpleName ?: "Import failed"
+            val reason = failureReason(e)
+            MiruLog.event(
+                "library",
+                "import-failed",
+                "format" to format.format,
+                "bytes" to ((reason as? ImportFailureReason.SizeLimit)?.actualBytes ?: known ?: -1L),
+                "limit" to limit,
+                "reason" to (reason?.let(::reasonName) ?: "unknown"),
+            )
             update(job, progress = 0.0, status = "FAILED", error = message)
-            return LocalImportResult.Failure(message)
+            return LocalImportResult.Failure(message, reason)
         } finally {
             if (temp.exists()) temp.delete()
         }
@@ -590,6 +635,32 @@ class LocalBookImporter(
             ) { consumer -> reader.forEachChapter(consumer) }
             library.updateTotalChapters(bookId, count)
             storeCover(bookId, reader.book.coverBytes)
+            PersistedBook(bookId, title)
+        }
+
+        LocalImportFormat.TXT -> TxtFileReader(file).let { reader ->
+            // The stored copy is named after its sha; the title comes from the
+            // original file name the user picked.
+            val title = fallbackTitle
+            val bookId = saveBook(
+                format = format,
+                bookUrl = bookUrl,
+                title = title,
+                author = "",
+                description = "",
+                genres = emptyList(),
+                timestamp = timestamp,
+                inLibrary = addToLibrary,
+                origin = origin,
+            )
+            saveFileRow(bookId, uri, displayName, format, mime, size, sha256, target, timestamp, origin)
+            val count = persistTextChapters(
+                bookId = bookId,
+                bookUrl = bookUrl,
+                bookDir = bookDir,
+                timestamp = timestamp,
+            ) { consumer -> reader.forEachChapter(consumer) }
+            library.updateTotalChapters(bookId, count)
             PersistedBook(bookId, title)
         }
 
@@ -724,7 +795,7 @@ class LocalBookImporter(
     }.getOrNull()
 
     // Streams SAF -> cache temp, hashing and enforcing the cap while copying.
-    private suspend fun copyToTemp(uri: Uri, temp: File): Pair<String, Long> {
+    private suspend fun copyToTemp(uri: Uri, temp: File, maxBytes: Long): Pair<String, Long> {
         val input = resolver.openInputStream(uri)
             ?: throw IllegalStateException("Cannot read file")
         return input.use { source -> streamToTemp(source, temp, maxBytes) }
@@ -960,6 +1031,7 @@ class LocalBookImporter(
         val staged = mutableListOf<String>()
         var finalRoot: String? = null
         var createdBookId: Long? = null
+        val limit = importLimit(LocalImportFormat.CBZ)
         try {
             val digest = MessageDigest.getInstance("SHA-256")
             var totalBytes = 0L
@@ -969,14 +1041,23 @@ class LocalBookImporter(
                     val temp = File(context.applicationContext.cacheDir, "local-cbz-${newId()}.tmp")
                     try {
                         val known = fileSize(archive.uri)
-                        if (known != null && known > maxBytes) {
-                            throw IllegalStateException("File too large ($known bytes)")
+                        if (known != null && known > limit) {
+                            throw ImportLimitException(limit, known)
                         }
-                        val (sha, size) = copyToTemp(archive.uri, temp)
+                        // Check before copying: the temp file lands in the same volume.
+                        if (known != null) {
+                            val free = baseDir.usableSpace
+                            if (free > 0 && known > free - IMPORT_SPACE_RESERVE) {
+                                throw ImportNoSpaceException(known + IMPORT_SPACE_RESERVE)
+                            }
+                        }
+                        val (sha, size) = copyToTemp(archive.uri, temp, limit)
                         digest.update("$chapterIndex:${archive.name}:$sha\u0000".encodeToByteArray())
                         totalBytes += size
-                        if (totalBytes > MAX_FOLDER_BYTES) {
-                            throw IllegalStateException("Folder too large")
+                        // Providers without SIZE can still reveal the size only here.
+                        val free = baseDir.usableSpace
+                        if (free > 0 && size > free - IMPORT_SPACE_RESERVE) {
+                            throw ImportNoSpaceException(size + IMPORT_SPACE_RESERVE)
                         }
                         CbzFileReader(temp).use { reader ->
                             val stage = stageCbzPages(
@@ -1004,7 +1085,10 @@ class LocalBookImporter(
                             ?: throw IllegalStateException("Cannot read ${page.name}")
                         if (bytes.isEmpty()) throw IllegalStateException("Empty page: ${page.name}")
                         totalBytes += bytes.size
-                        if (totalBytes > MAX_FOLDER_BYTES) throw IllegalStateException("Folder too large")
+                        val free = baseDir.usableSpace
+                        if (free > 0 && bytes.size > free - IMPORT_SPACE_RESERVE) {
+                            throw ImportNoSpaceException(bytes.size + IMPORT_SPACE_RESERVE)
+                        }
                         digest.update("$chapterIndex:${page.name}\u0000".encodeToByteArray())
                         digest.update(bytes)
                         val extension = page.name.substringAfterLast('.', "").lowercase()
@@ -1161,8 +1245,17 @@ class LocalBookImporter(
         } catch (e: Exception) {
             cleanupFolderImport(createdBookId, staged, stagingRoot, finalRoot)
             val message = e.message ?: e::class.simpleName ?: "Folder import failed"
+            val reason = failureReason(e)
+            MiruLog.event(
+                "library",
+                "import-failed",
+                "format" to "folder",
+                "bytes" to ((reason as? ImportFailureReason.SizeLimit)?.actualBytes ?: -1L),
+                "freeBytes" to baseDir.usableSpace,
+                "reason" to (reason?.let(::reasonName) ?: "unknown"),
+            )
             update(job, progress = 0.0, status = "FAILED", error = message)
-            return LocalImportResult.Failure(message)
+            return LocalImportResult.Failure(message, reason)
         }
     }
 
