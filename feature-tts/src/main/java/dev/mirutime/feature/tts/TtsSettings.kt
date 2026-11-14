@@ -5,7 +5,7 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 const val TtsMinSpeed = 0.5f
-const val TtsMaxSpeed = 3f
+const val TtsMaxSpeed = 5f
 const val TtsSpeedStep = 0.01f
 const val TtsMinPitch = 0.5f
 const val TtsMaxPitch = 3f

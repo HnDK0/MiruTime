@@ -31,20 +31,20 @@ class TtsSettingsTest {
 
     @Test
     fun sanitizedClampsOutOfRangeValues() {
-        val settings = TtsSettings(speed = 5f, pitch = 0.1f).sanitized()
+        val settings = TtsSettings(speed = 9f, pitch = 0.1f).sanitized()
 
-        assertEquals(3f, settings.speed)
+        assertEquals(5f, settings.speed)
         assertEquals(0.5f, settings.pitch)
     }
 
     @Test
-    fun rateRangeIsHalfToThreeAtHundredthSteps() {
+    fun rateRangeIsHalfToFiveAtHundredthSteps() {
         assertEquals(0.5f, clampTtsSpeed(-1f))
-        assertEquals(3f, clampTtsSpeed(9f))
+        assertEquals(5f, clampTtsSpeed(9f))
         assertEquals(2.34f, TtsSettings(speed = 2.344f).sanitized().speed, 0.001f)
         assertEquals(2.5f, TtsSettings(speed = 2.5f).sanitized().speed)
         assertEquals("2.50", formatTtsRate(2.5f))
-        assertEquals(249, ttsSliderSteps(TtsMinSpeed..TtsMaxSpeed, TtsSpeedStep))
+        assertEquals(449, ttsSliderSteps(TtsMinSpeed..TtsMaxSpeed, TtsSpeedStep))
     }
 
     @Test

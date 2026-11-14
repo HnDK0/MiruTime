@@ -799,11 +799,11 @@ class TtsControllerTest {
 
         controller.updateSettings(TtsSettings(speed = 9f, pitch = 0.1f))
 
-        assertEquals(3f, controller.settings.value.speed)
+        assertEquals(5f, controller.settings.value.speed)
         assertEquals(0.5f, controller.settings.value.pitch)
-        assertEquals(3f, engine.appliedRate)
+        assertEquals(5f, engine.appliedRate)
         assertEquals(0.5f, engine.appliedPitch)
-        assertEquals(TtsSettings(speed = 3f, pitch = 0.5f), store.load())
+        assertEquals(TtsSettings(speed = 5f, pitch = 0.5f), store.load())
     }
 
     @Test
@@ -1060,12 +1060,12 @@ class TtsControllerTest {
             controller.restore(
                 document,
                 emptyMap(),
-                session().copy(voiceId = "voice-a", speed = 5f, pitch = 0.1f),
+                session().copy(voiceId = "voice-a", speed = 9f, pitch = 0.1f),
             ),
         )
 
         assertEquals("voice-a", engine.voice)
-        assertEquals(3f, engine.appliedRate)
+        assertEquals(5f, engine.appliedRate)
         assertEquals(0.5f, engine.appliedPitch)
     }
     @Test
