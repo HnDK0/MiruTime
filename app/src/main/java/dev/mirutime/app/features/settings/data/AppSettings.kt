@@ -251,14 +251,13 @@ object AppSettings {
 
     // --- Network ---
     // SCRAPER_USER_AGENT ("" = default), CLOUDFLARE_BYPASS_ENABLED,
-    // MASS_ADD_DELAY_MS, DOWNLOAD_DELAY_MS; WTR-Lab's own plugin settings
-    // (wtrlab_mode / wtrlab_chapter_delay — plugin schema, not app prefs)
+    // MASS_ADD_DELAY_MS, DOWNLOAD_DELAY_MS. WTR-Lab's options
+    // (wtrlab_mode / wtrlab_chapter_delay) are the plugin's own schema and live
+    // in lua_preferences, never in app prefs.
     var userAgent by mutableStateOf("")
     var cloudflareBypass by mutableStateOf(true)
     var massAddDelayMs by mutableIntStateOf(2000)
     var downloadDelayMs by mutableIntStateOf(2000)
-    var wtrMode by mutableStateOf("ai")
-    var wtrChapterDelayMs by mutableIntStateOf(0)
 
     // --- Backup (BACKUP_AUTO_*, EXPORT_DIRECTORY_URI) ---
     var autoBackup by mutableStateOf(false)
@@ -457,8 +456,6 @@ object AppSettings {
         cloudflareBypass = cloudflareBypass,
         massAddDelayMs = massAddDelayMs,
         downloadDelayMs = downloadDelayMs,
-        wtrMode = wtrMode,
-        wtrChapterDelayMs = wtrChapterDelayMs,
         autoBackup = autoBackup,
         backupDirectory = backupDirectory,
         backupMaxCount = backupMaxCount,
@@ -568,8 +565,6 @@ object AppSettings {
         cloudflareBypass = settings.cloudflareBypass
         massAddDelayMs = settings.massAddDelayMs
         downloadDelayMs = settings.downloadDelayMs
-        wtrMode = settings.wtrMode
-        wtrChapterDelayMs = settings.wtrChapterDelayMs
         autoBackup = settings.autoBackup
         backupDirectory = settings.backupDirectory
         backupMaxCount = settings.backupMaxCount

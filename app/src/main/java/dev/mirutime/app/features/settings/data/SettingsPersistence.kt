@@ -101,8 +101,6 @@ data class PersistedSettings(
     val cloudflareBypass: Boolean = true,
     val massAddDelayMs: Int = 2000,
     val downloadDelayMs: Int = 2000,
-    val wtrMode: String = "ai",
-    val wtrChapterDelayMs: Int = 0,
     val autoBackup: Boolean = false,
     val backupDirectory: String = "",
     val backupMaxCount: Int = 5,
@@ -344,9 +342,6 @@ class SettingsStore(private val values: KeyValueStore) {
                 ?: defaults.cloudflareBypass,
             massAddDelayMs = values.getInt(KEY_MASS_ADD_DELAY_MS) ?: defaults.massAddDelayMs,
             downloadDelayMs = values.getInt(KEY_DOWNLOAD_DELAY_MS) ?: defaults.downloadDelayMs,
-            wtrMode = values.getString(KEY_WTR_MODE) ?: defaults.wtrMode,
-            wtrChapterDelayMs = values.getInt(KEY_WTR_CHAPTER_DELAY_MS)
-                ?: defaults.wtrChapterDelayMs,
             autoBackup = values.getBoolean(KEY_AUTO_BACKUP) ?: defaults.autoBackup,
             backupDirectory = values.getString(KEY_BACKUP_DIRECTORY) ?: defaults.backupDirectory,
             backupMaxCount = values.getInt(KEY_BACKUP_MAX_COUNT) ?: defaults.backupMaxCount,
@@ -446,8 +441,6 @@ class SettingsStore(private val values: KeyValueStore) {
                 KEY_CLOUDFLARE_BYPASS to settings.cloudflareBypass,
                 KEY_MASS_ADD_DELAY_MS to settings.massAddDelayMs,
                 KEY_DOWNLOAD_DELAY_MS to settings.downloadDelayMs,
-                KEY_WTR_MODE to settings.wtrMode,
-                KEY_WTR_CHAPTER_DELAY_MS to settings.wtrChapterDelayMs,
                 KEY_AUTO_BACKUP to settings.autoBackup,
                 KEY_BACKUP_DIRECTORY to settings.backupDirectory,
                 KEY_BACKUP_MAX_COUNT to settings.backupMaxCount,
@@ -539,8 +532,6 @@ class SettingsStore(private val values: KeyValueStore) {
         private const val KEY_CLOUDFLARE_BYPASS = "CLOUDFLARE_BYPASS_ENABLED"
         private const val KEY_MASS_ADD_DELAY_MS = "MASS_ADD_DELAY_MS"
         private const val KEY_DOWNLOAD_DELAY_MS = "DOWNLOAD_DELAY_MS"
-        private const val KEY_WTR_MODE = "WTRLAB_MODE"
-        private const val KEY_WTR_CHAPTER_DELAY_MS = "WTRLAB_CHAPTER_DELAY"
         private const val KEY_AUTO_BACKUP = "BACKUP_AUTO_ENABLED"
         private const val KEY_BACKUP_DIRECTORY = "BACKUP_DIRECTORY_URI"
         private const val KEY_BACKUP_MAX_COUNT = "BACKUP_MAX_COUNT"

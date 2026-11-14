@@ -194,8 +194,6 @@ class SettingsStoreTest {
             cloudflareBypass = false,
             massAddDelayMs = 1500,
             downloadDelayMs = 2500,
-            wtrMode = "manual",
-            wtrChapterDelayMs = 750,
             autoBackup = true,
             backupDirectory = "content://tree/backups",
             backupMaxCount = 9,
@@ -418,7 +416,6 @@ class SettingsStoreTest {
             novelRegexApplyTo = mapOf("url" to RegexRuleScope.Both),
             nextRuleId = 300L,
             userAgent = "agent",
-            wtrMode = "manual",
             pinnedSources = listOf("local-manga", "alpha"),
             filterPresets = mapOf("alpha" to listOf(FilterPreset("Recent", CatalogFilters()))),
             searchHistory = mapOf(
@@ -449,7 +446,6 @@ class SettingsStoreTest {
             assertEquals(11L, AppSettings.globalRegexRules.single().id)
             assertEquals(12L, AppSettings.novelRegexRules.getValue("url").single().id)
             assertEquals("agent", AppSettings.userAgent)
-            assertEquals("manual", AppSettings.wtrMode)
             assertEquals(setOf("local-manga", "alpha"), AppSettings.pinnedSources)
             assertEquals(listOf("Recent"), AppSettings.filterPresets.getValue("alpha").map { it.name })
             assertEquals(listOf("Dragon"), AppSettings.searchHistoryFor("alpha"))
