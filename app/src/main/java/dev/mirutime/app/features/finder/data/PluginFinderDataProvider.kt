@@ -654,10 +654,36 @@ class PluginFinderDataProvider(
         filterSchemas.invalidate(id)
     }
 
-    // The core source contract exposes settingsSchema() as suspend; this
-    // synchronous Finder contract has no place for it yet, so declare nothing
-    // rather than inventing a plugin schema.
-    override fun settingsSchema(id: String): List<PluginSetting> = emptyList()
+    // The settings a plugin declares itself (getSettingsSchema), bound to the
+    // same preference entries it reads with get_preference. Local sources and
+    // plugins without settings give Ok(empty); a plugin that fails to answer
+    // gives Err, which the sheet shows with Retry next to the base URL.
+    // Both graph.source() and the Lua call already hop to Dispatchers.IO, so
+    // no extra withContext here.
+    override suspend fun settingsSchema(id: String): Outcome<List<PluginSetting>> {
+        if (LocalSources.isLocal(id)) return Outcome.Ok(emptyList())
+        if (OpdsSources.catalogIdOf(id) != null) return Outcome.Ok(emptyList())
+        return try {
+            loadPluginSettings(
+                sourceId = id,
+                source = graph.source(id),
+                store = graph.keyValueStore,
+                // A plugin's getFilterList may depend on the same preference
+                // (webnovel's mode, for one), so the cached schema is stale.
+                onChanged = filterSchemas::invalidate,
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            MiruLog.event(
+                "finder",
+                "settings-schema-failed",
+                "id" to id,
+                "error" to error::class.simpleName,
+            )
+            Outcome.Err(PluginError.ScriptError("settings schema failed"))
+        }
+    }
 
     // Local-first list: installed plugins plus the memory/disk repository
     // snapshot. Never touches the network, so Manage extensions can paint rows

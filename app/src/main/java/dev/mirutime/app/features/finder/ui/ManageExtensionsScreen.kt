@@ -48,6 +48,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
@@ -82,9 +83,11 @@ import dev.mirutime.app.features.finder.domain.ExtensionFilters
 import dev.mirutime.app.features.finder.domain.PluginExtension
 import dev.mirutime.app.features.finder.domain.PluginFileInstall
 import dev.mirutime.app.features.finder.domain.PluginFileRejection
+import dev.mirutime.app.features.finder.domain.PluginSetting
 import dev.mirutime.app.features.finder.domain.applyFilters
 import dev.mirutime.app.features.finder.domain.supportsPluginTranslation
 import dev.mirutime.app.features.settings.ui.PluginTranslationSheet
+import dev.mirutime.core.api.Outcome
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import dev.mirutime.uikit.MiruTextField
@@ -661,19 +664,59 @@ fun ManageExtensionsScreen(
         }
     }
     settingsFor?.let { plugin ->
-        PluginSettingsSheet(
-            name = plugin.name,
-            description = stringResource(
-                R.string.finder_source_meta_fmt,
-                plugin.language,
-                typeLabel(plugin.type),
-                plugin.installedVersion.orEmpty(),
-            ),
-            baseUrl = provider.baseUrl(plugin.id),
-            settings = provider.settingsSchema(plugin.id),
-            onSave = { url -> scope.launch { provider.setBaseUrl(plugin.id, url) } },
-            onClose = { settingsFor = null },
-        )
+        // The plugin's own settings come from a Lua call, so they arrive after
+        // the sheet opens: the base URL is editable at once and the plugin's
+        // settings appear below it as soon as the plugin answers. A failure is
+        // shown with Retry, never as "this plugin has no settings". The error
+        // is not cleared while a retry runs (the sheet shows progress in its
+        // place), so the group is never blank for the whole Lua timeout.
+        var pluginSettings by remember(plugin.id) { mutableStateOf(emptyList<PluginSetting>()) }
+        var pluginSettingsError by remember(plugin.id) { mutableStateOf<String?>(null) }
+        var pluginSettingsLoading by remember(plugin.id) { mutableStateOf(true) }
+        var settingsAttempt by remember(plugin.id) { mutableIntStateOf(0) }
+        LaunchedEffect(plugin.id, settingsAttempt) {
+            pluginSettingsLoading = true
+            try {
+                when (val result = provider.settingsSchema(plugin.id)) {
+                    is Outcome.Ok -> {
+                        pluginSettings = result.value
+                        pluginSettingsError = null
+                    }
+                    is Outcome.Err -> {
+                        pluginSettings = emptyList()
+                        pluginSettingsError = pluginSchemaErrorMessage(
+                            error = result.error,
+                            sourceId = plugin.id,
+                            sourceName = plugin.name,
+                            operation = "settings",
+                        )
+                    }
+                }
+            } finally {
+                // A provider that throws must not leave the sheet stuck on the
+                // loading branch with no error to show.
+                pluginSettingsLoading = false
+            }
+        }
+        // A new plugin must never inherit the previous one's sheet state.
+        key(plugin.id) {
+            PluginSettingsSheet(
+                name = plugin.name,
+                description = stringResource(
+                    R.string.finder_source_meta_fmt,
+                    plugin.language,
+                    typeLabel(plugin.type),
+                    plugin.installedVersion.orEmpty(),
+                ),
+                baseUrl = provider.baseUrl(plugin.id),
+                settings = pluginSettings,
+                settingsError = pluginSettingsError,
+                settingsLoading = pluginSettingsLoading,
+                onRetrySettings = { if (!pluginSettingsLoading) settingsAttempt++ },
+                onSave = { url -> scope.launch { provider.setBaseUrl(plugin.id, url) } },
+                onClose = { settingsFor = null },
+            )
+        }
     }
     translationFor?.let { plugin ->
         PluginTranslationSheet(

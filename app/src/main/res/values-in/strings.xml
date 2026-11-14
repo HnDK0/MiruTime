@@ -758,6 +758,8 @@
     <string name="finder_plugin_base_url_hint">Ubah saat situs pindah ke alamat baru. Alamat API mengikutinya kecuali plugin menetapkan alamatnya sendiri.</string>
     <string name="finder_action_failed_fmt">Tidak dapat menyelesaikan: %1$s</string>
     <string name="finder_plugin_saved">Pengaturan plugin disimpan</string>
+    <string name="finder_plugin_settings_error">Pengaturan plugin tidak dapat dimuat</string>
+    <string name="finder_plugin_settings_loading">Memuat pengaturan plugin…</string>
     <string name="finder_repo_reset">Setel ulang ke bawaan</string>
     <string name="finder_save">Simpan</string>
     <string name="finder_select_all">Pilih semua</string>

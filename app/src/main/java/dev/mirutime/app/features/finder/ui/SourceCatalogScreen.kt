@@ -291,7 +291,7 @@ internal fun SourceCatalogScreen(
                     // is dropped and the summary counts plugin filters honestly.
                     presets = provider.presets(sourceId)
                 }
-                is Outcome.Err -> schemaError = filterSchemaErrorMessage(
+                is Outcome.Err -> schemaError = pluginSchemaErrorMessage(
                     result.error,
                     sourceId,
                     sourceName,
@@ -986,19 +986,21 @@ private fun ErrorCard(message: String, onReload: () -> Unit, onCopy: () -> Unit)
     }
 }
 
-// Filter-schema failures are technical diagnostics shown inside the sheet
-// under the localized "could not load filters" title; the shared builder names
-// the source, the operation and scheme+host+path, never the query.
-private fun filterSchemaErrorMessage(
+// Plugin-schema failures are technical diagnostics shown inside a sheet under
+// a localized "could not load ..." title; the shared builder names the source,
+// the operation and scheme+host+path, never the query. Used by the catalogue
+// filter sheet (filters) and the plugin settings sheet (settings).
+internal fun pluginSchemaErrorMessage(
     error: MiruError,
     sourceId: String,
     sourceName: String? = null,
+    operation: String = "filters",
 ): String =
     buildPluginErrorReport(
         error = error as? PluginError,
         sourceId = sourceId,
         sourceName = sourceName,
-        operation = "filters",
+        operation = operation,
     ).detailText
 
 // The grid's first slot is the search bar; books start after it.

@@ -644,6 +644,50 @@ class LuaPluginSourceTest {
         assertEquals("token", schema.single()["key"])
     }
 
+    // getSettingsSchema is optional, like getFilterList: a plugin without it
+    // has an empty schema, so the settings sheet is not an error state.
+    @Test
+    fun `missing settings schema is an empty schema, not an error`() {
+        val s = source("x = 1")
+        val schema = runBlocking { s.settingsSchema() }.ok()
+        assertEquals(emptyList<Map<String, String>>(), schema)
+    }
+
+    // The host reads this exact flat shape (key/type/label/current plus
+    // options.count and options.<i>.value|label); the ranobes "Full / Lite"
+    // chapter list must survive the flattening unchanged.
+    @Test
+    fun `select setting keeps key, current and options in the flat shape`() {
+        val s = source(
+            """
+            function getSettingsSchema()
+              return {
+                {
+                  key = "ranobes_chapter_list",
+                  type = "select",
+                  label = "Chapter list",
+                  current = "full",
+                  options = {
+                    { value = "full", label = "Full" },
+                    { value = "lite", label = "Lite" },
+                  },
+                },
+              }
+            end
+            """.trimIndent(),
+        )
+        val setting = runBlocking { s.settingsSchema() }.ok().single()
+        assertEquals("ranobes_chapter_list", setting["key"])
+        assertEquals("select", setting["type"])
+        assertEquals("Chapter list", setting["label"])
+        assertEquals("full", setting["current"])
+        assertEquals("2", setting["options.count"])
+        assertEquals("full", setting["options.0.value"])
+        assertEquals("Full", setting["options.0.label"])
+        assertEquals("lite", setting["options.1.value"])
+        assertEquals("Lite", setting["options.1.label"])
+    }
+
     // ── catalogFiltered: NoveLA value shapes (LuaFilterSupport.toLuaTable) ────
 
     @Test

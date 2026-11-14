@@ -4,6 +4,7 @@ import dev.mirutime.core.api.PluginError
 import dev.mirutime.core.engine.LuaSession
 import dev.mirutime.core.host.CookieStore
 import dev.mirutime.core.host.KeyValueStore
+import dev.mirutime.core.host.PLUGIN_PREFERENCES_NAMESPACE
 import kotlinx.coroutines.runBlocking
 import org.luaj.vm2.LuaTable
 import org.luaj.vm2.LuaValue
@@ -68,13 +69,14 @@ class StorageBindings(
 
         globals.set("get_preference", object : OneArgFunction() {
             override fun call(key: LuaValue): LuaValue {
-                val value = keyValueStore.get(PREFS_NAMESPACE, key.checkjstring()) ?: return LuaValue.NIL
+                val value = keyValueStore.get(PLUGIN_PREFERENCES_NAMESPACE, key.checkjstring())
+                    ?: return LuaValue.NIL
                 return LuaValue.valueOf(value)
             }
         })
         globals.set("set_preference", object : TwoArgFunction() {
             override fun call(key: LuaValue, value: LuaValue): LuaValue {
-                keyValueStore.set(PREFS_NAMESPACE, key.checkjstring(), value.checkjstring())
+                keyValueStore.set(PLUGIN_PREFERENCES_NAMESPACE, key.checkjstring(), value.checkjstring())
                 return LuaValue.NIL
             }
         })
@@ -103,10 +105,5 @@ class StorageBindings(
         java.net.URI(urlOrHost).host ?: urlOrHost
     } catch (_: Exception) {
         urlOrHost
-    }
-
-    private companion object {
-        // NoveLA's SharedPreferences file name for plugin preferences.
-        const val PREFS_NAMESPACE = "lua_preferences"
     }
 }

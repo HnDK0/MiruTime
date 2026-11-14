@@ -472,7 +472,15 @@ class LuaPluginSource(
     }
 
     override suspend fun settingsSchema(): Outcome<List<Map<String, String>>> = locked {
-        toFilterMaps(callOrErr("getSettingsSchema", emptyList()))
+        // getSettingsSchema is optional, like getFilterList: a plugin that
+        // declares no settings has an empty schema, not a broken one. A real
+        // script/parse failure still returns Err, so the sheet can tell
+        // "no settings" from "settings failed".
+        if (!hasFunction("getSettingsSchema")) {
+            Outcome.Ok(emptyList())
+        } else {
+            toFilterMaps(callOrErr("getSettingsSchema", emptyList()), what = "settings schema")
+        }
     }
 
     override fun close() {
@@ -739,12 +747,17 @@ class LuaPluginSource(
         }
     }
 
-    private fun toFilterMaps(result: Outcome<LuaData>): Outcome<List<Map<String, String>>> =
+    // `what` names the Lua call in the failure text, so a settings schema is
+    // never reported as a broken filter list.
+    private fun toFilterMaps(
+        result: Outcome<LuaData>,
+        what: String = "filter list",
+    ): Outcome<List<Map<String, String>>> =
         when (result) {
             is Outcome.Err -> result
             is Outcome.Ok -> {
                 val list = result.value as? LuaData.LuaList
-                    ?: return scriptErr("filter list is not a list")
+                    ?: return scriptErr("$what is not a list")
                 Outcome.Ok(
                     list.items.mapNotNull { item ->
                         val t = item as? LuaData.LuaMap ?: return@mapNotNull null

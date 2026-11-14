@@ -769,6 +769,8 @@
     <string name="finder_plugin_base_url_hint">Site yeni bir adrese taşındığında değiştirin. Eklenti kendi adresini belirtmedikçe API adresi bunu izler.</string>
     <string name="finder_action_failed_fmt">Tamamlanamadı: %1$s</string>
     <string name="finder_plugin_saved">Eklenti ayarları kaydedildi</string>
+    <string name="finder_plugin_settings_error">Eklenti ayarları yüklenemedi</string>
+    <string name="finder_plugin_settings_loading">Eklenti ayarları yükleniyor…</string>
     <string name="finder_repo_reset">Varsayılana sıfırla</string>
     <string name="finder_save">Kaydet</string>
     <string name="finder_select_all">Tümünü seç</string>

@@ -769,6 +769,8 @@
     <string name="finder_plugin_base_url_hint">Ändere sie, wenn die Seite auf eine neue Adresse umzieht. Die API-Adresse folgt ihr, außer die Erweiterung legt eine eigene fest.</string>
     <string name="finder_action_failed_fmt">Konnte nicht abgeschlossen werden: %1$s</string>
     <string name="finder_plugin_saved">Erweiterungseinstellungen gespeichert</string>
+    <string name="finder_plugin_settings_error">Erweiterungseinstellungen konnten nicht geladen werden</string>
+    <string name="finder_plugin_settings_loading">Erweiterungseinstellungen werden geladen…</string>
     <string name="finder_repo_reset">Auf Standard zurücksetzen</string>
     <string name="finder_save">Speichern</string>
     <string name="finder_select_all">Alle auswählen</string>

@@ -780,6 +780,8 @@
     <string name="finder_plugin_base_url_hint">Cámbiala cuando el sitio se mueva a una dirección nueva. La dirección de la API la sigue salvo que el complemento defina la suya.</string>
     <string name="finder_action_failed_fmt">No se pudo terminar: %1$s</string>
     <string name="finder_plugin_saved">Ajustes del complemento guardados</string>
+    <string name="finder_plugin_settings_error">No se pudieron cargar los ajustes del complemento</string>
+    <string name="finder_plugin_settings_loading">Cargando ajustes del complemento…</string>
     <string name="finder_repo_reset">Restablecer por defecto</string>
     <string name="finder_save">Guardar</string>
     <string name="finder_select_all">Seleccionar todo</string>

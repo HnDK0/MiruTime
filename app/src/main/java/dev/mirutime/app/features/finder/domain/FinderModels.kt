@@ -458,8 +458,8 @@ fun isWebUrl(raw: String): Boolean {
 sealed interface PluginSetting {
     val key: String
 
-    // `select` widget: <= 3 options are chips in a row, more — a value row
-    // opening a one-of-N choice sheet.
+    // `select` widget. Few short options are chips in a row; everything else
+    // is a value row opening a one-of-N choice sheet (see fitsChipRow).
     data class Select(
         override val key: String,
         val label: String,
@@ -472,6 +472,17 @@ sealed interface PluginSetting {
 // One Select option: `key` is the value written back to the plugin, `label`
 // is shown exactly as the plugin declared it.
 data class PluginSettingOption(val key: String, val label: String)
+
+// Longest option label that still reads as a chip. Real plugins do ship
+// sentences ("Full — real titles (many requests on long novels)" is 47), so a
+// count alone is not enough: two sentence-chips wrap into a cramped block,
+// while the same two short words ("Novels" / "Fanfic") fit one row. 24 keeps
+// tomatomtl's "Google Translate (fast)" a chip and sends ranobes and
+// novel543's mode picker to the choice sheet.
+internal const val PluginSettingChipLabelMax = 24
+
+internal fun List<PluginSettingOption>.fitsChipRow(): Boolean =
+    size <= 3 && all { it.label.length <= PluginSettingChipLabelMax }
 
 // Named filter preset: max 10 per source. The query is never part of a
 // preset — it is a one-off, a preset is a reusable filter set.

@@ -786,6 +786,8 @@
     <string name="finder_plugin_base_url_hint">Меняйте, когда сайт переехал на новый адрес. Адрес API следует за ним, если плагин не задаёт свой.</string>
     <string name="finder_action_failed_fmt">Не удалось выполнить: %1$s</string>
     <string name="finder_plugin_saved">Настройки плагина сохранены</string>
+    <string name="finder_plugin_settings_error">Не удалось загрузить настройки плагина</string>
+    <string name="finder_plugin_settings_loading">Загрузка настроек плагина…</string>
     <string name="finder_repo_reset">Сбросить на стандартный</string>
     <string name="finder_save">Сохранить</string>
     <string name="finder_select_all">Выбрать все</string>

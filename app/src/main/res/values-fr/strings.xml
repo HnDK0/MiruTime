@@ -780,6 +780,8 @@
     <string name="finder_plugin_base_url_hint">Modifiez-la quand le site change d\'adresse. L\'adresse de l\'API suit, sauf si l\'extension définit la sienne.</string>
     <string name="finder_action_failed_fmt">Impossible de terminer : %1$s</string>
     <string name="finder_plugin_saved">Paramètres de l\'extension enregistrés</string>
+    <string name="finder_plugin_settings_error">Impossible de charger les paramètres de l\'extension</string>
+    <string name="finder_plugin_settings_loading">Chargement des paramètres de l\'extension…</string>
     <string name="finder_repo_reset">Réinitialiser par défaut</string>
     <string name="finder_save">Enregistrer</string>
     <string name="finder_select_all">Tout sélectionner</string>

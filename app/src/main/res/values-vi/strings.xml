@@ -758,6 +758,8 @@
     <string name="finder_plugin_base_url_hint">Đổi khi trang chuyển sang địa chỉ mới. Địa chỉ API theo đó trừ khi tiện ích tự đặt.</string>
     <string name="finder_action_failed_fmt">Không hoàn tất được: %1$s</string>
     <string name="finder_plugin_saved">Đã lưu cài đặt tiện ích</string>
+    <string name="finder_plugin_settings_error">Không tải được cài đặt tiện ích</string>
+    <string name="finder_plugin_settings_loading">Đang tải cài đặt tiện ích…</string>
     <string name="finder_repo_reset">Đặt lại về mặc định</string>
     <string name="finder_save">Lưu</string>
     <string name="finder_select_all">Chọn tất cả</string>

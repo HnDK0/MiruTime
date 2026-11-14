@@ -780,6 +780,8 @@
     <string name="finder_plugin_base_url_hint">Altere quando o site mudar de endereço. O endereço da API acompanha, a menos que o complemento defina o seu.</string>
     <string name="finder_action_failed_fmt">Não foi possível concluir: %1$s</string>
     <string name="finder_plugin_saved">Configurações do complemento salvas</string>
+    <string name="finder_plugin_settings_error">Não foi possível carregar as configurações do complemento</string>
+    <string name="finder_plugin_settings_loading">Carregando configurações do complemento…</string>
     <string name="finder_repo_reset">Restaurar padrão</string>
     <string name="finder_save">Salvar</string>
     <string name="finder_select_all">Selecionar tudo</string>

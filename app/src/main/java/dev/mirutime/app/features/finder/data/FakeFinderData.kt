@@ -27,8 +27,9 @@ import dev.mirutime.app.features.library.data.ImportSummary
 import dev.mirutime.app.features.library.data.LocalImportResult
 import dev.mirutime.app.features.library.data.PickedImportFile
 import dev.mirutime.app.features.opds.domain.OpdsFailure
-import dev.mirutime.app.features.settings.data.AppSettings
 import dev.mirutime.core.api.Outcome
+import dev.mirutime.core.host.KeyValueStore
+import dev.mirutime.core.host.PLUGIN_PREFERENCES_NAMESPACE
 import dev.mirutime.data.library.LibraryMembership
 import kotlin.math.abs
 import kotlinx.coroutines.delay
@@ -135,9 +136,12 @@ interface FinderDataProvider {
     fun baseUrl(id: String): String
     suspend fun setBaseUrl(id: String, url: String)
 
-    // Settings the plugin itself declares (`getSettingsSchema`); empty list =
-    // the plugin has none.
-    fun settingsSchema(id: String): List<PluginSetting>
+    // Settings the plugin itself declares (`getSettingsSchema`); Ok(empty) =
+    // the plugin has none, Err = the plugin failed to answer. Suspend because
+    // the schema comes from a Lua call; a value read here is the plugin's
+    // stored preference, and changing one writes the same entry the plugin
+    // reads with get_preference.
+    suspend fun settingsSchema(id: String): Outcome<List<PluginSetting>>
 
     // Manage extensions screen. extensions() paints local/disk rows and must
     // never await the network; refreshExtensions() may fetch the repository.
@@ -374,36 +378,64 @@ class FakeFinderDataProvider : FinderDataProvider {
 
     // WTR-Lab is the canonical schema example: the exact
     // getSettingsSchema() of wtrlab.lua — keys, labels and option values, no
-    // app resources involved. Values live in AppSettings so they survive like
-    // the rest of the app's state.
-    override fun settingsSchema(id: String): List<PluginSetting> = when (id) {
-        "wtr-lab" -> listOf(
-            PluginSetting.Select(
-                key = "wtrlab_mode",
-                label = "Translation Mode",
-                options = listOf(
-                    PluginSettingOption("ai", "AI (Beta)"),
-                    PluginSettingOption("raw", "Raw (Web)"),
-                    PluginSettingOption("webplus", "Web+ (Beta)"),
+    // app resources involved. A preview has no PluginGraph, so the values live
+    // in a local store under the same namespace the Lua globals use: the chip
+    // keeps its pick when the sheet is reopened, like the real plugin.
+    private val previewPreferences = object : KeyValueStore {
+        private val values = mutableMapOf<String, String>()
+
+        override fun get(namespace: String, key: String): String? = values["$namespace:$key"]
+
+        override fun set(namespace: String, key: String, value: String) {
+            values["$namespace:$key"] = value
+        }
+
+        override fun remove(namespace: String, key: String) {
+            values.remove("$namespace:$key")
+        }
+    }
+
+    private fun previewSetting(
+        key: String,
+        label: String,
+        default: String,
+        options: List<PluginSettingOption>,
+    ): PluginSetting.Select = PluginSetting.Select(
+        key = key,
+        label = label,
+        options = options,
+        current = { previewPreferences.get(PLUGIN_PREFERENCES_NAMESPACE, key) ?: default },
+        onChange = { previewPreferences.set(PLUGIN_PREFERENCES_NAMESPACE, key, it) },
+    )
+
+    override suspend fun settingsSchema(id: String): Outcome<List<PluginSetting>> = when (id) {
+        "wtr-lab" -> Outcome.Ok(
+            listOf(
+                previewSetting(
+                    key = "wtrlab_mode",
+                    label = "Translation Mode",
+                    default = "ai",
+                    options = listOf(
+                        PluginSettingOption("ai", "AI (Beta)"),
+                        PluginSettingOption("raw", "Raw (Web)"),
+                        PluginSettingOption("webplus", "Web+ (Beta)"),
+                    ),
                 ),
-                current = { AppSettings.wtrMode },
-                onChange = { AppSettings.wtrMode = it },
-            ),
-            PluginSetting.Select(
-                key = "wtrlab_chapter_delay",
-                label = "Chapter Fetch Delay (may reduce 'Security Check' triggers)",
-                options = listOf(
-                    PluginSettingOption("0", "None"),
-                    PluginSettingOption("2000", "2 seconds"),
-                    PluginSettingOption("4000", "4 seconds"),
-                    PluginSettingOption("6000", "6 seconds"),
+                previewSetting(
+                    key = "wtrlab_chapter_delay",
+                    label = "Chapter Fetch Delay (may reduce 'Security Check' triggers)",
+                    default = "0",
+                    options = listOf(
+                        PluginSettingOption("0", "None"),
+                        PluginSettingOption("2000", "2 seconds"),
+                        PluginSettingOption("4000", "4 seconds"),
+                        PluginSettingOption("6000", "6 seconds"),
+                    ),
                 ),
-                current = { AppSettings.wtrChapterDelayMs.toString() },
-                onChange = { AppSettings.wtrChapterDelayMs = it.toIntOrNull() ?: 0 },
             ),
         )
 
-        else -> emptyList()
+        else -> Outcome.Ok(emptyList())
     }
 
     override suspend fun uninstallMany(ids: Set<String>) {
