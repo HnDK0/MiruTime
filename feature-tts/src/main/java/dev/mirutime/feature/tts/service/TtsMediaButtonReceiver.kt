@@ -18,10 +18,20 @@ import dev.mirutime.feature.tts.TtsStatus
 class TtsMediaButtonReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_MEDIA_BUTTON) return
-        val key = intent.mediaButtonKey() ?: return
+        val key = intent.mediaButtonKey()
+        if (key == null) {
+            // A null extra is a normal OEM variation on the mutable-PendingIntent
+            // path, not an error worth an INFO line per press.
+            MiruLog.d("tts", "media-button-drop reason=no-key")
+            return
+        }
         // Only the down edge: the up edge would double-fire the same press.
         if (key.action != KeyEvent.ACTION_DOWN) return
-        val controller = TtsServiceHost.current ?: return
+        val controller = TtsServiceHost.current
+        if (controller == null) {
+            MiruLog.event("tts", "media-button-drop", "reason" to "no-host", "code" to key.keyCode)
+            return
+        }
         when (key.keyCode) {
             KeyEvent.KEYCODE_MEDIA_PLAY -> controller.resume()
             KeyEvent.KEYCODE_MEDIA_PAUSE -> controller.pause()
@@ -51,7 +61,11 @@ class TtsMediaButtonReceiver : BroadcastReceiver() {
             REQUEST_MEDIA_BUTTON,
             Intent(context, TtsMediaButtonReceiver::class.java)
                 .setAction(Intent.ACTION_MEDIA_BUTTON),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            // The platform fills the pressed key into EXTRA_KEY_EVENT, which
+            // needs a mutable PendingIntent. This path only runs below S, where
+            // PendingIntents are mutable by default; from S the session uses
+            // setMediaButtonBroadcastReceiver instead.
+            PendingIntent.FLAG_UPDATE_CURRENT,
         )
     }
 }

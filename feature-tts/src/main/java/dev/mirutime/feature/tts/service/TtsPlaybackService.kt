@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -16,7 +17,9 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
+import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.AudioTrack
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
@@ -80,6 +83,8 @@ class TtsPlaybackService : Service() {
     private var hasAudioFocus = false
     private var started = false
     private var foregroundStarted = false
+    private var claimTrack: AudioTrack? = null
+    private var mediaClaimed = false
     private var bookTitle = ""
     private var chapterTitle = ""
     private var chapterNumber = 0
@@ -213,7 +218,16 @@ class TtsPlaybackService : Service() {
             setSessionActivity(contentIntent())
             // Explicit media-button receiver so headsets/Bluetooth route to this
             // session even when it is not the platform's default one (FR-044).
-            setMediaButtonReceiver(TtsMediaButtonReceiver.pendingIntent(this@TtsPlaybackService))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // The component form builds a mutable PendingIntent internally, so
+                // the platform can fill in the pressed key; with an immutable one
+                // EXTRA_KEY_EVENT is dropped and the receiver sees nothing.
+                setMediaButtonBroadcastReceiver(
+                    ComponentName(this@TtsPlaybackService, TtsMediaButtonReceiver::class.java),
+                )
+            } else {
+                setMediaButtonReceiver(TtsMediaButtonReceiver.pendingIntent(this@TtsPlaybackService))
+            }
         }
         registerNoisyReceiver()
         observeState()
@@ -312,6 +326,7 @@ class TtsPlaybackService : Service() {
         overlay = null
         releaseWakeLock()
         abandonAudioFocus()
+        releaseClaim()
         unregisterNoisyReceiver()
         mediaSession.isActive = false
         mediaSession.release()
@@ -386,11 +401,20 @@ class TtsPlaybackService : Service() {
             TtsStatus.Playing, TtsStatus.Loading -> {
                 ensureAudioFocus()
                 acquireWakeLock()
+                // Claim the media-button slot only once speech actually starts:
+                // a chapter load can outlast the burst.
+                if (state.status == TtsStatus.Playing && !mediaClaimed) {
+                    mediaClaimed = true
+                    claimMediaSession()
+                }
                 mediaSession.isActive = true
                 updateMediaSession()
                 ensureForeground()
             }
             TtsStatus.Paused -> {
+                // Re-arm the claim so resume and chapter hand-off re-take the
+                // media-button slot.
+                mediaClaimed = false
                 // A chapter hand-off pauses the engine while the next document
                 // loads. Keep the wake lock so the load still completes with
                 // the screen off; a real pause releases it.
@@ -448,6 +472,8 @@ class TtsPlaybackService : Service() {
         started = false
         releaseWakeLock()
         abandonAudioFocus()
+        mediaClaimed = false
+        releaseClaim()
         mediaSession.isActive = false
         mediaSession.setPlaybackState(
             PlaybackState.Builder()
@@ -817,6 +843,73 @@ class TtsPlaybackService : Service() {
         hasAudioFocus = audioManager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
     }
 
+    /**
+     * The platform sends media buttons to the UID that most recently played
+     * audio locally, and TTS audio belongs to the engine's UID, so headset keys
+     * go to whichever media app played last. A 100 ms silent burst of our own
+     * puts this app in that list (issuetracker.google.com/issues/249741615).
+     *
+     * Never throws: an uncaught exception here would kill the state collector.
+     * shortcut: one claim per play run; a long session in which another app
+     * plays audio may need a re-claim.
+     */
+    private fun claimMediaSession() {
+        releaseClaim()
+        val frames = CLAIM_SAMPLE_RATE / 10
+        val track = try {
+            AudioTrack(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build(),
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(CLAIM_SAMPLE_RATE)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build(),
+                frames * 2, // PCM16 mono
+                AudioTrack.MODE_STATIC,
+                AudioManager.AUDIO_SESSION_ID_GENERATE,
+            )
+        } catch (e: Exception) {
+            MiruLog.event("tts", "media-claim-failed", "stage" to "create", "error" to describe(e))
+            return
+        }
+        try {
+            // A static track is STATE_NO_STATIC_DATA until write(), so only
+            // STATE_UNINITIALIZED means the platform refused it.
+            check(track.state != AudioTrack.STATE_UNINITIALIZED) { "uninitialized" }
+            track.write(ShortArray(frames), 0, frames)
+            track.play()
+        } catch (e: Exception) {
+            releaseTrack(track)
+            MiruLog.event("tts", "media-claim-failed", "stage" to "start", "error" to describe(e))
+            return
+        }
+        claimTrack = track
+        MiruLog.event("tts", "media-claim")
+        serviceScope.launch {
+            delay(CLAIM_RELEASE_DELAY_MS)
+            if (claimTrack !== track) return@launch
+            claimTrack = null
+            releaseTrack(track)
+        }
+    }
+
+    private fun releaseClaim() {
+        val track = claimTrack ?: return
+        claimTrack = null
+        releaseTrack(track)
+    }
+
+    private fun releaseTrack(track: AudioTrack) {
+        runCatching { track.stop() }
+            .onFailure { MiruLog.event("tts", "media-claim-stop-failed", "error" to describe(it)) }
+        track.release()
+    }
+
+    private fun describe(error: Throwable): String = error.message ?: error::class.simpleName.orEmpty()
+
     private fun abandonAudioFocus() {
         val request = audioFocusRequest ?: return
         audioFocusRequest = null
@@ -861,6 +954,9 @@ class TtsPlaybackService : Service() {
         private const val REQUEST_STOP = 4
         private const val REQUEST_PREVIOUS = 5
         private const val REQUEST_NEXT = 6
+
+        private const val CLAIM_SAMPLE_RATE = 44_100
+        private const val CLAIM_RELEASE_DELAY_MS = 200L
 
         fun start(
             context: Context,
