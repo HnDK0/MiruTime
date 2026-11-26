@@ -1607,6 +1607,66 @@ class TtsControllerTest {
         assertEquals(document.chapterIndex, stopped?.chapterIndex)
     }
 
+    @Test
+    fun `play queues only a bounded lookahead window and tops up on onStart`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        val chUrl = "local://book#chapter=1"
+        val doc = ReaderDocument(
+            bookUrl = "local://book",
+            chapterUrl = chUrl,
+            chapterIndex = 0,
+            title = "Ch 1",
+            blocks = listOf(
+                ReaderBlock(
+                    id = BlockId(chUrl, 0),
+                    kind = BlockKind.Paragraph,
+                    original = "One. Two. Three. Four. Five. Six.",
+                ),
+            ),
+        )
+
+        controller.play(doc, emptyMap())
+        assertEquals(4, engine.spoken.size)
+        assertEquals(listOf(true, false, false, false), engine.flushFlags)
+
+        engine.listener?.onStart(engine.spoken[1])
+        assertEquals(5, engine.spoken.size)
+        assertEquals("Five.", engine.spokenTexts.last())
+    }
+
+    @Test
+    fun `rapid skipNextChunk fast-forward uses flush on first chunk and stays Playing`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        val chUrl = "local://book#chapter=1"
+        val doc = ReaderDocument(
+            bookUrl = "local://book",
+            chapterUrl = chUrl,
+            chapterIndex = 0,
+            title = "Ch 1",
+            blocks = listOf(
+                ReaderBlock(
+                    id = BlockId(chUrl, 0),
+                    kind = BlockKind.Paragraph,
+                    original = "Line 1. Line 2. Line 3. Line 4. Line 5. Line 6.",
+                ),
+            ),
+        )
+
+        controller.play(doc, emptyMap())
+        engine.spoken.clear()
+        engine.spokenTexts.clear()
+        engine.flushFlags.clear()
+
+        controller.skipNextChunk()
+        controller.skipNextChunk()
+
+        assertEquals(TtsStatus.Playing, controller.state.value.status)
+        assertEquals(2, controller.state.value.currentChunk)
+        assertTrue(engine.flushFlags.first())
+        assertEquals("Line 3.", engine.spokenTexts.first())
+    }
 }
 
 private class FakeVoicePreviewer : TtsVoicePreviewer {
@@ -1658,61 +1718,5 @@ private class RecordingSessionStore : TtsSessionStore {
     override fun clear(immediate: Boolean, background: Boolean) {
         saved = null
     }
-
-    @Test
-    fun `play queues only a bounded lookahead window and tops up on onStart`() = runTest {
-        val engine = FakeEngine()
-        val controller = createController(engine)
-        val doc = ReaderDocument(
-            bookUrl = "book://1",
-            chapterUrl = "ch://1",
-            chapterIndex = 0,
-            title = "Ch 1",
-            blocks = listOf(
-                ReaderBlock(
-                    id = BlockId("ch://1", 0),
-                    original = "One. Two. Three. Four. Five. Six.",
-                ),
-            ),
-        )
-
-        controller.play(doc)
-        assertEquals(4, engine.spoken.size)
-        assertEquals(listOf(true, false, false, false), engine.flushFlags)
-
-        engine.listener?.onStart(engine.spoken[1])
-        assertEquals(5, engine.spoken.size)
-        assertEquals("Five.", engine.spokenTexts.last())
-    }
-
-    @Test
-    fun `rapid skipNextChunk fast-forward uses flush on first chunk and stays Playing`() = runTest {
-        val engine = FakeEngine()
-        val controller = createController(engine)
-        val doc = ReaderDocument(
-            bookUrl = "book://1",
-            chapterUrl = "ch://1",
-            chapterIndex = 0,
-            title = "Ch 1",
-            blocks = listOf(
-                ReaderBlock(
-                    id = BlockId("ch://1", 0),
-                    original = "Line 1. Line 2. Line 3. Line 4. Line 5. Line 6.",
-                ),
-            ),
-        )
-
-        controller.play(doc)
-        engine.spoken.clear()
-        engine.spokenTexts.clear()
-        engine.flushFlags.clear()
-
-        controller.skipNextChunk()
-        controller.skipNextChunk()
-
-        assertEquals(TtsStatus.Playing, controller.state.value.status)
-        assertEquals(2, controller.state.value.currentChunk)
-        assertTrue(engine.flushFlags.first())
-        assertEquals("Line 3.", engine.spokenTexts.first())
-    }
 }
+
