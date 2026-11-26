@@ -1664,8 +1664,11 @@ class TtsControllerTest {
 
         assertEquals(TtsStatus.Playing, controller.state.value.status)
         assertEquals(2, controller.state.value.currentChunk)
-        assertTrue(engine.flushFlags.first())
-        assertEquals("Line 3.", engine.spokenTexts.first())
+        assertEquals(
+            listOf("Line 3.", "Line 4.", "Line 5.", "Line 6."),
+            engine.spokenTexts.takeLast(4),
+        )
+        assertEquals(listOf(true, false, false, false), engine.flushFlags.takeLast(4))
     }
 }
 
