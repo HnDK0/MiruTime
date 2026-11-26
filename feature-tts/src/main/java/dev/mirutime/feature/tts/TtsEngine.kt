@@ -33,7 +33,7 @@ interface TtsEngine {
     /** Re-reads the installed engines from the platform (no app restart). */
     fun refreshEngines()
 
-    fun speak(text: String, utteranceId: Int): Boolean
+    fun speak(text: String, utteranceId: Int, flush: Boolean = false): Boolean
     fun preview(text: String): Boolean
     fun stop()
     fun setVoice(name: String?): Boolean
@@ -278,9 +278,11 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
         )
     }
 
-    override fun speak(text: String, utteranceId: Int): Boolean =
-        tts?.speak(text, TextToSpeech.QUEUE_ADD, Bundle(), utteranceId.toString()) ==
+    override fun speak(text: String, utteranceId: Int, flush: Boolean): Boolean {
+        val queueMode = if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+        return tts?.speak(text, queueMode, Bundle(), utteranceId.toString()) ==
             TextToSpeech.SUCCESS
+    }
 
     // QUEUE_FLUSH: a test utterance must be heard now, not after the book queue.
     override fun preview(text: String): Boolean =
@@ -340,3 +342,4 @@ class AndroidTtsEngine(context: Context) : TtsEngine {
 /** Only a real playback utterance id may fail the active session. */
 internal fun shouldReportPlaybackError(utteranceId: String?): Boolean =
     utteranceId?.toIntOrNull() != null
+

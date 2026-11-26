@@ -201,6 +201,7 @@ class TtsController(
     // one. Cleared whenever the queue is paused/skipped/replaced.
     private val utteranceChunks = java.util.concurrent.ConcurrentHashMap<Int, Int>()
     private var nextUtteranceId = 0
+    private var queuedUpTo = -1
     private var bookUrl = ""
     private var chapterIndex = 0
     private var voiceId: String? = _settings.value.voiceId
@@ -734,20 +735,43 @@ class TtsController(
         // cursor if speech never starts (engine race, process death).
         persist(wasPlaying = true, immediate = true, background = true)
         engine.stop()
-        for (i in current until chunks.size) {
+        val end = minOf(current + LOOKAHEAD_CHUNKS - 1, chunks.lastIndex)
+        enqueueRange(current, end, flushFirst = true)
+    }
+
+    private fun enqueueRange(startIndex: Int, endIndex: Int, flushFirst: Boolean): Boolean {
+        for (i in startIndex..endIndex) {
             val utteranceId = ++nextUtteranceId
             utteranceChunks[utteranceId] = i
-            if (!engine.speak(chunks[i].text, utteranceId)) {
-                // Chunks already queued before the failure must stop too.
-                engine.stop()
-                setState(
-                    _state.value.copy(
-                        status = TtsStatus.Failed,
-                        message = "TTS speak failed",
-                    ),
-                )
-                active = false
-                return
+            val flush = flushFirst && i == startIndex
+            if (!engine.speak(chunks[i].text, utteranceId, flush)) {
+                utteranceChunks.remove(utteranceId)
+                if (i == current) {
+                    // Only abort playback if the active chunk itself failed to queue.
+                    engine.stop()
+                    setState(
+                        _state.value.copy(
+                            status = TtsStatus.Failed,
+                            message = "TTS speak failed",
+                        ),
+                    )
+                    active = false
+                    return false
+                }
+                return true
+            }
+            queuedUpTo = i
+        }
+        return true
+    }
+
+    private fun topUpQueue(fromIndex: Int) {
+        if (!active || !ready || chunks.isEmpty()) return
+        val targetEnd = minOf(fromIndex + LOOKAHEAD_CHUNKS - 1, chunks.lastIndex)
+        if (queuedUpTo < targetEnd) {
+            val start = maxOf(fromIndex, queuedUpTo + 1)
+            if (start <= targetEnd) {
+                enqueueRange(start, targetEnd, flushFirst = false)
             }
         }
     }
@@ -825,6 +849,7 @@ class TtsController(
 
     private fun invalidateUtterances() {
         utteranceChunks.clear()
+        queuedUpTo = -1
     }
 
     private fun onEngineReady() {
@@ -1007,6 +1032,7 @@ class TtsController(
             current = index
             setState(chunkState(index, TtsStatus.Playing))
             persist(wasPlaying = true, immediate = true, background = true)
+            topUpQueue(index)
         }
 
         override fun onDone(utteranceId: Int) {
@@ -1136,3 +1162,5 @@ internal fun ttsStartIndex(
 
 /** A chapter hand-off that never arrives must not hold Loading forever. */
 private const val HandoffTimeoutMs = 30_000L
+private const val LOOKAHEAD_CHUNKS = 4
+
