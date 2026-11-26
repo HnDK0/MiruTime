@@ -316,6 +316,12 @@ class TtsController(
         language: TtsLanguage = TtsLanguage.from(translations),
     ) {
         if (_state.value.status != TtsStatus.Paused) {
+            val sameChapter = chunks.firstOrNull()?.blockId?.chapterUrl == document.chapterUrl
+            if (ready && sameChapter && sessionLanguage == language && chunks.isNotEmpty()) {
+                val target = ttsStartIndex(chunks, blockIndex, charOffset)
+                speakFrom(target)
+                return
+            }
             playFrom(document, translations, blockIndex, charOffset, language)
             return
         }
