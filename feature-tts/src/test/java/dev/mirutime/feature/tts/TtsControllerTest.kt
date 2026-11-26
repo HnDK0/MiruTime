@@ -57,6 +57,7 @@ class TtsControllerTest {
 
         val spoken = mutableListOf<Int>()
         val spokenTexts = mutableListOf<String>()
+        val flushFlags = mutableListOf<Boolean>()
         val previews = mutableListOf<String>()
         var stops = 0
         var failSpeak = false
@@ -95,9 +96,10 @@ class TtsControllerTest {
             listener?.onVoicesChanged()
         }
 
-        override fun speak(text: String, utteranceId: Int): Boolean {
+        override fun speak(text: String, utteranceId: Int, flush: Boolean): Boolean {
             spoken += utteranceId
             spokenTexts += text
+            flushFlags += flush
             return !failSpeak
         }
 
@@ -1655,5 +1657,62 @@ private class RecordingSessionStore : TtsSessionStore {
 
     override fun clear(immediate: Boolean, background: Boolean) {
         saved = null
+    }
+
+    @Test
+    fun `play queues only a bounded lookahead window and tops up on onStart`() = runTest {
+        val engine = FakeEngine()
+        val controller = createController(engine)
+        val doc = ReaderDocument(
+            bookUrl = "book://1",
+            chapterUrl = "ch://1",
+            chapterIndex = 0,
+            title = "Ch 1",
+            blocks = listOf(
+                ReaderBlock(
+                    id = BlockId("ch://1", 0),
+                    original = "One. Two. Three. Four. Five. Six.",
+                ),
+            ),
+        )
+
+        controller.play(doc)
+        assertEquals(4, engine.spoken.size)
+        assertEquals(listOf(true, false, false, false), engine.flushFlags)
+
+        engine.listener?.onStart(engine.spoken[1])
+        assertEquals(5, engine.spoken.size)
+        assertEquals("Five.", engine.spokenTexts.last())
+    }
+
+    @Test
+    fun `rapid skipNextChunk fast-forward uses flush on first chunk and stays Playing`() = runTest {
+        val engine = FakeEngine()
+        val controller = createController(engine)
+        val doc = ReaderDocument(
+            bookUrl = "book://1",
+            chapterUrl = "ch://1",
+            chapterIndex = 0,
+            title = "Ch 1",
+            blocks = listOf(
+                ReaderBlock(
+                    id = BlockId("ch://1", 0),
+                    original = "Line 1. Line 2. Line 3. Line 4. Line 5. Line 6.",
+                ),
+            ),
+        )
+
+        controller.play(doc)
+        engine.spoken.clear()
+        engine.spokenTexts.clear()
+        engine.flushFlags.clear()
+
+        controller.skipNextChunk()
+        controller.skipNextChunk()
+
+        assertEquals(TtsStatus.Playing, controller.state.value.status)
+        assertEquals(2, controller.state.value.currentChunk)
+        assertTrue(engine.flushFlags.first())
+        assertEquals("Line 3.", engine.spokenTexts.first())
     }
 }
