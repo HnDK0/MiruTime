@@ -16,9 +16,10 @@ jobs:
       - name: Run TTS tests & build arm64-v8a APK
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon :feature-tts:testDebugUnitTest :app:assembleDebug
+          ./gradlew --no-daemon -PabiSplits=true :feature-tts:testDebugUnitTest :app:assembleDebug
       - name: Upload arm64-v8a APK
         uses: actions/upload-artifact@v4
         with:
           name: mirutime-arm64-v8a-debug
           path: app/build/outputs/apk/debug/*arm64-v8a*.apk
+          
