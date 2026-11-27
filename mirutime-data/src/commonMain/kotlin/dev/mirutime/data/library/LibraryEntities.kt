@@ -609,6 +609,11 @@ data class BookTranslationEntity(
     val pipelineVersion: String,
     val title: String? = null,
     val description: String? = null,
+    // Translated source status text; `status` above is the row marker.
+    val statusText: String? = null,
+    // Source status this translation was produced from, so a changed source
+    // text invalidates the translation instead of showing a stale one.
+    val statusSource: String? = null,
     val altTitlesJson: String = "[]",
     // Persisted `chapterIndex -> translated title` map for the metadata
     // overlay; "{}" when the title batch has not run.

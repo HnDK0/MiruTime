@@ -524,6 +524,8 @@ class PluginBookDataProvider(
             // instead of wiping it, so "refresh restores, never erases".
             rating = mergedRating(freshRating, existing.rating.toFloat()),
             ongoing = pluginStatusOngoing(meta.status),
+            status = meta.status?.takeIf { it.isNotBlank() }
+                ?: existing.statusRaw.takeIf { it.isNotBlank() },
             updatedLabel = meta.lastUpdated.orEmpty(),
             totalChapters = existing.totalChapters,
             readCount = readCount,
@@ -671,6 +673,8 @@ class PluginBookDataProvider(
             contentType = source.metadata.contentType.toAppType(),
             rating = parsePluginRating(meta.rating),
             ongoing = pluginStatusOngoing(meta.status),
+            status = meta.status?.takeIf { it.isNotBlank() }
+                ?: existing?.statusRaw?.takeIf { it.isNotBlank() },
             updatedLabel = meta.lastUpdated.orEmpty(),
             // The screen merges the lazy chapter list into these two fields.
             totalChapters = existing?.totalChapters ?: 0,
@@ -727,6 +731,7 @@ class PluginBookDataProvider(
             .getOrDefault(ContentType.Novel),
         rating = row.rating.toFloat(),
         ongoing = pluginStatusOngoing(row.statusRaw.ifBlank { row.statusNormalized }),
+        status = row.statusRaw.takeIf { it.isNotBlank() },
         updatedLabel = row.lastUpdatedRaw,
         totalChapters = row.totalChapters,
         readCount = 0, // overlayLibraryState fills the real count
@@ -790,8 +795,11 @@ class PluginBookDataProvider(
         description = built.description,
         originLanguage = built.originLanguage,
         ratingRaw = meta.rating.orEmpty(),
-        statusRaw = meta.status.orEmpty(),
-        statusNormalized = normalizeStatus(meta.status),
+        statusRaw = meta.status?.takeIf { it.isNotBlank() } ?: existing?.statusRaw.orEmpty(),
+        statusNormalized = normalizeStatus(meta.status)
+            .takeIf { it != "UNKNOWN" }
+            ?: existing?.statusNormalized
+            ?: "UNKNOWN",
         lastUpdatedRaw = meta.lastUpdated.orEmpty(),
         lastUpdatedAt = existing?.lastUpdatedAt,
         extrasJson = buildJsonObject {

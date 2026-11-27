@@ -33,6 +33,8 @@ data class MetadataTranslationKey(
 data class StoredMetadataTranslation(
     val title: String? = null,
     val description: String? = null,
+    val translatedStatus: String? = null,
+    val translatedStatusSource: String? = null,
     val chapterTitles: Map<Int, String> = emptyMap(),
 )
 
@@ -40,6 +42,9 @@ data class StoredMetadataTranslation(
 data class MetadataTranslationPatch(
     val title: String? = null,
     val description: String? = null,
+    // An empty string with a source records "translated, nothing came back".
+    val translatedStatus: String? = null,
+    val translatedStatusSource: String? = null,
     val chapterTitles: Map<Int, String> = emptyMap(),
 )
 
@@ -120,6 +125,8 @@ class RoomMetadataTranslationStore(
     private fun BookTranslationEntity.toStored() = StoredMetadataTranslation(
         title = title?.takeIf { it.isNotBlank() },
         description = description?.takeIf { it.isNotBlank() },
+        translatedStatus = statusText?.takeIf { it.isNotBlank() },
+        translatedStatusSource = statusSource?.takeIf { it.isNotBlank() },
         chapterTitles = decodeChapterTitles(chapterTitlesJson),
     )
 }
@@ -148,6 +155,8 @@ internal fun mergeMetadataTranslation(
     // Only provider output is stored here; the original title never is.
     title = patch.title ?: existing?.title,
     description = patch.description ?: existing?.description,
+    statusText = patch.translatedStatus ?: existing?.statusText,
+    statusSource = patch.translatedStatusSource ?: existing?.statusSource,
     altTitlesJson = existing?.altTitlesJson ?: "[]",
     chapterTitlesJson = encodeChapterTitles(
         decodeChapterTitles(existing?.chapterTitlesJson) + patch.chapterTitles,

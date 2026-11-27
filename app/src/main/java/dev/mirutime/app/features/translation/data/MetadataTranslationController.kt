@@ -44,6 +44,8 @@ data class BookMetadataJob(
     val config: MetadataConfig,
     // Full scope can switch chapter titles off while keeping title/description.
     val includeChapterTitles: Boolean = true,
+    // Source status text, translated with the rest of the details batch.
+    val status: String? = null,
 )
 
 /**
@@ -64,6 +66,10 @@ data class BookMetadataTranslation(
     val status: MetadataTranslationStatus,
     val title: String? = null,
     val description: String? = null,
+    val translatedStatus: String? = null,
+    // Source text the translation was made from; a changed source invalidates
+    // it instead of showing a stale translation.
+    val translatedStatusSource: String? = null,
     val chapterTitles: Map<Int, String> = emptyMap(),
     val detailsLoaded: Boolean = false,
     /** Provider that actually served the batch (free fallback may differ). */
@@ -139,7 +145,7 @@ class MetadataTranslationController(
             .orEmpty()
         val neededChapterTitles = job.chapters.filter { it.second.isNotBlank() }.map { it.first }
         val chapterTitlesLoaded = neededChapterTitles.all { it in loadedChapterTitles }
-        if (hasDetails(job.bookUrl, job.config) &&
+        if (hasDetails(job.bookUrl, job.config, job.status) &&
             (!job.includeChapterTitles || chapterTitlesLoaded)
         ) {
             return
@@ -147,6 +153,9 @@ class MetadataTranslationController(
         val units = buildList {
             job.title.takeIf { it.isNotBlank() }?.let { add(TranslationUnit("0", it)) }
             job.description.takeIf { it.isNotBlank() }?.let { add(TranslationUnit("1", it)) }
+            job.status?.takeIf { it.isNotBlank() }?.let {
+                add(TranslationUnit(STATUS_ID.toString(), it.trim()))
+            }
             if (job.includeChapterTitles) {
                 job.chapters.forEach { (index, title) ->
                     if (title.isNotBlank()) {
@@ -226,9 +235,13 @@ class MetadataTranslationController(
         return entry?.config == config && entry.title != null
     }
 
-    private fun hasDetails(bookUrl: String, config: MetadataConfig): Boolean {
+    private fun hasDetails(bookUrl: String, config: MetadataConfig, status: String?): Boolean {
         val entry = _state.value[bookUrl]
-        return entry?.config == config && entry.detailsLoaded
+        // The source text, not the translated text, marks the attempt: an
+        // empty provider answer must not re-send the whole batch forever.
+        val source = status?.trim().orEmpty()
+        val statusDone = source.isEmpty() || entry?.translatedStatusSource == source
+        return entry?.config == config && entry.detailsLoaded && statusDone
     }
 
     private fun markLoading(bookUrl: String, config: MetadataConfig, pendingKey: String) {
@@ -239,6 +252,8 @@ class MetadataTranslationController(
                 status = MetadataTranslationStatus.Loading,
                 title = previous?.title,
                 description = previous?.description,
+                translatedStatus = previous?.translatedStatus,
+                translatedStatusSource = previous?.translatedStatusSource,
                 chapterTitles = previous?.chapterTitles.orEmpty(),
                 detailsLoaded = previous?.detailsLoaded == true,
                 provider = previous?.provider,
@@ -347,11 +362,21 @@ class MetadataTranslationController(
                     MetadataKind.Details -> {
                         val title = translations[0]?.takeIf { it.isNotBlank() }
                         val description = translations[1]?.takeIf { it.isNotBlank() }
+                        val statusSource = statusSourceOf(job.request)
+                        val translatedStatus = translations[STATUS_ID]?.takeIf { it.isNotBlank() }
                         val chapterTitles = chapterTitlesOf(translations)
                         next + (bookUrl to entry.copy(
                             status = MetadataTranslationStatus.Ready,
                             title = title ?: entry.title,
                             description = description ?: entry.description,
+                            // A new source drops the previous translation even
+                            // when the provider returned nothing usable.
+                            translatedStatus = if (statusSource != null) {
+                                translatedStatus
+                            } else {
+                                entry.translatedStatus
+                            },
+                            translatedStatusSource = statusSource ?: entry.translatedStatusSource,
                             chapterTitles = chapterTitles.ifEmpty { entry.chapterTitles },
                             detailsLoaded = true,
                             provider = result.provider,
@@ -396,6 +421,10 @@ class MetadataTranslationController(
                 MetadataKind.Details -> MetadataTranslationPatch(
                     title = translations[0]?.takeIf { it.isNotBlank() },
                     description = translations[1]?.takeIf { it.isNotBlank() },
+                    translatedStatus = statusSourceOf(job.request)?.let {
+                        translations[STATUS_ID].orEmpty()
+                    },
+                    translatedStatusSource = statusSourceOf(job.request),
                     chapterTitles = chapterTitlesOf(translations),
                 )
                 MetadataKind.Chapters -> MetadataTranslationPatch(
@@ -463,7 +492,9 @@ class MetadataTranslationController(
         config: MetadataConfig,
         stored: StoredMetadataTranslation,
     ) {
-        if (stored.title == null && stored.description == null && stored.chapterTitles.isEmpty()) {
+        if (stored.title == null && stored.description == null &&
+            stored.translatedStatusSource == null && stored.chapterTitles.isEmpty()
+        ) {
             return
         }
         _state.update { current ->
@@ -473,6 +504,9 @@ class MetadataTranslationController(
                 status = previous?.status ?: MetadataTranslationStatus.Ready,
                 title = previous?.title ?: stored.title,
                 description = previous?.description ?: stored.description,
+                translatedStatus = previous?.translatedStatus ?: stored.translatedStatus,
+                translatedStatusSource = previous?.translatedStatusSource
+                    ?: stored.translatedStatusSource,
                 chapterTitles = previous?.chapterTitles.orEmpty() + stored.chapterTitles,
                 // Only a batch that requested the synopsis can mark details
                 // done; a stored description is the durable proof of it.
@@ -491,6 +525,10 @@ class MetadataTranslationController(
                 if (id >= FIRST_CHAPTER_ID) id - FIRST_CHAPTER_ID to text else null
             }
             .toMap()
+
+    /** The status unit's source text, null when the book has no status. */
+    private fun statusSourceOf(request: MetadataRequest): String? =
+        request.units.firstOrNull { it.id == STATUS_ID.toString() }?.text
 
     private fun fail(job: Pending) {
         _state.update { current ->
@@ -536,6 +574,9 @@ class MetadataTranslationController(
 
     private companion object {
         const val FIRST_CHAPTER_ID = 2
+        // Negative so it never collides with title (0), synopsis (1) or
+        // chapter indexes; chapterTitlesOf already ignores ids below 2.
+        const val STATUS_ID = -1
         // A catalogue page is 50 books and the library reloads its own page on
         // every visit; the old 40-entry cap evicted the whole fresh batch right
         // after it was applied, so no card ever showed a translated title.

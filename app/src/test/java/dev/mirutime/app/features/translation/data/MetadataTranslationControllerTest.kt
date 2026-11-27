@@ -74,6 +74,145 @@ class MetadataTranslationControllerTest {
     }
 
     @Test
+    fun `details batch translates the source status and persists it`() = runTest {
+        val engine = FakeEngine(::echo)
+        val store = FakeMetadataStore()
+        val controller = MetadataTranslationController(engine, this, store)
+        val config = config()
+        val job = BookMetadataJob(
+            bookUrl = "fake://a/one",
+            title = "One",
+            description = "Synopsis",
+            status = "连载中",
+            chapters = listOf(1 to "First"),
+            config = config,
+        )
+
+        controller.submitBook(job)
+        advanceUntilIdle()
+
+        val entry = controller.state.value["fake://a/one"]
+        assertEquals("translated:连载中", entry?.translatedStatus)
+        assertEquals("连载中", entry?.translatedStatusSource)
+        assertEquals(
+            "-1",
+            engine.requests.single().units.single { it.text == "连载中" }.id,
+        )
+        val stored = store.saved.getValue("fake://a/one" to store.keys.single())
+        assertEquals("translated:连载中", stored.translatedStatus)
+        assertEquals("连载中", stored.translatedStatusSource)
+
+        // A cached status counts as done; a second submit must not re-request.
+        controller.submitBook(job)
+        advanceUntilIdle()
+        assertEquals(1, engine.requests.size)
+    }
+
+    @Test
+    fun `empty status translation is attempted once, not every open`() = runTest {
+        val engine = FakeEngine { request ->
+            Outcome.Ok(
+                MetadataTranslationResult(
+                    translations = request.units.mapNotNull { unit ->
+                        unit.id.toIntOrNull()?.let { id ->
+                            id to if (id == -1) "" else "translated:${unit.text}"
+                        }
+                    }.toMap(),
+                    provider = request.provider,
+                    model = null,
+                ),
+            )
+        }
+        val controller = MetadataTranslationController(engine, this)
+        val config = config()
+        val job = BookMetadataJob(
+            bookUrl = "fake://a/one",
+            title = "One",
+            description = "Synopsis",
+            chapters = emptyList(),
+            config = config,
+            status = "连载中",
+        )
+
+        controller.submitBook(job)
+        advanceUntilIdle()
+        controller.submitBook(job)
+        advanceUntilIdle()
+
+        assertEquals(1, engine.requests.size)
+        val entry = controller.state.value["fake://a/one"]
+        assertEquals(null, entry?.translatedStatus)
+        assertEquals("连载中", entry?.translatedStatusSource)
+    }
+
+    @Test
+    fun `changed source status retranslates instead of keeping the old one`() = runTest {
+        val engine = FakeEngine(::echo)
+        val controller = MetadataTranslationController(engine, this)
+        val config = config()
+        val job = BookMetadataJob(
+            bookUrl = "fake://a/one",
+            title = "One",
+            description = "Synopsis",
+            chapters = emptyList(),
+            config = config,
+            status = "连载中",
+        )
+
+        controller.submitBook(job)
+        advanceUntilIdle()
+        assertEquals("translated:连载中", controller.state.value["fake://a/one"]?.translatedStatus)
+
+        controller.submitBook(job.copy(status = "已完结"))
+        advanceUntilIdle()
+
+        assertEquals(2, engine.requests.size)
+        val entry = controller.state.value["fake://a/one"]
+        assertEquals("translated:已完结", entry?.translatedStatus)
+        assertEquals("已完结", entry?.translatedStatusSource)
+    }
+
+    @Test
+    fun `cached details without a status request the status once`() = runTest {
+        val config = config()
+        val store = FakeMetadataStore()
+        store.saved["fake://a/one" to controllerKey(config)] = StoredMetadataTranslation(
+            title = "Заголовок",
+            description = "Описание",
+        )
+        val engine = FakeEngine(::echo)
+        val controller = MetadataTranslationController(engine, this, store)
+
+        controller.hydrate("fake://a/one", config)
+        controller.submitBook(
+            BookMetadataJob(
+                bookUrl = "fake://a/one",
+                title = "One",
+                description = "Synopsis",
+                chapters = emptyList(),
+                config = config,
+                status = "连载中",
+            ),
+        )
+        advanceUntilIdle()
+        controller.submitBook(
+            BookMetadataJob(
+                bookUrl = "fake://a/one",
+                title = "One",
+                description = "Synopsis",
+                chapters = emptyList(),
+                config = config,
+                status = "连载中",
+            ),
+        )
+        advanceUntilIdle()
+
+        // The pre-status cache must refetch exactly once, then stop.
+        assertEquals(1, engine.requests.size)
+        assertEquals("translated:连载中", controller.state.value["fake://a/one"]?.translatedStatus)
+    }
+
+    @Test
     fun `chapter titles can be switched off while details still translate`() = runTest {
         val engine = FakeEngine(::echo)
         val controller = MetadataTranslationController(engine, this)
@@ -444,6 +583,8 @@ class MetadataTranslationControllerTest {
             pipelineVersion = MetadataPipelineVersion,
             title = "Old title",
             description = "Old description",
+            statusText = "Old status",
+            statusSource = "Old source",
             chapterTitlesJson = "{\"1\":\"One\"}",
             status = "COMPLETE",
             updatedAt = 1,
@@ -455,6 +596,8 @@ class MetadataTranslationControllerTest {
             key = key,
             patch = MetadataTranslationPatch(
                 title = "New title",
+                translatedStatus = "New status",
+                translatedStatusSource = "New source",
                 chapterTitles = mapOf(2 to "Two"),
             ),
             now = 2,
@@ -463,6 +606,8 @@ class MetadataTranslationControllerTest {
         assertEquals(9, merged.translationId)
         assertEquals("New title", merged.title)
         assertEquals("Old description", merged.description)
+        assertEquals("New status", merged.statusText)
+        assertEquals("New source", merged.statusSource)
         assertEquals(mapOf(1 to "One", 2 to "Two"), decodeChapterTitles(merged.chapterTitlesJson))
     }
 
@@ -500,6 +645,9 @@ class MetadataTranslationControllerTest {
             saved[bookUrl to key] = previous.copy(
                 title = patch.title ?: previous.title,
                 description = patch.description ?: previous.description,
+                translatedStatus = patch.translatedStatus ?: previous.translatedStatus,
+                translatedStatusSource = patch.translatedStatusSource
+                    ?: previous.translatedStatusSource,
                 chapterTitles = previous.chapterTitles + patch.chapterTitles,
             )
         }

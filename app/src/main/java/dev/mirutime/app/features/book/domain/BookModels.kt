@@ -69,6 +69,9 @@ data class BookDetails(
     // 0 means "not parseable" → the rating cell shows "—".
     val rating: Float,
     val ongoing: Boolean,
+    // Status exactly as the source published it ("连载中", "Ongoing"); null
+    // when the source gave none, so the UI shows no invented label.
+    val status: String? = null,
     val updatedLabel: String,
     val totalChapters: Int,
     val readCount: Int,

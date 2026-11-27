@@ -856,6 +856,7 @@ internal fun BookScreen(
                             coverUrl = refreshed.coverUrl,
                             genres = refreshed.genres,
                             ongoing = refreshed.ongoing,
+                            status = refreshed.status,
                             updatedLabel = refreshed.updatedLabel,
                         )
                     }
@@ -1566,6 +1567,7 @@ internal fun BookScreen(
                 chapters = loaded.chapters.map { it.index to it.title },
                 config = config,
                 includeChapterTitles = translationPresentation.chapterTitles,
+                status = loaded.status,
             ),
         )
     }
@@ -1623,6 +1625,10 @@ internal fun BookScreen(
                 AnnounceCard(
                     book = current,
                     title = metadataEntry?.title ?: current.title,
+                    // Only a translation of the status currently on screen.
+                    translatedStatus = metadataEntry?.translatedStatus?.takeIf {
+                        metadataEntry.translatedStatusSource == current.status?.trim()
+                    },
                     shelves = shelves,
                     shelvesLoading = shelvesLoading,
                     onShelfClick = { shelfSheetOpen = true },
@@ -2561,6 +2567,7 @@ private fun ChaptersSkeleton() {
 private fun AnnounceCard(
     book: BookDetails,
     title: String,
+    translatedStatus: String? = null,
     shelves: List<Shelf>,
     shelvesLoading: Boolean,
     onShelfClick: () -> Unit,
@@ -2592,14 +2599,14 @@ private fun AnnounceCard(
         val known = shelves.firstOrNull { it.id == book.shelfId }
         if (known == null) shelfLabel(book.shelfId, shelves) else shelfLabel(known)
     }
-    val status = buildString {
-        append(stringResource(if (book.ongoing) R.string.book_stat_ongoing else R.string.book_stat_completed))
-        val updated = book.updatedLabel.trim()
-        if (updated.isNotEmpty()) {
-            append(" · ")
-            append(updated)
-        }
-    }
+    // Source text wins over any invented label; FULL mode swaps in its
+    // translation. No status and no update date leaves the row hidden.
+    val shownStatus = translatedStatus?.trim()?.takeIf { it.isNotEmpty() }
+        ?: book.status?.trim()?.takeIf { it.isNotEmpty() }
+    val status = listOfNotNull(
+        shownStatus,
+        book.updatedLabel.trim().takeIf { it.isNotEmpty() },
+    ).joinToString(" · ")
     val pluginLabel = stringResource(R.string.book_plugin)
     MiruCard {
         Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.M)) {
@@ -2745,23 +2752,25 @@ private fun AnnounceCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(extra.accent),
-                    )
-                    Text(
-                        text = status,
-                        style = MiruCardType.Meta,
-                        color = extra.muted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                if (status.isNotEmpty()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(extra.accent),
+                        )
+                        Text(
+                            text = status,
+                            style = MiruCardType.Meta,
+                            color = extra.muted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }

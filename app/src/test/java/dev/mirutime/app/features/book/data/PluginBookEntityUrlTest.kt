@@ -131,6 +131,37 @@ class PluginBookEntityUrlTest {
     }
 
     @Test
+    fun `row builder keeps a stored status when the plugin sends blank`() {
+        val stored = existing().copy(statusRaw = "连载中", statusNormalized = "UNKNOWN")
+        val entity = PluginBookDataProvider().buildEntity(
+            bookUrl = key,
+            sourceId = installId,
+            built = details("Book"),
+            meta = BookMeta(title = "Book"),
+            existing = stored,
+            timestamp = 3L,
+        )
+
+        assertEquals("连载中", entity.statusRaw)
+        assertEquals("UNKNOWN", entity.statusNormalized)
+    }
+
+    @Test
+    fun `row builder prefers a fresh status over the stored one`() {
+        val stored = existing().copy(statusRaw = "连载中", statusNormalized = "ONGOING")
+        val entity = PluginBookDataProvider().buildEntity(
+            bookUrl = key,
+            sourceId = installId,
+            built = details("Book"),
+            meta = BookMeta(title = "Book", status = "已完结"),
+            existing = stored,
+            timestamp = 3L,
+        )
+
+        assertEquals("已完结", entity.statusRaw)
+    }
+
+    @Test
     fun `row builder stamps current timestamp when newly added to library`() {
         val freshEntity = PluginBookDataProvider().buildEntity(
             bookUrl = key,
