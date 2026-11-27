@@ -39,13 +39,36 @@ class RegexRuleCacheTest {
         assertNotSame(rule("foo").compiled(), rule("foo", wholeWords = true).compiled())
     }
 
-    // Java's \b is ASCII-only by default: without the Unicode flag a
-    // whole-word rule silently does nothing on Cyrillic or other scripts.
+    // Word edges are lookarounds, not \b: \b is ASCII-only on desktop JVM and
+    // refuses patterns that start or end with punctuation.
     @Test
     fun `wholeWords matches non-latin words`() {
         val cyrillic = rule("Иван", replacement = "X", wholeWords = true)
 
         assertEquals("Привет X и Иванка", applyRules(listOf(cyrillic), "Привет Иван и Иванка"))
+    }
+
+    @Test
+    fun `wholeWords matches a term with trailing punctuation`() {
+        val rule = rule("""ad\.""", replacement = "X", wholeWords = true)
+
+        // "bad." contains "ad." but not as a whole word.
+        assertEquals("X bad.", applyRules(listOf(rule), "ad. bad."))
+    }
+
+    @Test
+    fun `wholeWords matches a term with leading punctuation`() {
+        val rule = rule("""\.\.\.""", replacement = "", wholeWords = true)
+
+        // '...' bounded by spaces: the old \b form could not match here.
+        assertEquals("wait  now", applyRules(listOf(rule), "wait ... now"))
+    }
+
+    @Test
+    fun `wholeWords never matches inside a longer word digit or underscore`() {
+        val rule = rule("ad", replacement = "X", wholeWords = true)
+
+        assertEquals("bad ads X ad_1 ad1", applyRules(listOf(rule), "bad ads ad ad_1 ad1"))
     }
 
     @Test

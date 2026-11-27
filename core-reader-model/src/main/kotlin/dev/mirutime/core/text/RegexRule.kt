@@ -77,13 +77,20 @@ private val plainCache = ConcurrentHashMap<String, Regex>()
 private val wholeWordsCache = ConcurrentHashMap<String, Regex>()
 
 // Whole-words wraps the pattern so it only matches between word boundaries.
+// Lookarounds, not \b: \b is ASCII-only on desktop JVM (Android matches through
+// ICU) and it refuses patterns that start or end with a non-word character
+// ("Note:", "...", "***") because it needs a word/non-word transition.
+// Same form as NoveLA's effectivePattern.
+private const val WholeWordStart = "(?<![\\p{L}\\p{N}_])"
+private const val WholeWordEnd = "(?![\\p{L}\\p{N}_])"
+
 fun RegexRule.compiled(): Regex? {
     val cache = if (wholeWords) wholeWordsCache else plainCache
     val compiled = cache[pattern] ?: run {
         val regex = try {
-            // (?U) makes \b Unicode-aware; otherwise whole-word rules never
-            // match non-Latin text.
-            Regex(if (wholeWords) "(?U)\\b(?:$pattern)\\b" else pattern)
+            Regex(
+                if (wholeWords) "$WholeWordStart(?:$pattern)$WholeWordEnd" else pattern,
+            )
         } catch (_: Exception) {
             NEVER_MATCH
         }
