@@ -39,12 +39,14 @@ class EpubExporterTest {
         totalChapters: Int,
         chapterLoader: suspend (Int, Int) -> List<Pair<String, String>>,
         imageByteLoader: suspend (String) -> ByteArray? = { null },
-        onProgress: (Int, Int) -> Unit = { _, _ -> }
+        onProgress: (Int, Int) -> Unit = { _, _ -> },
+        textTransform: (String) -> String = { it },
     ): ByteArray = runBlocking {
         val out = ByteArrayOutputStream()
         exportStreaming(
             out, "Test Book", "en", totalChapters, chapterLoader,
-            imageByteLoader = imageByteLoader, onProgress = onProgress
+            imageByteLoader = imageByteLoader, onProgress = onProgress,
+            textTransform = textTransform,
         )
         out.toByteArray()
     }
@@ -306,6 +308,30 @@ class EpubExporterTest {
         assertFalse(entries.containsKey("OEBPS/chapter-003.xhtml"))
         assertEquals(1, Regex("<itemref idref=").findAll(entries.getValue("OEBPS/content.opf")).count())
         assertEquals(listOf(1 to 3), progress)
+    }
+
+    @Test
+    fun `text transform runs on decoded paragraph text and drops emptied ones`() {
+        val seen = mutableListOf<String>()
+        val chapter = unzip(
+            exportStreamingToBytes(
+                totalChapters = 1,
+                // Entities and inline tags are already resolved when the
+                // transform sees the text, exactly like the reader.
+                chapterLoader = { _, _ ->
+                    listOf("T" to "<p>Keep &amp; <em>safe</em></p><p>Delete me</p><p>Keep too</p>")
+                },
+                textTransform = { text ->
+                    seen += text
+                    if (text == "Delete me") "" else text.uppercase()
+                },
+            )
+        ).getValue("OEBPS/chapter-001.xhtml")
+
+        assertEquals(listOf("Keep & safe", "Delete me", "Keep too"), seen)
+        assertTrue(chapter.contains("<p>KEEP &amp; SAFE</p>"))
+        assertTrue(chapter.contains("<p>KEEP TOO</p>"))
+        assertFalse(chapter.contains("DELETE"))
     }
 
     @Test

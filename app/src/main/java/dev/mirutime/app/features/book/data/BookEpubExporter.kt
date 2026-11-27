@@ -8,6 +8,10 @@ import dev.mirutime.app.features.translation.domain.TranslationRequest
 import dev.mirutime.core.local.exportStreaming
 import dev.mirutime.core.log.MiruLog
 import dev.mirutime.core.reader.html.ReaderHtmlParser
+import dev.mirutime.core.text.RegexRule
+import dev.mirutime.core.text.RegexRuleTarget
+import dev.mirutime.core.text.applyRulesFor
+import dev.mirutime.core.text.normalizeAngles
 import dev.mirutime.translator.PromptSpec
 import java.io.File
 import java.io.OutputStream
@@ -49,6 +53,7 @@ class BookEpubExporter(
         suspend (bookUrl: String, chapterUrl: String, html: String) -> Map<Int, String>? =
         { _, _, _ -> null },
     private val sourceIdFor: (bookUrl: String) -> String = { "" },
+    private val rulesFor: (bookUrl: String) -> List<RegexRule> = { emptyList() },
 ) {
     /**
      * [title] is the display name the caller chose (it carries the language and
@@ -93,6 +98,28 @@ class BookEpubExporter(
         // the original src is kept, exactly like a failed download.
         val remoteImageDeadline = System.currentTimeMillis() + REMOTE_IMAGE_BUDGET_MS
 
+        // Cleanup rules are applied per chapter here: to the chapter title and
+        // to the paragraph text the core writer has already stripped and
+        // entity-decoded, which is the same input the reader rules see.
+        val rules = rulesFor(bookUrl)
+        val rulesActive = rules.any { it.enabled && it.pattern.isNotBlank() }
+        val originalTransform: (String) -> String = if (rulesActive) {
+            // Same normalization the reader's parser applies before the rules:
+            // angles folded, then space runs collapsed and trimmed per line.
+            { text ->
+                applyRulesFor(
+                    rules,
+                    normalizeAngles(text)
+                        .lines()
+                        .joinToString("\n") { SpaceRuns.replace(it, " ").trim() }
+                        .trim(),
+                    RegexRuleTarget.Original,
+                )
+            }
+        } else {
+            { text -> text }
+        }
+
         var written = 0
         var missing = 0
         val chapterLoader: suspend (Int, Int) -> List<Pair<String, String>> = { offset, count ->
@@ -120,22 +147,23 @@ class BookEpubExporter(
                         val translations = try {
                             // The resolver keys the cache off the ORIGINAL html:
                             // ReaderScreen stores sourceHash from this exact text,
-                            // not from the image-resolved copy used for output.
+                            // not from the image-resolved copy. The planner
+                            // applies the Original rules itself.
                             translationsFor(bookUrl, chapterUrl, sourceText)
                         } catch (e: CancellationException) {
                             throw e
                         } catch (_: Exception) {
                             null
                         }
-                        if (translations.isNullOrEmpty()) {
-                            sourceHtml
-                        } else {
-                            translatedChapterHtml(sourceHtml, chapterUrl, translations)
-                        }
+                        // A chapter without a cached translation still gets the
+                        // Original-stage cleanup: the fallback branch inside
+                        // translatedChapterHtml applies it.
+                        translatedChapterHtml(sourceText, chapterUrl, translations.orEmpty(), rules)
                     } else {
                         sourceHtml
                     }
-                    val title = chapter.title.ifBlank { "Chapter ${chapter.index}" }
+                    val title = applyRulesFor(rules, chapter.title, RegexRuleTarget.Original)
+                        .ifBlank { "Chapter ${chapter.index}" }
                     title to html
                 }
             }
@@ -188,6 +216,14 @@ class BookEpubExporter(
                     written = done
                     onProgress(done, total)
                 },
+                // Every block is already rule-clean in translated mode (and
+                // untranslated chapters are cleaned there too): the core
+                // transform stays identity so rules never hit translated text.
+                textTransform = if (includeTranslation) {
+                    { text -> text }
+                } else {
+                    originalTransform
+                },
             )
             if (missing > 0) {
                 MiruLog.event(
@@ -232,21 +268,36 @@ internal fun translatedChapterHtml(
     html: String,
     chapterUrl: String,
     translations: Map<Int, String>,
+    rules: List<RegexRule> = emptyList(),
 ): String {
-    if (translations.isEmpty() || html.isBlank()) return html
-    val blocks = ReaderHtmlParser.parseDocument(html, chapterUrl)
+    if (html.isBlank()) return html
+    // Nothing to swap and nothing to clean: keep the source bytes as they are.
+    if (translations.isEmpty() && rules.none { it.enabled && it.pattern.isNotBlank() }) return html
+    // Text is parsed as-is (parseDocument cleans it exactly like the reader);
+    // only relative image srcs are resolved up front, because the parser's own
+    // resolveImageUrl handles http(s) chapter URLs only.
+    val blocks = ReaderHtmlParser.parseDocument(resolveImageSources(html, chapterUrl), chapterUrl)
     if (blocks.isEmpty()) return html
     val body = buildString {
         for (block in blocks) {
             val translated = translations[block.id.index]?.takeIf { it.isNotBlank() }
+            // parseDocument hands out cleaned text, so the Original rules run
+            // on the same input as in the reader; the translated side gets only
+            // Translation-stage rules.
+            val text = if (translated != null) {
+                applyRulesFor(rules, translated, RegexRuleTarget.Translation)
+            } else {
+                applyRulesFor(rules, block.original, RegexRuleTarget.Original)
+            }
             when (block.kind) {
                 BlockKind.Heading ->
-                    append("<h2>").append(htmlEscape(translated ?: block.original)).append("</h2>")
+                    append("<h2>").append(htmlEscape(text)).append("</h2>")
                 BlockKind.Paragraph ->
-                    append("<p>").append(htmlEscape(translated ?: block.original)).append("</p>")
+                    append("<p>").append(htmlEscape(text)).append("</p>")
                 BlockKind.Image -> block.imageRef?.takeIf { it.isNotBlank() }?.let { src ->
+                    val alt = applyRulesFor(rules, block.original, RegexRuleTarget.Original)
                     append("<p><img src=\"").append(htmlEscape(src))
-                        .append("\" alt=\"").append(htmlEscape(block.original)).append("\"/></p>")
+                        .append("\" alt=\"").append(htmlEscape(alt)).append("\"/></p>")
                 }
                 BlockKind.Divider -> Unit
             }
@@ -287,6 +338,10 @@ internal fun readFileUrlBytes(src: String): ByteArray? {
 }
 
 private const val MAX_EXPORT_IMAGE_BYTES = 32L * 1024 * 1024
+
+// Same whitespace run the reader's parser collapses inside a block, so rules
+// match the reader's text and not the raw markup spacing.
+private val SpaceRuns = Regex("[ \\t\\u00A0]+")
 
 // Whole-export budget for remote chapter images (not per image).
 private const val REMOTE_IMAGE_BUDGET_MS = 60_000L

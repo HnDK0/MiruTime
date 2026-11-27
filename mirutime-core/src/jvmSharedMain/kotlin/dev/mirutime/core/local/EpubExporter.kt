@@ -94,13 +94,18 @@ private fun paragraphXml(text: String): String =
     xmlEscape(text).replace("\n", "<br/>")
 
 /** HTML fragment → paragraphs: block tags split, tags strip, entities unescape. */
-private fun textToParagraphs(html: String): List<String> = html
+private fun textToParagraphs(
+    html: String,
+    transform: (String) -> String = { it },
+): List<String> = html
     .replace(BLOCK_TAG_BREAK, "\n\n")
     .replace(BR_TAG_BREAK, "\n")
     .replace(STRIP_HTML_TAGS, "")
     .let { Parser.unescapeEntities(it, false) }
     .split(PARAGRAPH_BREAK)
     .map { it.trim() }
+    .filter { it.isNotEmpty() }
+    .map(transform)
     .filter { it.isNotEmpty() }
 
 /**
@@ -126,7 +131,8 @@ suspend fun export(
     creator: String? = null,
     subjects: List<String> = emptyList(),
     imageByteLoader: suspend (src: String) -> ByteArray? = { null },
-    onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }
+    onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    textTransform: (String) -> String = { it },
 ) = exportStreaming(
     outputStream,
     bookTitle,
@@ -138,7 +144,8 @@ suspend fun export(
     creator,
     subjects,
     imageByteLoader,
-    onProgress
+    onProgress,
+    textTransform,
 )
 
 /**
@@ -156,6 +163,10 @@ suspend fun export(
  *
  * Progress: done is the number of chapters actually written, total the book's
  * total chapter count (known before the export starts).
+ *
+ * [textTransform] runs on every paragraph after tag stripping and entity
+ * decoding, so a book-specific cleanup (regex rules) sees the same text the
+ * reader does; a paragraph transformed to an empty string is dropped.
  */
 suspend fun exportStreaming(
     outputStream: OutputStream,
@@ -168,7 +179,8 @@ suspend fun exportStreaming(
     creator: String? = null,
     subjects: List<String> = emptyList(),
     imageByteLoader: suspend (src: String) -> ByteArray? = { null },
-    onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }
+    onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    textTransform: (String) -> String = { it },
 ) = withContext(Dispatchers.IO) {
     require(totalChapters > 0) { "Chapter list is empty — an EPUB without content is not allowed" }
 
@@ -231,6 +243,7 @@ suspend fun exportStreaming(
                 // Image srcs of the body BEFORE tag stripping: image-only
                 // chapters produce no text after stripping but must be kept.
                 val imgSrcList = IMG_SRC_REGEX.findAll(trimmedBody).map { it.groupValues[1] }.toList()
+                // Untransformed: the transform runs exactly once, in bodyXml.
                 val paragraphs = textToParagraphs(trimmedBody)
                 if (paragraphs.isEmpty() && imgSrcList.isEmpty()) return@forEach
                 val name = chapterFileName(validTitles.size)
@@ -243,7 +256,7 @@ suspend fun exportStreaming(
                     var lastEnd = 0
                     IMG_SRC_REGEX.findAll(trimmedBody).forEach { m ->
                         val textPart = trimmedBody.substring(lastEnd, m.range.first)
-                        textToParagraphs(textPart).forEach { p ->
+                        textToParagraphs(textPart, textTransform).forEach { p ->
                             if (isNotEmpty()) appendLine()
                             append("""    <p>${paragraphXml(p)}</p>""")
                         }
@@ -267,11 +280,14 @@ suspend fun exportStreaming(
                         imageIndex++
                         lastEnd = m.range.last + 1
                     }
-                    textToParagraphs(trimmedBody.substring(lastEnd)).forEach { p ->
+                    textToParagraphs(trimmedBody.substring(lastEnd), textTransform).forEach { p ->
                         if (isNotEmpty()) appendLine()
                         append("""    <p>${paragraphXml(p)}</p>""")
                     }
                 }
+                // The transform may have removed every paragraph: nothing to
+                // write, nothing to count.
+                if (bodyXml.isBlank()) return@forEach
                 zip.writeEntry(
                     "OEBPS/$name",
                     """$XML_PROLOG

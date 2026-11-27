@@ -640,6 +640,9 @@ class MiruApp : Application(), SingletonImageLoader.Factory {
                 }
             },
             sourceIdFor = { PluginBookIndex.sourceForBook(it).orEmpty() },
+            // Same cleanup the reader applies on load: the exported chapter
+            // must match what the user sees.
+            rulesFor = { AppSettings.effectiveRules(it) },
         )
     }
     // App-level translator for the in-app browser. The reader keeps its own

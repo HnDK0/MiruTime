@@ -6,6 +6,8 @@ import dev.mirutime.app.features.library.domain.ContentType
 import dev.mirutime.app.features.translation.data.ChapterTranslationPlanner
 import dev.mirutime.core.reader.ChapterContent
 import dev.mirutime.core.reader.html.ReaderHtmlParser
+import dev.mirutime.core.text.RegexRule
+import dev.mirutime.core.text.RegexRuleScope
 import dev.mirutime.app.features.translation.data.TranslationMode
 import dev.mirutime.translator.PromptSpec
 import dev.mirutime.translator.ProviderId
@@ -192,6 +194,26 @@ class BookEpubExporterTest {
         assertTrue(result.contains("<p>Dos</p>"))
         // No cached blocks at all: the original HTML is returned untouched.
         assertEquals(html, translatedChapterHtml(html, "chapter", emptyMap()))
+    }
+
+    @Test
+    fun `empty translations with active rules still parse and clean once`() {
+        val rule = RegexRule(
+            id = 1,
+            pattern = "x",
+            replacement = "xx",
+            description = "",
+            enabled = true,
+            wholeWords = false,
+            scope = RegexRuleScope.Original,
+        )
+        val html = "<p>x</p>"
+
+        assertEquals("<p>xx</p>", translatedChapterHtml(html, "chapter", emptyMap(), listOf(rule)))
+        // A second application would give "xxxx".
+        assertFalse(translatedChapterHtml(html, "chapter", emptyMap(), listOf(rule)).contains("xxxx"))
+        // Rules alone are not a reason to touch a body with no text.
+        assertEquals("", translatedChapterHtml("", "chapter", emptyMap(), listOf(rule)))
     }
 
     @Test
@@ -504,6 +526,195 @@ class BookEpubExporterTest {
         val entries = unzip(out.toByteArray())
         assertTrue(entries.containsKey("OEBPS/chapter-001.xhtml"))
         assertFalse(entries.containsKey("OEBPS/chapter-002.xhtml"))
+    }
+
+    @Test
+    fun `export applies original rules to text and titles and keeps markup`() {
+        val rules = listOf(
+            // Inline tags are stripped before the rules run, so this matches
+            // text the reader sees as one block.
+            RegexRule(
+                id = 1,
+                pattern = "Buy now",
+                replacement = "",
+                description = "",
+                enabled = true,
+                wholeWords = false,
+                scope = RegexRuleScope.Original,
+            ),
+            RegexRule(
+                id = 2,
+                pattern = "Buy ",
+                replacement = "",
+                description = "",
+                enabled = true,
+                wholeWords = false,
+                scope = RegexRuleScope.Original,
+            ),
+            // Disabled: must never reach the exported text.
+            RegexRule(
+                id = 3,
+                pattern = "Ad",
+                replacement = "",
+                description = "",
+                enabled = false,
+                wholeWords = false,
+                scope = RegexRuleScope.Original,
+            ),
+        )
+        val html = """<h2>Buy Ad title</h2><p>Buy <em>now</em></p><p><img src="pic.png" alt="x"/></p>"""
+        val provider = FakeProvider(
+            details(listOf(chapter(1).copy(title = "Buy Ad title"))),
+            mapOf(1 to content(1, html)),
+        )
+        val out = ByteArrayOutputStream()
+
+        val result = runBlocking {
+            BookEpubExporter(
+                provider,
+                chapterBodyLoader = { _, _ -> html },
+                rulesFor = { rules },
+            ).export("test://book", includeTranslation = false, outputStream = out)
+        }
+
+        assertTrue(result is EpubExportResult.Success)
+        val chapterHtml = unzip(out.toByteArray())
+            .getValue("OEBPS/chapter-001.xhtml")
+            .toString(Charsets.UTF_8)
+        // The paragraph split by <em> is cleaned as one text run, so neither
+        // half of "Buy now" survives.
+        assertFalse(chapterHtml.contains("Buy"))
+        assertFalse(chapterHtml.contains("now"))
+        // Title and body heading are cleaned.
+        assertTrue(chapterHtml.contains("<title>Ad title</title>"))
+        assertTrue(chapterHtml.contains("<h2>Ad title</h2>"))
+        assertTrue(chapterHtml.contains("<p>Ad title</p>"))
+        // Disabled rule must not delete "Ad"; the image stays.
+        assertTrue(chapterHtml.contains("pic.png"))
+    }
+
+    @Test
+    fun `export applies only translation rules to translated text`() {
+        // x -> xx is observable if applied twice: the fallback block must stay
+        // "xx", never "xxxx".
+        val originalRule = RegexRule(
+            id = 1,
+            pattern = "x",
+            replacement = "xx",
+            description = "",
+            enabled = true,
+            wholeWords = false,
+            scope = RegexRuleScope.Original,
+        )
+        val translationRule = RegexRule(
+            id = 2,
+            pattern = " term",
+            replacement = "",
+            description = "",
+            enabled = true,
+            wholeWords = false,
+            scope = RegexRuleScope.Translation,
+        )
+        val provider = FakeProvider(
+            details(listOf(chapter(1))),
+            mapOf(1 to content(1, "<p>x</p><p>x</p>")),
+        )
+        val out = ByteArrayOutputStream()
+
+        val result = runBlocking {
+            BookEpubExporter(
+                provider,
+                chapterBodyLoader = { _, _ -> "<p>x</p><p>x</p>" },
+                translationsFor = { _, _, _ -> mapOf(0 to "x term") },
+                rulesFor = { listOf(originalRule, translationRule) },
+            ).export("test://book", includeTranslation = true, outputStream = out)
+        }
+
+        assertTrue(result is EpubExportResult.Success)
+        val chapterHtml = unzip(out.toByteArray())
+            .getValue("OEBPS/chapter-001.xhtml")
+            .toString(Charsets.UTF_8)
+        // Translation-scope rule cleaned the translated block, the Original rule
+        // did not run on it.
+        assertTrue(chapterHtml.contains("<p>x</p>"))
+        // Untranslated block keeps the source text with the Original rule
+        // applied exactly once.
+        assertTrue(chapterHtml.contains("<p>xx</p>"))
+        assertFalse(chapterHtml.contains("xxxx"))
+        assertFalse(chapterHtml.contains(" term"))
+    }
+
+    @Test
+    fun `translated export cleans chapters without a cached translation`() {
+        // Double application is observable: x -> xx would become "xxxx".
+        val rule = RegexRule(
+            id = 1,
+            pattern = "x",
+            replacement = "xx",
+            description = "",
+            enabled = true,
+            wholeWords = false,
+            scope = RegexRuleScope.Original,
+        )
+        val provider = FakeProvider(
+            details(listOf(chapter(1))),
+            mapOf(1 to content(1, "<p>x</p>")),
+        )
+        val out = ByteArrayOutputStream()
+
+        val result = runBlocking {
+            BookEpubExporter(
+                provider,
+                chapterBodyLoader = { _, _ -> "<p>x</p>" },
+                translationsFor = { _, _, _ -> null },
+                rulesFor = { listOf(rule) },
+            ).export("test://book", includeTranslation = true, outputStream = out)
+        }
+
+        assertTrue(result is EpubExportResult.Success)
+        val chapterHtml = unzip(out.toByteArray())
+            .getValue("OEBPS/chapter-001.xhtml")
+            .toString(Charsets.UTF_8)
+        assertTrue(chapterHtml.contains("<p>xx</p>"))
+        assertFalse(chapterHtml.contains("xxxx"))
+    }
+
+    @Test
+    fun `export leaves text untouched without effective rules`() {
+        val provider = FakeProvider(
+            details(listOf(chapter(1))),
+            mapOf(1 to content(1, "<p>Keep <em>this</em> text</p>")),
+        )
+        val exportHtml: (List<RegexRule>) -> String = { rules ->
+            runBlocking {
+                val out = ByteArrayOutputStream()
+                val result = BookEpubExporter(
+                    provider,
+                    chapterBodyLoader = { _, _ -> "<p>Keep <em>this</em> text</p>" },
+                    rulesFor = { rules },
+                ).export("test://book", includeTranslation = false, outputStream = out)
+                assertTrue(result is EpubExportResult.Success)
+                unzip(out.toByteArray()).getValue("OEBPS/chapter-001.xhtml")
+                    .toString(Charsets.UTF_8)
+            }
+        }
+
+        val plain = exportHtml(emptyList())
+        assertTrue(plain.contains("<p>Keep this text</p>"))
+        // A disabled rule changes nothing either.
+        val disabled = exportHtml(
+            listOf(
+                RegexRule(
+                    id = 1,
+                    pattern = "this",
+                    replacement = "",
+                    description = "",
+                    enabled = false,
+                    wholeWords = false,
+                ),
+            ),
+        )
+        assertEquals(plain, disabled)
     }
 
     @Test
