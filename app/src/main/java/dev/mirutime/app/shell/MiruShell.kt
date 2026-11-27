@@ -370,13 +370,18 @@ fun MiruShell(
     // Restore-only revision: an open book page reloads its row after a restore
     // without reloading on every membership tap or book-open notification.
     var restoreRevision by remember { mutableIntStateOf(0) }
-    // One invalidation path for every committed membership write: cached
-    // catalogue/search snapshots carry inLibrary flags, so drop them and let
-    // library/dashboard/Finder reload on the new revision. Never called for a
-    // failed write.
-    val onLibraryChanged: () -> Unit = {
+    // Cached catalogue/search snapshots carry inLibrary flags. They are only
+    // stale after a committed membership write, so dropping them is the whole
+    // fix for a screen that already reloads its own rows.
+    val invalidateCachedBadges: () -> Unit = {
         FinderSearchCache.clear()
         catalogSessions.invalidateAll()
+    }
+    // One invalidation path for every committed membership write: drop the
+    // cached snapshots and let library/dashboard/Finder reload on the new
+    // revision. Never called for a failed write.
+    val onLibraryChanged: () -> Unit = {
+        invalidateCachedBadges()
         dataRevision++
         MiruLog.event("nav", "data-revision", "rev" to dataRevision, "reason" to "library")
     }
@@ -673,6 +678,10 @@ fun MiruShell(
                     onBookOpen = { bookKey ->
                         navController.navigate("book/${Uri.encode(bookKey)}")
                     },
+                    // The screen reloads its own rows and meta after a delete;
+                    // a revision bump would repeat that reload (a second
+                    // skeleton and scroll reset), so only cached badges go.
+                    onLibraryChanged = invalidateCachedBadges,
                 )
             }
             composable(MiruDestination.Finder.route) {
@@ -692,6 +701,7 @@ fun MiruShell(
                     onSearchOpen = { navController.navigate("finder/search") },
                     onManageExtensions = { navController.navigate("finder/extensions") },
                     onLibraryOpen = { navigateFrom(navController, MiruDestination.Library.route) },
+                    onLibraryChanged = onLibraryChanged,
                 )
             }
             composable("finder/extensions") {

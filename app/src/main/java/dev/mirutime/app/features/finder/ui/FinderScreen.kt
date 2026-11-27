@@ -123,6 +123,8 @@ fun FinderScreen(
     onSearchOpen: () -> Unit = {},
     onManageExtensions: () -> Unit = {},
     onLibraryOpen: () -> Unit = {},
+    // A link add commits library rows, so cached badges elsewhere are stale.
+    onLibraryChanged: () -> Unit = {},
     // Bumped by the shell after a library change/restore: the source rows
     // (local and plugin counts) are a one-shot snapshot, so reload them.
     refreshKey: Int = 0,
@@ -461,6 +463,7 @@ fun FinderScreen(
             // Added books live in the library: that is where the user lands.
             onAdded = {
                 linkOpen = false
+                onLibraryChanged()
                 onLibraryOpen()
             },
         )

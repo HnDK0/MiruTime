@@ -34,7 +34,6 @@ import dev.mirutime.app.features.finder.domain.parsePluginFilters
 import dev.mirutime.app.features.finder.domain.pluginCatalogRequest
 import dev.mirutime.app.features.finder.domain.restrictToSchema
 import dev.mirutime.app.features.finder.domain.applyCatalogFilters
-import dev.mirutime.app.features.finder.domain.applyMembership
 import dev.mirutime.app.features.library.data.BookCoverStore
 import dev.mirutime.app.features.library.data.ImportSummary
 import dev.mirutime.app.features.library.data.LocalBooksInstallId
@@ -1003,23 +1002,6 @@ class PluginFinderDataProvider(
                     bookId = book.bookId,
                 )
             }
-    }
-
-    // One batch lookup per rendered list; the screens then update this value
-    // locally after a long-press, so no page reload is needed.
-    private suspend fun withMembership(books: List<CatalogBook>): List<CatalogBook> {
-        if (books.isEmpty()) return books
-        return try {
-            val membership = libraryMembership(books.map { it.bookUrl }, books.map { it.title })
-            books.applyMembership(membership.urls, membership.titles, membership.keys)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            // Badges are an enhancement; a membership read failure must not
-            // hide a loaded catalogue page or search result.
-            MiruCoreLogger.w(TAG, "membership lookup failed: ${e.message}")
-            books
-        }
     }
 
     private suspend fun CatalogPage.withMembership(): CatalogPage =

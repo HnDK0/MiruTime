@@ -274,6 +274,25 @@ internal fun SourceCatalogScreen(
         }
     }
 
+    // Membership is DB truth, not feed data: re-read it for the cards already
+    // loaded whenever this screen is entered, so a write made elsewhere (book
+    // page, another catalogue, a library delete) is never shown stale. One
+    // batch read, in place, no page refetch. OPDS membership is feed-scoped
+    // and stays with its own loader.
+    LaunchedEffect(session) {
+        if (isOpds) return@LaunchedEffect
+        val loaded = session.state.value.books
+        if (loaded.isEmpty()) return@LaunchedEffect
+        // A page that lands during the read carries its own badges from the
+        // provider: only the cards in this snapshot are rewritten.
+        val keys = loaded.mapTo(HashSet()) { it.bookKey }
+        val refreshed = provider.withMembership(loaded).associateBy { it.bookKey }
+        session.updateBooks { books ->
+            books.map { book -> if (book.bookKey in keys) refreshed[book.bookKey] ?: book else book }
+        }
+        MiruLog.d("finder", "event=catalog-badges books=${loaded.size}")
+    }
+
     LaunchedEffect(sourceId) {
         searchFiltersSupported = provider.supportsSearchFilters(sourceId)
         sourceLanguage = provider.sourceLanguage(sourceId)

@@ -107,6 +107,20 @@ class CatalogSessionTest {
     }
 
     @Test
+    fun `membership rewrite replaces loaded cards and keeps the pager`() = runTest {
+        val session = CatalogSession({ _, _ -> page(listOf("a", "b"), hasMore = true) }, this)
+
+        session.ensureLoaded()
+        advanceUntilIdle()
+        session.updateBooks { books -> books.map { it.copy(inLibrary = true) } }
+
+        assertEquals(listOf("a", "b"), session.state.value.books.map { it.bookUrl })
+        assertTrue(session.state.value.books.all { it.inLibrary })
+        assertEquals(1, session.state.value.pagesLoaded)
+        assertTrue(session.state.value.hasMore)
+    }
+
+    @Test
     fun `repeated books are deduped when pages append`() = runTest {
         val session = CatalogSession(
             { page, _ ->

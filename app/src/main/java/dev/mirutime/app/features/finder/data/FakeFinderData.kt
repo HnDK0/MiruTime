@@ -2,12 +2,14 @@ package dev.mirutime.app.features.finder.data
 
 import android.net.Uri
 import dev.mirutime.app.di.InstallReport
+import dev.mirutime.app.di.host.MiruCoreLogger
 import dev.mirutime.app.features.book.data.MembershipResult
 import dev.mirutime.app.features.finder.domain.CatalogBook
 import dev.mirutime.app.features.finder.domain.CatalogFilters
 import dev.mirutime.app.features.finder.domain.CatalogPage
 import dev.mirutime.app.features.finder.domain.CatalogSort
 import dev.mirutime.app.features.finder.domain.CatalogSource
+import dev.mirutime.app.features.finder.domain.applyMembership
 import dev.mirutime.app.features.finder.domain.FilterPreset
 import dev.mirutime.app.features.finder.domain.LocalBook
 import dev.mirutime.app.features.finder.domain.LocalCatalogFolder
@@ -32,6 +34,7 @@ import dev.mirutime.core.host.KeyValueStore
 import dev.mirutime.core.host.PLUGIN_PREFERENCES_NAMESPACE
 import dev.mirutime.data.library.LibraryMembership
 import kotlin.math.abs
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
 // Refresh result: merged rows plus any shared-library failure that would make
@@ -107,6 +110,24 @@ interface FinderDataProvider {
         urls: Collection<String>,
         titles: Collection<String>,
     ): LibraryMembership = LibraryMembership(urls = libraryUrls(urls), titles = emptyMap())
+
+    /**
+     * Re-reads the badges of cards that are already loaded: one DB batch, no
+     * network. Same mapping the page loader applies, so a refreshed list never
+     * disagrees with a fresh fetch. A failed read keeps the loaded flags.
+     */
+    suspend fun withMembership(books: List<CatalogBook>): List<CatalogBook> {
+        if (books.isEmpty()) return books
+        return try {
+            val membership = libraryMembership(books.map { it.bookUrl }, books.map { it.title })
+            books.applyMembership(membership.urls, membership.titles, membership.keys)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            MiruCoreLogger.w("finder", "event=membership-refresh-failed error=${e::class.simpleName}")
+            books
+        }
+    }
 
     /**
      * Explicit add/remove from the library. Never called by a normal tap; the

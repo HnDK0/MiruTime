@@ -152,6 +152,9 @@ fun LibraryScreen(
     provider: LibraryDataProvider,
     refreshKey: Int = 0,
     onBookOpen: (String) -> Unit = {},
+    // A bulk delete drops the row, so cached catalogue/search snapshots keep a
+    // stale inLibrary badge until the shell invalidates them.
+    onLibraryChanged: () -> Unit = {},
 ) {
     // Shelves are one ordered list: Reading + Completed pinned on top,
     // everything else is manageable (08-library.md). Deleting a shelf is
@@ -588,6 +591,9 @@ fun LibraryScreen(
                 "ok" to result.succeeded.size,
                 "failed" to result.failed.size,
             )
+            if (action == BulkAction.Delete && result.succeeded.isNotEmpty()) {
+                onLibraryChanged()
+            }
             // Refresh metadata and the pages already on screen with the
             // filters active at completion time.
             reloadMeta()

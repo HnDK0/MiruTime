@@ -60,6 +60,8 @@ internal interface CatalogSessionLike {
     fun refresh(force: Boolean = false)
     fun saveScroll(bookUrl: String?, offset: Int)
     fun updateBook(bookUrl: String, transform: (CatalogBook) -> CatalogBook)
+    /** In-place list swap (membership re-read); no emission when nothing changes. */
+    fun updateBooks(transform: (List<CatalogBook>) -> List<CatalogBook>)
     fun scrollIndex(books: List<CatalogBook>): Int
     fun scrollOffset(): Int
     fun close()
@@ -139,6 +141,10 @@ internal class CatalogSession(
                 },
             )
         }
+    }
+
+    override fun updateBooks(transform: (List<CatalogBook>) -> List<CatalogBook>) {
+        mutableState.update { it.copy(books = transform(it.books)) }
     }
 
     /** Index of the book that was visible before a list replacement. */

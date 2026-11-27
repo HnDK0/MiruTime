@@ -190,6 +190,12 @@ internal class OpdsCatalogSession(
         }
     }
 
+    // Same fidelity as updateBook: an OPDS card's membership comes from the
+    // feed (`originMembership`), and the catalogue screen never rewrites it.
+    override fun updateBooks(transform: (List<CatalogBook>) -> List<CatalogBook>) {
+        mutableState.update { it.copy(books = transform(it.books)) }
+    }
+
     override fun scrollIndex(books: List<CatalogBook>): Int {
         val saved = layers.lastOrNull()?.url?.let { scroll[it]?.first } ?: return 0
         return books.indexOfFirst { it.bookUrl == saved }.takeIf { it >= 0 } ?: 0
