@@ -10,6 +10,13 @@ import dev.mirutime.translator.ProviderId
 const val MetadataPipelineVersion = "metadata-1"
 
 /**
+ * Genre names are sent and compared trimmed and non-empty: the normalized
+ * list is both the translation source and the invalidation key.
+ */
+internal fun normalizedGenres(genres: List<String>): List<String> =
+    genres.map { it.trim() }.filter { it.isNotBlank() }
+
+/**
  * Explicit in-memory/persisted identity. Using the data class hashCode here
  * would be opaque and easy to regress; this string always names every part of
  * the translation identity, including source and pipeline version.

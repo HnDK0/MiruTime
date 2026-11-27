@@ -502,8 +502,17 @@ class LibraryRepository(
     ) {
         if (book.bookId <= 0L) return
         val tags = dao.tagsForBook(book.bookId).joinToString(" ") { it.name }
+        val translatedGenres = dao.latestBookTranslationGenres(book.bookId, source, target)
+            .joinToString(" ") { it.name }
         val translatedTitle = dao.latestBookTranslationTitle(book.bookId, source, target).orEmpty()
-        dao.upsertBookSearch(book.toSearchRow(tags, translatedTitle))
+        // Translated genres ride in the tags column: the FTS schema stays as is
+        // and the original tag names remain searchable alongside them.
+        dao.upsertBookSearch(
+            book.toSearchRow(
+                tags = listOf(tags, translatedGenres).filter { it.isNotBlank() }.joinToString(" "),
+                translatedTitle = translatedTitle,
+            ),
+        )
     }
 
     suspend fun rebuildSearchIndex() {
@@ -516,8 +525,13 @@ class LibraryRepository(
             val rows = chunk.mapNotNull { book ->
                 if (book.bookId <= 0L) return@mapNotNull null
                 val tags = tagsByBookId[book.bookId]?.joinToString(" ").orEmpty()
+                val translatedGenres = dao.latestBookTranslationGenres(book.bookId)
+                    .joinToString(" ") { it.name }
                 val translatedTitle = dao.latestBookTranslationTitle(book.bookId, null, null).orEmpty()
-                book.toSearchRow(tags, translatedTitle)
+                book.toSearchRow(
+                    tags = listOf(tags, translatedGenres).filter { it.isNotBlank() }.joinToString(" "),
+                    translatedTitle = translatedTitle,
+                )
             }
             if (rows.isNotEmpty()) dao.upsertBookSearches(rows)
         }

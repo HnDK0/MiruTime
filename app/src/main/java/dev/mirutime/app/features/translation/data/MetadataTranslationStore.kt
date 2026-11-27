@@ -2,6 +2,7 @@ package dev.mirutime.app.features.translation.data
 
 import dev.mirutime.data.library.BookTranslationEntity
 import dev.mirutime.data.library.LibraryRepository
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -36,6 +37,8 @@ data class StoredMetadataTranslation(
     val translatedStatus: String? = null,
     val translatedStatusSource: String? = null,
     val chapterTitles: Map<Int, String> = emptyMap(),
+    val translatedGenres: List<String> = emptyList(),
+    val translatedGenresSource: List<String> = emptyList(),
 )
 
 /** Null fields mean "leave the stored value alone" (partial merge). */
@@ -46,6 +49,9 @@ data class MetadataTranslationPatch(
     val translatedStatus: String? = null,
     val translatedStatusSource: String? = null,
     val chapterTitles: Map<Int, String> = emptyMap(),
+    // Null keeps the stored genres; a list (even empty) replaces them.
+    val translatedGenres: List<String>? = null,
+    val translatedGenresSource: List<String>? = null,
 )
 
 /**
@@ -128,6 +134,8 @@ class RoomMetadataTranslationStore(
         translatedStatus = statusText?.takeIf { it.isNotBlank() },
         translatedStatusSource = statusSource?.takeIf { it.isNotBlank() },
         chapterTitles = decodeChapterTitles(chapterTitlesJson),
+        translatedGenres = decodeGenres(genresJson),
+        translatedGenresSource = decodeGenres(genresSourceJson),
     )
 }
 
@@ -161,6 +169,9 @@ internal fun mergeMetadataTranslation(
     chapterTitlesJson = encodeChapterTitles(
         decodeChapterTitles(existing?.chapterTitlesJson) + patch.chapterTitles,
     ),
+    genresJson = patch.translatedGenres?.let(::encodeGenres) ?: existing?.genresJson ?: "[]",
+    genresSourceJson = patch.translatedGenresSource?.let(::encodeGenres)
+        ?: existing?.genresSourceJson ?: "[]",
     status = StatusComplete,
     updatedAt = now,
 )
@@ -173,6 +184,15 @@ internal fun decodeChapterTitles(json: String?): Map<Int, String> =
 private fun encodeChapterTitles(titles: Map<Int, String>): String =
     MetadataJson.encodeToString(TitlesSerializer, titles)
 
+private fun decodeGenres(json: String?): List<String> =
+    runCatching {
+        MetadataJson.decodeFromString(GenresSerializer, json.orEmpty().ifBlank { "[]" })
+    }.getOrDefault(emptyList())
+
+private fun encodeGenres(genres: List<String>): String =
+    MetadataJson.encodeToString(GenresSerializer, genres)
+
 private const val StatusComplete = "COMPLETE"
 private val TitlesSerializer = MapSerializer(Int.serializer(), String.serializer())
+private val GenresSerializer = ListSerializer(String.serializer())
 private val MetadataJson = Json { ignoreUnknownKeys = true }

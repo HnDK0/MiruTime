@@ -46,6 +46,8 @@ data class BookMetadataJob(
     val includeChapterTitles: Boolean = true,
     // Source status text, translated with the rest of the details batch.
     val status: String? = null,
+    // Source genres, translated with the rest of the details batch.
+    val genres: List<String> = emptyList(),
 )
 
 /**
@@ -72,6 +74,10 @@ data class BookMetadataTranslation(
     val translatedStatusSource: String? = null,
     val chapterTitles: Map<Int, String> = emptyMap(),
     val detailsLoaded: Boolean = false,
+    // Translated genres and the exact source list they came from; a changed
+    // source list invalidates them instead of showing stale chips.
+    val genres: List<String> = emptyList(),
+    val translatedGenresSource: List<String> = emptyList(),
     /** Provider that actually served the batch (free fallback may differ). */
     val provider: ProviderId? = null,
     /**
@@ -145,8 +151,10 @@ class MetadataTranslationController(
             .orEmpty()
         val neededChapterTitles = job.chapters.filter { it.second.isNotBlank() }.map { it.first }
         val chapterTitlesLoaded = neededChapterTitles.all { it in loadedChapterTitles }
+        val genres = normalizedGenres(job.genres)
         if (hasDetails(job.bookUrl, job.config, job.status) &&
-            (!job.includeChapterTitles || chapterTitlesLoaded)
+            (!job.includeChapterTitles || chapterTitlesLoaded) &&
+            hasGenres(job.bookUrl, job.config, genres)
         ) {
             return
         }
@@ -155,6 +163,9 @@ class MetadataTranslationController(
             job.description.takeIf { it.isNotBlank() }?.let { add(TranslationUnit("1", it)) }
             job.status?.takeIf { it.isNotBlank() }?.let {
                 add(TranslationUnit(STATUS_ID.toString(), it.trim()))
+            }
+            genres.forEachIndexed { index, genre ->
+                add(TranslationUnit((GENRE_ID_BASE - index).toString(), genre))
             }
             if (job.includeChapterTitles) {
                 job.chapters.forEach { (index, title) ->
@@ -166,7 +177,8 @@ class MetadataTranslationController(
         }
         if (units.isEmpty()) return
 
-        val pendingKey = "book:${job.bookUrl}:${job.config.cacheKey()}"
+        val pendingKey = "book:${job.bookUrl}:${job.config.cacheKey()}:" +
+            genres.joinToString("\u0001")
         markLoading(job.bookUrl, job.config, pendingKey)
         enqueue(
             Pending(
@@ -244,6 +256,16 @@ class MetadataTranslationController(
         return entry?.config == config && entry.detailsLoaded && statusDone
     }
 
+    private fun hasGenres(
+        bookUrl: String,
+        config: MetadataConfig,
+        genres: List<String>,
+    ): Boolean {
+        if (genres.isEmpty()) return true
+        val entry = _state.value[bookUrl]
+        return entry?.config == config && entry.translatedGenresSource == genres
+    }
+
     private fun markLoading(bookUrl: String, config: MetadataConfig, pendingKey: String) {
         _state.update { current ->
             val previous = current[bookUrl]?.takeIf { it.config == config }
@@ -256,6 +278,8 @@ class MetadataTranslationController(
                 translatedStatusSource = previous?.translatedStatusSource,
                 chapterTitles = previous?.chapterTitles.orEmpty(),
                 detailsLoaded = previous?.detailsLoaded == true,
+                genres = previous?.genres.orEmpty(),
+                translatedGenresSource = previous?.translatedGenresSource.orEmpty(),
                 provider = previous?.provider,
                 pendingKey = pendingKey,
             ))
@@ -275,6 +299,9 @@ class MetadataTranslationController(
             "kind" to job.kind.name,
             "books" to job.books.size,
             "units" to job.request.units.size,
+            "genres" to job.request.units.count {
+                (it.id.toIntOrNull() ?: 0) <= GENRE_ID_BASE
+            },
         )
     }
 
@@ -364,6 +391,7 @@ class MetadataTranslationController(
                         val description = translations[1]?.takeIf { it.isNotBlank() }
                         val statusSource = statusSourceOf(job.request)
                         val translatedStatus = translations[STATUS_ID]?.takeIf { it.isNotBlank() }
+                        val genrePair = translatedGenresOf(job.request, translations)
                         val chapterTitles = chapterTitlesOf(translations)
                         next + (bookUrl to entry.copy(
                             status = MetadataTranslationStatus.Ready,
@@ -377,6 +405,9 @@ class MetadataTranslationController(
                                 entry.translatedStatus
                             },
                             translatedStatusSource = statusSource ?: entry.translatedStatusSource,
+                            genres = genrePair?.second ?: entry.genres,
+                            translatedGenresSource = genrePair?.first
+                                ?: entry.translatedGenresSource,
                             chapterTitles = chapterTitles.ifEmpty { entry.chapterTitles },
                             detailsLoaded = true,
                             provider = result.provider,
@@ -412,6 +443,8 @@ class MetadataTranslationController(
     private suspend fun persist(job: Pending, translations: Map<Int, String>) {
         val store = store ?: return
         val key = job.config.storeKey()
+        // Null means this batch carried no genre units (non-details kinds).
+        val genrePair = translatedGenresOf(job.request, translations)
         var saved = 0
         job.books.forEachIndexed { index, bookUrl ->
             val patch = when (job.kind) {
@@ -426,6 +459,8 @@ class MetadataTranslationController(
                     },
                     translatedStatusSource = statusSourceOf(job.request),
                     chapterTitles = chapterTitlesOf(translations),
+                    translatedGenres = genrePair?.second,
+                    translatedGenresSource = genrePair?.first,
                 )
                 MetadataKind.Chapters -> MetadataTranslationPatch(
                     title = translations[0]?.takeIf { it.isNotBlank() },
@@ -493,7 +528,8 @@ class MetadataTranslationController(
         stored: StoredMetadataTranslation,
     ) {
         if (stored.title == null && stored.description == null &&
-            stored.translatedStatusSource == null && stored.chapterTitles.isEmpty()
+            stored.translatedStatusSource == null && stored.chapterTitles.isEmpty() &&
+            stored.translatedGenresSource.isEmpty()
         ) {
             return
         }
@@ -511,6 +547,9 @@ class MetadataTranslationController(
                 // Only a batch that requested the synopsis can mark details
                 // done; a stored description is the durable proof of it.
                 detailsLoaded = previous?.detailsLoaded == true || stored.description != null,
+                genres = previous?.genres?.takeIf { it.isNotEmpty() } ?: stored.translatedGenres,
+                translatedGenresSource = previous?.translatedGenresSource
+                    ?.takeIf { it.isNotEmpty() } ?: stored.translatedGenresSource,
                 provider = previous?.provider,
                 pendingKey = previous?.pendingKey,
             )
@@ -529,6 +568,29 @@ class MetadataTranslationController(
     /** The status unit's source text, null when the book has no status. */
     private fun statusSourceOf(request: MetadataRequest): String? =
         request.units.firstOrNull { it.id == STATUS_ID.toString() }?.text
+
+    /** The genre units' source texts, in the order they were added. */
+    private fun sourceGenresOf(request: MetadataRequest): List<String> =
+        request.units
+            .filter { (it.id.toIntOrNull() ?: 0) <= GENRE_ID_BASE }
+            .map { it.text }
+
+    /**
+     * Source genres paired with their translated names. A blank provider answer
+     * keeps the source name so a chip never disappears; null means the request
+     * had no genre units.
+     */
+    private fun translatedGenresOf(
+        request: MetadataRequest,
+        translations: Map<Int, String>,
+    ): Pair<List<String>, List<String>>? {
+        val source = sourceGenresOf(request)
+        if (source.isEmpty()) return null
+        val translated = source.mapIndexed { index, original ->
+            translations[GENRE_ID_BASE - index]?.takeIf { it.isNotBlank() } ?: original
+        }
+        return source to translated
+    }
 
     private fun fail(job: Pending) {
         _state.update { current ->
@@ -577,6 +639,8 @@ class MetadataTranslationController(
         // Negative so it never collides with title (0), synopsis (1) or
         // chapter indexes; chapterTitlesOf already ignores ids below 2.
         const val STATUS_ID = -1
+        // Genre units use -2, -3, ... in list order.
+        const val GENRE_ID_BASE = -2
         // A catalogue page is 50 books and the library reloads its own page on
         // every visit; the old 40-entry cap evicted the whole fresh batch right
         // after it was applied, so no card ever showed a translated title.

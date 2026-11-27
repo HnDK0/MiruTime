@@ -173,6 +173,139 @@ class MetadataTranslationControllerTest {
     }
 
     @Test
+    fun `details batch translates genres in order and persists them`() = runTest {
+        val engine = FakeEngine(::echo)
+        val store = FakeMetadataStore()
+        val controller = MetadataTranslationController(engine, this, store)
+        val config = config()
+        val job = BookMetadataJob(
+            bookUrl = "fake://a/one",
+            title = "One",
+            description = "Synopsis",
+            chapters = emptyList(),
+            config = config,
+            genres = listOf("Action", " Fantasy ", ""),
+        )
+
+        controller.submitBook(job)
+        advanceUntilIdle()
+
+        val entry = controller.state.value["fake://a/one"]
+        assertEquals(listOf("translated:Action", "translated:Fantasy"), entry?.genres)
+        assertEquals(listOf("Action", "Fantasy"), entry?.translatedGenresSource)
+        assertEquals(
+            listOf("-2", "-3"),
+            engine.requests.single().units.filter { it.text == "Action" || it.text == "Fantasy" }
+                .map { it.id },
+        )
+        val stored = store.saved.getValue("fake://a/one" to store.keys.single())
+        assertEquals(listOf("translated:Action", "translated:Fantasy"), stored.translatedGenres)
+        assertEquals(listOf("Action", "Fantasy"), stored.translatedGenresSource)
+
+        controller.submitBook(job)
+        advanceUntilIdle()
+        assertEquals(1, engine.requests.size)
+    }
+
+    @Test
+    fun `changed genre source retranslates instead of keeping the old list`() = runTest {
+        val engine = FakeEngine(::echo)
+        val controller = MetadataTranslationController(engine, this)
+        val job = BookMetadataJob(
+            bookUrl = "fake://a/one",
+            title = "One",
+            description = "Synopsis",
+            chapters = emptyList(),
+            config = config(),
+            genres = listOf("Action"),
+        )
+
+        controller.submitBook(job)
+        advanceUntilIdle()
+        assertEquals(listOf("translated:Action"), controller.state.value["fake://a/one"]?.genres)
+
+        controller.submitBook(job.copy(genres = listOf("Action", "Drama")))
+        advanceUntilIdle()
+
+        assertEquals(2, engine.requests.size)
+        val entry = controller.state.value["fake://a/one"]
+        assertEquals(listOf("Action", "Drama"), entry?.translatedGenresSource)
+        assertEquals(listOf("translated:Action", "translated:Drama"), entry?.genres)
+    }
+
+    @Test
+    fun `changed genres during a running batch request the new list`() = runTest {
+        val engine = GatedEngine()
+        val controller = MetadataTranslationController(engine, this)
+        val job = BookMetadataJob(
+            bookUrl = "fake://a/one",
+            title = "One",
+            description = "Synopsis",
+            chapters = emptyList(),
+            config = config(),
+            genres = listOf("Action"),
+        )
+
+        controller.submitBook(job)
+        advanceUntilIdle()
+        assertEquals(1, engine.requests.size)
+
+        // Same book+config, different genre list: the new list must not be
+        // swallowed by the queue key of the batch already in flight.
+        controller.submitBook(job.copy(genres = listOf("Action", "Drama")))
+        advanceUntilIdle()
+
+        engine.release()
+        advanceUntilIdle()
+        // The stale batch is discarded; the entry is still waiting for the new one.
+        assertEquals(MetadataTranslationStatus.Loading, controller.state.value["fake://a/one"]?.status)
+        assertEquals(emptyList<String>(), controller.state.value["fake://a/one"]?.genres)
+
+        engine.release()
+        advanceUntilIdle()
+        val entry = controller.state.value["fake://a/one"]
+        assertEquals(listOf("Action", "Drama"), entry?.translatedGenresSource)
+        assertEquals(listOf("GEMINI:Action", "GEMINI:Drama"), entry?.genres)
+    }
+
+    @Test
+    fun `hydrated genres stay with their own language pair`() = runTest {
+        val engine = FakeEngine(::echo)
+        val store = FakeMetadataStore()
+        val ru = config()
+        val de = ru.copy(target = LanguageCode.parse("de"))
+        store.save(
+            "fake://a/one",
+            controllerKey(ru),
+            MetadataTranslationPatch(
+                translatedGenres = listOf("Фэнтези"),
+                translatedGenresSource = listOf("Fantasy"),
+            ),
+        )
+        store.save(
+            "fake://a/one",
+            controllerKey(de),
+            MetadataTranslationPatch(
+                translatedGenres = listOf("Fantasie"),
+                translatedGenresSource = listOf("Fantasy"),
+            ),
+        )
+        val controller = MetadataTranslationController(engine, this, store)
+
+        controller.hydrate("fake://a/one", ru)
+        assertEquals(ru, controller.state.value["fake://a/one"]?.config)
+        assertEquals(listOf("Фэнтези"), controller.state.value["fake://a/one"]?.genres)
+
+        controller.hydrate("fake://a/one", de)
+        assertEquals(de, controller.state.value["fake://a/one"]?.config)
+        assertEquals(listOf("Fantasie"), controller.state.value["fake://a/one"]?.genres)
+
+        controller.hydrate("fake://a/one", ru)
+        assertEquals(ru, controller.state.value["fake://a/one"]?.config)
+        assertEquals(listOf("Фэнтези"), controller.state.value["fake://a/one"]?.genres)
+    }
+
+    @Test
     fun `cached details without a status request the status once`() = runTest {
         val config = config()
         val store = FakeMetadataStore()
@@ -586,6 +719,8 @@ class MetadataTranslationControllerTest {
             statusText = "Old status",
             statusSource = "Old source",
             chapterTitlesJson = "{\"1\":\"One\"}",
+            genresJson = "[\"Old genre\"]",
+            genresSourceJson = "[\"Old source genre\"]",
             status = "COMPLETE",
             updatedAt = 1,
         )
@@ -599,6 +734,8 @@ class MetadataTranslationControllerTest {
                 translatedStatus = "New status",
                 translatedStatusSource = "New source",
                 chapterTitles = mapOf(2 to "Two"),
+                translatedGenres = listOf("Новый жанр"),
+                translatedGenresSource = listOf("New genre"),
             ),
             now = 2,
         )
@@ -609,6 +746,44 @@ class MetadataTranslationControllerTest {
         assertEquals("New status", merged.statusText)
         assertEquals("New source", merged.statusSource)
         assertEquals(mapOf(1 to "One", 2 to "Two"), decodeChapterTitles(merged.chapterTitlesJson))
+        assertEquals("[\"Новый жанр\"]", merged.genresJson)
+        assertEquals("[\"New genre\"]", merged.genresSourceJson)
+    }
+
+    @Test
+    fun `partial metadata patch keeps genres it does not touch`() {
+        val existing = BookTranslationEntity(
+            translationId = 9,
+            bookId = 4,
+            source = "en",
+            target = "ru",
+            provider = "GEMINI",
+            model = null,
+            promptHash = "p",
+            sourceHash = "s",
+            pipelineVersion = MetadataPipelineVersion,
+            genresJson = "[\"Фэнтези\"]",
+            genresSourceJson = "[\"Fantasy\"]",
+            status = "COMPLETE",
+            updatedAt = 1,
+        )
+
+        val merged = mergeMetadataTranslation(
+            existing = existing,
+            bookId = 4,
+            key = MetadataTranslationKey(
+                source = "en",
+                target = "ru",
+                provider = "GEMINI",
+                promptHash = "p",
+                pipelineVersion = MetadataPipelineVersion,
+            ),
+            patch = MetadataTranslationPatch(title = "Only a title"),
+            now = 2,
+        )
+
+        assertEquals("[\"Фэнтези\"]", merged.genresJson)
+        assertEquals("[\"Fantasy\"]", merged.genresSourceJson)
     }
 
     private fun controllerKey(config: MetadataConfig) = MetadataTranslationKey(
@@ -649,6 +824,9 @@ class MetadataTranslationControllerTest {
                 translatedStatusSource = patch.translatedStatusSource
                     ?: previous.translatedStatusSource,
                 chapterTitles = previous.chapterTitles + patch.chapterTitles,
+                translatedGenres = patch.translatedGenres ?: previous.translatedGenres,
+                translatedGenresSource = patch.translatedGenresSource
+                    ?: previous.translatedGenresSource,
             )
         }
     }

@@ -618,6 +618,10 @@ data class BookTranslationEntity(
     // Persisted `chapterIndex -> translated title` map for the metadata
     // overlay; "{}" when the title batch has not run.
     val chapterTitlesJson: String = "{}",
+    // Translated genre list and the source list it was produced from, so a
+    // changed source invalidates the translation instead of showing a stale one.
+    val genresJson: String = "[]",
+    val genresSourceJson: String = "[]",
     val status: String,
     val updatedAt: Long,
 )

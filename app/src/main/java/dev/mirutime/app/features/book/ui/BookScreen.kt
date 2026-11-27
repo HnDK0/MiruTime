@@ -226,6 +226,7 @@ import dev.mirutime.app.features.translation.data.ChapterTranslationStatus
 import dev.mirutime.app.features.translation.data.activeTranslationMode
 import dev.mirutime.data.library.DownloadTaskEntity
 import dev.mirutime.app.features.translation.data.metadataConfigFor
+import dev.mirutime.app.features.translation.data.normalizedGenres
 import dev.mirutime.app.features.translation.data.translationPresentationFor
 import dev.mirutime.app.features.video.data.VideoDownloadAction
 import dev.mirutime.app.features.video.data.VideoDownloadItem
@@ -1568,6 +1569,7 @@ internal fun BookScreen(
                 config = config,
                 includeChapterTitles = translationPresentation.chapterTitles,
                 status = loaded.status,
+                genres = loaded.genres,
             ),
         )
     }
@@ -1629,6 +1631,13 @@ internal fun BookScreen(
                     translatedStatus = metadataEntry?.translatedStatus?.takeIf {
                         metadataEntry.translatedStatusSource == current.status?.trim()
                     },
+                    // Only genre chips translated from the list currently on
+                    // screen; a changed source falls back to the originals.
+                    genres = metadataEntry
+                        ?.takeIf { it.translatedGenresSource == normalizedGenres(current.genres) }
+                        ?.genres
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: current.genres,
                     shelves = shelves,
                     shelvesLoading = shelvesLoading,
                     onShelfClick = { shelfSheetOpen = true },
@@ -2568,6 +2577,8 @@ private fun AnnounceCard(
     book: BookDetails,
     title: String,
     translatedStatus: String? = null,
+    // Genre chips to show; FULL mode swaps in its translated list.
+    genres: List<String> = book.genres,
     shelves: List<Shelf>,
     shelvesLoading: Boolean,
     onShelfClick: () -> Unit,
@@ -2774,12 +2785,15 @@ private fun AnnounceCard(
                 }
             }
         }
-        if (book.genres.isNotEmpty()) {
+        val shownGenres = genres.distinct()
+        if (shownGenres.isNotEmpty()) {
             Spacer(modifier = Modifier.height(MiruSpace.M))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(MiruSpace.S))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                items(book.genres, key = { it }) { genre -> MiruTag(label = genre) }
+                // Translated names can collide even when the sources differ:
+                // distinct keeps the LazyRow item keys unique.
+                items(shownGenres, key = { it }) { genre -> MiruTag(label = genre) }
             }
         }
         if (!catalogEntry) {

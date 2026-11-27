@@ -76,6 +76,14 @@ object LibraryMigrations {
         migrateV13ToV14(connection)
     }
 
+    /**
+     * Schema v15: translated book genres. Additive columns; a cached row
+     * re-requests the details batch once to fill them.
+     */
+    val MIGRATION_14_15: Migration = Migration(14, 15) { connection ->
+        migrateV14ToV15(connection)
+    }
+
     val ALL: Array<Migration> =
         arrayOf(
             MIGRATION_6_7,
@@ -86,6 +94,7 @@ object LibraryMigrations {
             MIGRATION_11_12,
             MIGRATION_12_13,
             MIGRATION_13_14,
+            MIGRATION_14_15,
         )
 }
 
@@ -172,6 +181,7 @@ private fun migrateBackupSteps(connection: SQLiteConnection, fromVersion: Int) {
     if (fromVersion < 12) migrateV11ToV12(connection)
     if (fromVersion < 13) migrateV12ToV13(connection)
     if (fromVersion < 14) migrateV13ToV14(connection)
+    if (fromVersion < 15) migrateV14ToV15(connection)
 }
 
 private fun migrateV6ToV7(connection: SQLiteConnection) {
@@ -430,16 +440,36 @@ private fun migrateV13ToV14(connection: SQLiteConnection) {
 }
 
 /**
+ * v15 matches [LibraryMigrations.MIGRATION_14_15]: two non-null
+ * `book_translations` columns (translated genres and their source list),
+ * defaulting to an empty JSON array so no existing row is rewritten.
+ */
+private fun migrateV14ToV15(connection: SQLiteConnection) {
+    if (!connection.tableExists("book_translations")) return
+    val columns = connection.columns("book_translations")
+    if ("genresJson" !in columns) {
+        connection.exec(
+            "ALTER TABLE book_translations ADD COLUMN genresJson TEXT NOT NULL DEFAULT '[]'",
+        )
+    }
+    if ("genresSourceJson" !in columns) {
+        connection.exec(
+            "ALTER TABLE book_translations ADD COLUMN genresSourceJson TEXT NOT NULL DEFAULT '[]'",
+        )
+    }
+}
+
+/**
  * Room refuses to open a migrated file whose `room_master_table` still carries
  * an older hash. The live import opens the staged database through Room, so the
- * migrator publishes the current identity itself. `14.json` is the source of
+ * migrator publishes the current identity itself. `15.json` is the source of
  * truth.
  */
 private fun updateRoomIdentity(connection: SQLiteConnection) {
     if (!connection.tableExists("room_master_table")) return
     connection.exec(
         "INSERT OR REPLACE INTO room_master_table (id, identity_hash) " +
-            "VALUES (42, '$V14_IDENTITY_HASH')",
+            "VALUES (42, '$V15_IDENTITY_HASH')",
     )
 }
 
@@ -531,13 +561,21 @@ internal fun verifyRestoredDatabase(connection: SQLiteConnection, expectedVersio
             }
         }
     }
+    REQUIRED_V15_COLUMNS.forEach { (table, columns) ->
+        val actual = connection.columns(table)
+        columns.forEach { column ->
+            if (column !in actual) {
+                error("Migrated database is missing column $table.$column")
+            }
+        }
+    }
 }
 
 private const val V9_IDENTITY_HASH = "117dd4519b1602322a7e187aa9956185"
 private const val V10_IDENTITY_HASH = "5290005f22d81a551a46b9dd80932d07"
 private const val V11_IDENTITY_HASH = "a2fd3b84ea24a48d3ef9e35e589a2271"
 private const val V12_IDENTITY_HASH = "0eb1c3b620a09fa57dfa6c2adfb95bb0"
-private const val V14_IDENTITY_HASH = "26183d9d593649031edc2ed535ea7721"
+private const val V15_IDENTITY_HASH = "eda5efe50696938c4593af4313d3ee3e"
 
 private val REQUIRED_V7_TABLES = listOf(
     "books",
@@ -603,6 +641,10 @@ private val REQUIRED_V13_COLUMNS = mapOf(
 
 private val REQUIRED_V14_COLUMNS = mapOf(
     "book_translations" to listOf("statusText", "statusSource"),
+)
+
+private val REQUIRED_V15_COLUMNS = mapOf(
+    "book_translations" to listOf("genresJson", "genresSourceJson"),
 )
 
 private fun SQLiteConnection.exec(sql: String) {

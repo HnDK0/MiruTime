@@ -7,7 +7,7 @@ import androidx.room3.RoomDatabaseConstructor
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import kotlinx.coroutines.Dispatchers
 
-const val LibrarySchemaVersion = 14
+const val LibrarySchemaVersion = 15
 
 /**
  * Oldest backup schema the restore path accepts. v6 archives are migrated to

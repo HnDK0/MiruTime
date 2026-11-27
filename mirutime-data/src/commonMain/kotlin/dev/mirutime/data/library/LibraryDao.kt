@@ -500,6 +500,24 @@ interface LibraryDao {
         target: String? = null,
     ): String?
 
+    // Translated genre names of that same latest row, read through json_each so
+    // the data layer never parses the JSON column itself. Feeds the FTS index.
+    @Query(
+        "SELECT je.value AS name FROM book_translations bt, " +
+            "json_each(CASE WHEN json_valid(bt.genresJson) THEN bt.genresJson ELSE '[]' END) je " +
+            "WHERE bt.translationId = (" +
+            "SELECT translationId FROM book_translations WHERE bookId = :bookId " +
+            "AND (:source IS NULL OR source = :source) " +
+            "AND (:target IS NULL OR target = :target) " +
+            "AND genresJson != '[]' " +
+            "ORDER BY updatedAt DESC, translationId DESC LIMIT 1)",
+    )
+    suspend fun latestBookTranslationGenres(
+        bookId: Long,
+        source: String? = null,
+        target: String? = null,
+    ): List<GenreNameRow>
+
     // bm25 weights follow the FTS column order: title, author, tags,
     // description, translatedTitle. bookId is the stable tie-break.
     @Query(

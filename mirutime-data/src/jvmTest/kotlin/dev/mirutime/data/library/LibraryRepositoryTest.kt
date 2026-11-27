@@ -1148,6 +1148,7 @@ class LibraryRepositoryTest {
                 sourceHash = "s",
                 pipelineVersion = "v",
                 title = "Серебряный маг",
+                genresJson = "[\"Культивация\"]",
                 status = "COMPLETE",
                 updatedAt = 10L,
             ),
@@ -1158,10 +1159,39 @@ class LibraryRepositoryTest {
         assertEquals(listOf(mageId), repository.searchBooks("cultivation").map { it.bookId })
         assertEquals(listOf(mageId), repository.searchBooks("flame").map { it.bookId })
         assertEquals(listOf(mageId), repository.searchBooks("Серебряный").map { it.bookId })
+        // Translated genres ride in the same FTS row as the original tags.
+        assertEquals(listOf(mageId), repository.searchBooks("Культивация").map { it.bookId })
         assertEquals(
             listOf(repository.book(other.bookUrl)!!.bookId),
             repository.searchBooks("iron").map { it.bookId },
         )
+    }
+
+    @Test
+    fun `fts switches to the newest translated genres of another language`() = runTest {
+        val book = book("https://site/book/fts-genres-lang", inLibrary = true, lastReadAt = null)
+        repository.saveBook(book)
+        val bookId = repository.book(book.bookUrl)!!.bookId
+        fun translation(target: String, genres: String, updatedAt: Long) = BookTranslationEntity(
+            bookId = bookId,
+            target = target,
+            provider = "GEMINI",
+            model = null,
+            promptHash = "p",
+            sourceHash = "s",
+            pipelineVersion = "v",
+            genresJson = genres,
+            status = "COMPLETE",
+            updatedAt = updatedAt,
+        )
+
+        repository.saveBookTranslation(translation("ru", "[\"Фэнтези\"]", 1L))
+        assertEquals(listOf(bookId), repository.searchBooks("Фэнтези").map { it.bookId })
+
+        repository.saveBookTranslation(translation("de", "[\"Fantasie\"]", 2L))
+        assertEquals(listOf(bookId), repository.searchBooks("Fantasie").map { it.bookId })
+        // The index holds one language pair at a time, like the translated title.
+        assertTrue(repository.searchBooks("Фэнтези").isEmpty())
     }
 
     @Test

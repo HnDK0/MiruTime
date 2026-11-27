@@ -15,6 +15,7 @@ import dev.mirutime.data.library.ChapterSeed
 import dev.mirutime.data.library.ChapterStatusRow
 import dev.mirutime.data.library.ChapterTranslationQueueRow
 import dev.mirutime.data.library.DownloadTaskEntity
+import dev.mirutime.data.library.GenreNameRow
 import dev.mirutime.data.library.LibraryDao
 import dev.mirutime.data.library.LibraryRepository
 import dev.mirutime.data.library.TagEntity
@@ -90,6 +91,7 @@ class PluginBookDataProviderMembershipTest {
                 }
                 "tagsForBook" -> emptyList<TagEntity>()
                 "latestBookTranslationTitle" -> null
+                "latestBookTranslationGenres" -> emptyList<GenreNameRow>()
                 "upsertBookSearch" -> Unit
                 "deleteBookTags" -> Unit
                 "tagByNormalized" -> null
