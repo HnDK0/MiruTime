@@ -223,7 +223,38 @@ jobs:
 
           cat "$RUNNER_TEMP/release-body.md"
 
-      - name: Create/update nightly release
+      - name: Save existing nightly mappings
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The nightly release is recreated on every run so it stays at the
+          # top of the releases list (GitHub sorts releases by creation date).
+          # Old mappings must survive: crashes from earlier nightlies still
+          # need them for deobfuscation.
+          mkdir -p "$RUNNER_TEMP/mappings"
+          count=$(gh release view nightly --json assets \
+            --jq '[.assets[].name | select(test("^mapping-.*\\.txt\\.gz$"))] | length' \
+            2>/dev/null || echo 0)
+          # gh release download fails when the pattern matches nothing.
+          if [ "${count:-0}" -gt 0 ]; then
+            gh release download nightly --pattern 'mapping-*.txt.gz' \
+              --dir "$RUNNER_TEMP/mappings" --clobber
+          fi
+          ls -lah "$RUNNER_TEMP/mappings"
+
+      - name: Delete nightly release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Keep the tag: it is force-moved below and /releases/tag/nightly
+          # must stay a valid URL.
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release delete nightly --yes --cleanup-tag=false
+          fi
+
+      - name: Create nightly release
         uses: softprops/action-gh-release@v3
         with:
           # Publish the assets first; the tag is moved in the next step only
@@ -234,7 +265,10 @@ jobs:
           prerelease: true
           draft: false
           body_path: ${{ runner.temp }}/release-body.md
-          files: release-artifacts/*
+          files: |
+            release-artifacts/*
+            ${{ runner.temp }}/mappings/*
+          fail_on_unmatched_files: false
 
       - name: Move nightly tag
         env:
