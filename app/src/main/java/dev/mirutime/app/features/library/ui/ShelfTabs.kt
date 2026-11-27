@@ -1,18 +1,15 @@
 package dev.mirutime.app.features.library.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,16 +17,25 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
 import dev.mirutime.app.features.library.domain.Shelf
-import dev.mirutime.uikit.LocalMiruOnImage
+import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruRoundIconButton
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.MiruTabPill
+import dev.mirutime.uikit.miruCardElevation
+import dev.mirutime.uikit.miruCardSurface
+import dev.mirutime.uikit.miruPlateBorder
 
 // Shelves row: secondary scrollable tabs (M3 pattern) with a segmented-control
 // look — flat text tabs, the selected ones on a soft accent pill, never chips.
 // "All" is the leading tab and means no shelf filter (empty selection); a tap
 // on a shelf toggles it, so several shelves can be active at once. Long-press
 // opens the shelf manager; the manage icon duplicates that entry.
+//
+// The tabs sit on their OWN plate: one track for the shelf group, the same
+// floating plate the app bar and cards use. That is the boundary the eye reads
+// between the rows above and below it — over a photo no hairline survives, and
+// a group of pills with no container is exactly what made shelves and filters
+// look like one strip of chips.
 @Composable
 fun ShelfTabsRow(
     shelves: List<Shelf>,
@@ -40,10 +46,18 @@ fun ShelfTabsRow(
     onTabLongPress: (Shelf) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val onImage = LocalMiruOnImage.current
-    Column(modifier = modifier.fillMaxWidth()) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(MiruRadius.Plate),
+        color = miruCardSurface(),
+        shadowElevation = miruCardElevation(),
+        border = miruPlateBorder(),
+        tonalElevation = 0.dp,
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = MiruSpace.S, end = MiruSpace.Xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
@@ -72,15 +86,6 @@ fun ShelfTabsRow(
                 icon = Icons.Filled.Edit,
                 contentDescription = stringResource(R.string.shelf_cd_manage),
                 onClick = onManage,
-            )
-        }
-        if (!onImage) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 2.dp)
-                    .height(1.dp)
-                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
             )
         }
     }

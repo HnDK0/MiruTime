@@ -683,7 +683,9 @@ fun LibraryScreen(
             }
 
             item {
-                Box(modifier = Modifier.padding(top = MiruSpace.Xxs, bottom = MiruSpace.S)) {
+                // A full step of air below the shelf plate: the filter chips are
+                // their own group, not a continuation of the tab track.
+                Box(modifier = Modifier.padding(top = MiruSpace.S, bottom = MiruSpace.S)) {
                     MiniFilters(
                         sources = selSources,
                         genres = genres,
