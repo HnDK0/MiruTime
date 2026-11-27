@@ -186,6 +186,8 @@ class TtsController(
     private var ready = false
     private var pending: (() -> Unit)? = null
     private var chunks: List<TtsChunk> = emptyList()
+    private var sessionDocument: ReaderDocument? = null
+    private var sessionSpoken: Map<Int, String> = emptyMap()
     // Language of the current session. Translation is a page-level decision:
     // parallel ORIGINAL_FIRST passes an empty translation map. A partially
     // translated page keeps this flag for the whole session by design.
@@ -201,6 +203,7 @@ class TtsController(
     // one. Cleared whenever the queue is paused/skipped/replaced.
     private val utteranceChunks = java.util.concurrent.ConcurrentHashMap<Int, Int>()
     private var nextUtteranceId = 0
+    private var queuedUpTo = -1
     private var bookUrl = ""
     private var chapterIndex = 0
     private var voiceId: String? = _settings.value.voiceId
@@ -264,6 +267,8 @@ class TtsController(
     ) {
         voicePreviewer.stop()
         handoffPending = false
+        handoffTimeout?.cancel()
+        handoffTimeout = null
         _lastStoppedSession = null
         val spoken = sessionTranslations(language, translations)
         val next = TtsChunker.chunks(document, spoken)
@@ -277,6 +282,8 @@ class TtsController(
         applySavedSettings(sessionTranslated)
         stopInternal(keepStatus = true)
         chunks = next
+        sessionDocument = document
+        sessionSpoken = spokenSnapshot(spoken)
         rebuildChunkCharStats()
         bookUrl = document.bookUrl
         chapterIndex = document.chapterIndex
@@ -315,6 +322,30 @@ class TtsController(
         language: TtsLanguage = TtsLanguage.from(translations),
     ) {
         if (_state.value.status != TtsStatus.Paused) {
+            val spoken = if (language == TtsLanguage.Original) emptyMap() else translations
+            val canFastSeek = _state.value.status == TtsStatus.Playing &&
+                !handoffPending &&
+                ready &&
+                chunks.isNotEmpty() &&
+                sessionLanguage == language &&
+                document == sessionDocument &&
+                spoken == sessionSpoken
+            if (canFastSeek) {
+                voicePreviewer.stop()
+                _lastStoppedSession = null
+                val target = ttsStartIndex(chunks, blockIndex, charOffset)
+                MiruLog.event(
+                    "tts",
+                    "seek",
+                    "chunks" to chunks.size,
+                    "chapter" to document.chapterIndex,
+                    "block" to blockIndex,
+                    "startChunk" to target,
+                    "fast" to true,
+                )
+                speakFrom(target)
+                return
+            }
             playFrom(document, translations, blockIndex, charOffset, language)
             return
         }
@@ -331,6 +362,8 @@ class TtsController(
         stopInternal(keepStatus = true)
         pending = null
         chunks = next
+        sessionDocument = document
+        sessionSpoken = spokenSnapshot(spoken)
         rebuildChunkCharStats()
         bookUrl = document.bookUrl
         chapterIndex = document.chapterIndex
@@ -367,6 +400,8 @@ class TtsController(
         stopInternal(keepStatus = true)
         pending = null
         chunks = next
+        sessionDocument = document
+        sessionSpoken = spokenSnapshot(spoken)
         rebuildChunkCharStats()
         bookUrl = document.bookUrl.ifBlank { session.bookUrl }
         chapterIndex = document.chapterIndex
@@ -596,6 +631,8 @@ class TtsController(
         // Persist before chunks/bookUrl are cleared, or the cursor is lost.
         if (!clearSession) persist(wasPlaying = false, immediate = true)
         chunks = emptyList()
+        sessionDocument = null
+        sessionSpoken = emptyMap()
         chunkCharSuffix = IntArray(0)
         current = 0
         sessionTranslated = false
@@ -734,20 +771,52 @@ class TtsController(
         // cursor if speech never starts (engine race, process death).
         persist(wasPlaying = true, immediate = true, background = true)
         engine.stop()
-        for (i in current until chunks.size) {
+        val end = minOf(current + LOOKAHEAD_CHUNKS - 1, chunks.lastIndex)
+        enqueueRange(current, end, flushFirst = true)
+    }
+
+    private fun enqueueRange(startIndex: Int, endIndex: Int, flushFirst: Boolean): Boolean {
+        MiruLog.d(
+            "tts",
+            "event=tts_enqueue start=$startIndex end=$endIndex flush=$flushFirst total=${chunks.size}",
+        )
+        for (i in startIndex..endIndex) {
             val utteranceId = ++nextUtteranceId
             utteranceChunks[utteranceId] = i
-            if (!engine.speak(chunks[i].text, utteranceId)) {
-                // Chunks already queued before the failure must stop too.
-                engine.stop()
-                setState(
-                    _state.value.copy(
-                        status = TtsStatus.Failed,
-                        message = "TTS speak failed",
-                    ),
-                )
-                active = false
-                return
+            val flush = flushFirst && i == startIndex
+            if (!engine.speak(chunks[i].text, utteranceId, flush)) {
+                utteranceChunks.remove(utteranceId)
+                if (i == current) {
+                    MiruLog.w("tts", "event=tts_speak_failed chunk=$i")
+                    // Chunks already queued before the failure must stop too.
+                    clearSleepTimer()
+                    invalidateUtterances()
+                    engine.stop()
+                    setState(
+                        _state.value.copy(
+                            status = TtsStatus.Failed,
+                            message = "TTS speak failed",
+                        ),
+                    )
+                    active = false
+                    persist(wasPlaying = false, immediate = true)
+                    return false
+                }
+                MiruLog.d("tts", "event=tts_lookahead_deferred chunk=$i current=$current")
+                return true
+            }
+            queuedUpTo = i
+        }
+        return true
+    }
+
+    private fun topUpQueue(fromIndex: Int) {
+        if (!active || !ready || chunks.isEmpty()) return
+        val targetEnd = minOf(fromIndex + LOOKAHEAD_CHUNKS - 1, chunks.lastIndex)
+        if (queuedUpTo < targetEnd) {
+            val start = maxOf(fromIndex, queuedUpTo + 1)
+            if (start <= targetEnd) {
+                enqueueRange(start, targetEnd, flushFirst = false)
             }
         }
     }
@@ -823,8 +892,12 @@ class TtsController(
         if (!keepStatus) setState(TtsState())
     }
 
+    private fun spokenSnapshot(spoken: Map<Int, String>): Map<Int, String> =
+        if (spoken.isEmpty()) emptyMap() else spoken.toMap()
+
     private fun invalidateUtterances() {
         utteranceChunks.clear()
+        queuedUpTo = -1
     }
 
     private fun onEngineReady() {
@@ -1004,14 +1077,37 @@ class TtsController(
             // a stopped/replaced queue no longer has any valid ids.
             val index = utteranceChunks[utteranceId] ?: return
             if (!active || index < current) return
-            current = index
-            setState(chunkState(index, TtsStatus.Playing))
-            persist(wasPlaying = true, immediate = true, background = true)
+            if (index > current || _state.value.status != TtsStatus.Playing) {
+                current = index
+                setState(chunkState(index, TtsStatus.Playing))
+                persist(wasPlaying = true, immediate = true, background = true)
+            }
+            topUpQueue(index)
         }
 
         override fun onDone(utteranceId: Int) {
-            val index = utteranceChunks[utteranceId] ?: return
-            if (index < chunks.lastIndex || !active) return
+            val index = utteranceChunks.remove(utteranceId) ?: return
+            if (!active || index < current) return
+            if (index < chunks.lastIndex) {
+                val nextIndex = index + 1
+                if (queuedUpTo <= index) {
+                    MiruLog.d("tts", "event=tts_queue_reprime next=$nextIndex total=${chunks.size}")
+                    current = nextIndex
+                    setState(chunkState(nextIndex, TtsStatus.Playing))
+                    persist(wasPlaying = true, immediate = true, background = true)
+                    val end = minOf(nextIndex + LOOKAHEAD_CHUNKS - 1, chunks.lastIndex)
+                    enqueueRange(nextIndex, end, flushFirst = true)
+                } else {
+                    if (nextIndex > current) {
+                        current = nextIndex
+                        setState(chunkState(nextIndex, TtsStatus.Playing))
+                        persist(wasPlaying = true, immediate = true, background = true)
+                    }
+                    topUpQueue(nextIndex)
+                }
+                return
+            }
+            current = index
             active = false
             persist(wasPlaying = false, immediate = true)
             val timer = _sleepTimer.value
@@ -1071,11 +1167,14 @@ class TtsController(
 
         override fun onError(utteranceId: Int?) {
             // Late errors from a stopped/skipped queue must not fail this one.
-            if (utteranceId != null && utteranceChunks[utteranceId] == null) return
+            if (utteranceId != null && utteranceChunks.remove(utteranceId) == null) return
+            if (utteranceId == null && !active) return
             handoffPending = false
             handoffTimeout?.cancel()
             handoffTimeout = null
             clearSleepTimer()
+            invalidateUtterances()
+            engine.stop()
             setState(_state.value.copy(status = TtsStatus.Failed, message = "TTS error"))
             active = false
             persist(wasPlaying = false, immediate = true)
@@ -1136,3 +1235,4 @@ internal fun ttsStartIndex(
 
 /** A chapter hand-off that never arrives must not hold Loading forever. */
 private const val HandoffTimeoutMs = 30_000L
+private const val LOOKAHEAD_CHUNKS = 4

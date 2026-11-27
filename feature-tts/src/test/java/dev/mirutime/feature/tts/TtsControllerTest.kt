@@ -57,9 +57,11 @@ class TtsControllerTest {
 
         val spoken = mutableListOf<Int>()
         val spokenTexts = mutableListOf<String>()
+        val flushFlags = mutableListOf<Boolean>()
         val previews = mutableListOf<String>()
         var stops = 0
         var failSpeak = false
+        var shouldFailSpeak: ((utteranceId: Int, text: String, flush: Boolean) -> Boolean)? = null
         val availableVoices = setOf("voice-a", "voice-b")
         var voice: String? = null
         var appliedRate = 1f
@@ -95,10 +97,14 @@ class TtsControllerTest {
             listener?.onVoicesChanged()
         }
 
-        override fun speak(text: String, utteranceId: Int): Boolean {
+        override fun speak(text: String, utteranceId: Int, flush: Boolean): Boolean {
+            if (failSpeak || shouldFailSpeak?.invoke(utteranceId, text, flush) == true) {
+                return false
+            }
             spoken += utteranceId
             spokenTexts += text
-            return !failSpeak
+            flushFlags += flush
+            return true
         }
 
         override fun preview(text: String): Boolean {
@@ -1605,6 +1611,320 @@ class TtsControllerTest {
         assertEquals(document.chapterIndex, stopped?.chapterIndex)
     }
 
+    @Test
+    fun `play queues only a bounded lookahead window and tops up on onStart`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        val chUrl = "local://book#chapter=1"
+        val doc = ReaderDocument(
+            bookUrl = "local://book",
+            chapterUrl = chUrl,
+            chapterIndex = 1,
+            title = "Ch 1",
+            blocks = listOf(
+                ReaderBlock(
+                    id = BlockId(chUrl, 0),
+                    kind = BlockKind.Paragraph,
+                    original = "One. Two. Three. Four. Five. Six.",
+                ),
+            ),
+        )
+
+        controller.play(doc, emptyMap())
+        assertEquals(4, engine.spoken.size)
+        assertEquals(listOf(true, false, false, false), engine.flushFlags)
+
+        engine.listener?.onStart(engine.spoken[1])
+        assertEquals(5, engine.spoken.size)
+        assertEquals("Five.", engine.spokenTexts.last())
+    }
+
+    @Test
+    fun `onDone tops up lookahead and finishes chapter when engine omits onStart`() = runTest {
+        val engine = FakeEngine()
+        val requests = mutableListOf<TtsChapterDirection>()
+        val controller = TtsController(
+            engine = engine,
+            scope = this,
+            sessions = InMemoryTtsSessionStore(),
+            settingsStore = InMemoryTtsSettingsStore(TtsSettings(autoNextChapter = true)),
+        )
+        val job = launch { controller.chapterRequests.collect { requests += it } }
+        runCurrent()
+        val chUrl = "local://book#chapter=1"
+        val doc = ReaderDocument(
+            bookUrl = "local://book",
+            chapterUrl = chUrl,
+            chapterIndex = 1,
+            title = "Ch 1",
+            blocks = listOf(
+                ReaderBlock(
+                    id = BlockId(chUrl, 0),
+                    kind = BlockKind.Paragraph,
+                    original = "One. Two. Three. Four. Five. Six.",
+                ),
+            ),
+        )
+
+        controller.play(doc, emptyMap())
+        assertEquals(listOf("One.", "Two.", "Three.", "Four."), engine.spokenTexts)
+
+        // Drive only via onDone without calling onStart; verify cursor and highlight advance each chunk.
+        for (idx in 0 until 6) {
+            val id = engine.spoken[idx]
+            engine.listener?.onDone(id)
+            if (idx < 5) {
+                assertEquals(idx + 1, controller.state.value.currentChunk)
+                val nextId = engine.spoken[idx + 1]
+                engine.listener?.onRangeStart(nextId, 0, 3)
+                assertTrue(controller.state.value.rangeEnd > controller.state.value.rangeStart)
+            }
+        }
+        runCurrent()
+
+        assertEquals(listOf("One.", "Two.", "Three.", "Four.", "Five.", "Six."), engine.spokenTexts)
+        assertEquals(TtsStatus.Loading, controller.state.value.status)
+        assertEquals(listOf(TtsChapterDirection.Next), requests)
+        job.cancel()
+    }
+
+    @Test
+    fun `transient lookahead speak failure recovers via onDone reprime without stalling`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(
+            engine = engine,
+            scope = this,
+            sessions = InMemoryTtsSessionStore(),
+            settingsStore = InMemoryTtsSettingsStore(TtsSettings(autoNextChapter = false)),
+        )
+        val chUrl = "local://book#chapter=1"
+        val doc = ReaderDocument(
+            bookUrl = "local://book",
+            chapterUrl = chUrl,
+            chapterIndex = 1,
+            title = "Ch 1",
+            blocks = listOf(
+                ReaderBlock(
+                    id = BlockId(chUrl, 0),
+                    kind = BlockKind.Paragraph,
+                    original = "One. Two. Three. Four.",
+                ),
+            ),
+        )
+        // Fail lookahead chunks (flush == false) during initial play only.
+        var blockLookahead = true
+        engine.shouldFailSpeak = { _, _, flush -> blockLookahead && !flush }
+
+        controller.play(doc, emptyMap())
+        assertEquals(listOf("One."), engine.spokenTexts)
+        assertEquals(TtsStatus.Playing, controller.state.value.status)
+
+        // Allow subsequent speak calls when chunk 0 finishes.
+        blockLookahead = false
+        engine.listener?.onDone(engine.spoken[0])
+
+        assertEquals(listOf("One.", "Two.", "Three.", "Four."), engine.spokenTexts)
+        assertEquals(1, controller.state.value.currentChunk)
+        assertEquals(listOf(true, true, false, false), engine.flushFlags)
+    }
+
+    @Test
+    fun `rapid skipNextChunk fast-forward uses flush on first chunk and stays Playing`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        val chUrl = "local://book#chapter=1"
+        val doc = ReaderDocument(
+            bookUrl = "local://book",
+            chapterUrl = chUrl,
+            chapterIndex = 1,
+            title = "Ch 1",
+            blocks = listOf(
+                ReaderBlock(
+                    id = BlockId(chUrl, 0),
+                    kind = BlockKind.Paragraph,
+                    original = "Line 1. Line 2. Line 3. Line 4. Line 5. Line 6.",
+                ),
+            ),
+        )
+
+        controller.play(doc, emptyMap())
+        engine.spoken.clear()
+        engine.spokenTexts.clear()
+        engine.flushFlags.clear()
+
+        controller.skipNextChunk()
+        controller.skipNextChunk()
+
+        assertEquals(TtsStatus.Playing, controller.state.value.status)
+        assertEquals(2, controller.state.value.currentChunk)
+        assertEquals(
+            listOf("Line 3.", "Line 4.", "Line 5.", "Line 6."),
+            engine.spokenTexts.takeLast(4),
+        )
+        assertEquals(listOf(true, false, false, false, true, false, false, false), engine.flushFlags)
+    }
+
+    @Test
+    fun `onError stops queued lookahead utterances and invalidates queue`() = runTest {
+        val engine = FakeEngine()
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        val chUrl = "local://book#chapter=1"
+        val doc = ReaderDocument(
+            bookUrl = "local://book",
+            chapterUrl = chUrl,
+            chapterIndex = 1,
+            title = "Ch 1",
+            blocks = listOf(
+                ReaderBlock(BlockId(chUrl, 0), BlockKind.Paragraph, "One. Two. Three. Four."),
+            ),
+        )
+        controller.play(doc, emptyMap())
+        engine.stops = 0
+        val activeId = engine.spoken[0]
+        val queuedLookaheadId = engine.spoken[1]
+
+        engine.listener?.onError(activeId)
+
+        assertEquals(TtsStatus.Failed, controller.state.value.status)
+        assertEquals(1, engine.stops)
+        // Queued lookahead callbacks after failure must be ignored.
+        engine.listener?.onDone(queuedLookaheadId)
+        assertEquals(TtsStatus.Failed, controller.state.value.status)
+    }
+
+    @Test
+    fun `playing seekToBlock fast-paths translation mode when map is unchanged`() = runTest {
+        val engine = FakeEngine()
+        val chUrl = "local://book#chapter=1"
+        val multiBlockDoc = ReaderDocument(
+            bookUrl = "local://book",
+            chapterUrl = chUrl,
+            chapterIndex = 1,
+            title = "Ch 1",
+            blocks = listOf(
+                ReaderBlock(BlockId(chUrl, 0), BlockKind.Paragraph, "Original zero."),
+                ReaderBlock(BlockId(chUrl, 1), BlockKind.Paragraph, "Original one."),
+            ),
+        )
+        val settings = InMemoryTtsSettingsStore(
+            TtsSettings(voiceId = "voice-a", translatedVoiceId = "voice-b"),
+        )
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore(), settings)
+        val mutableMap = mutableMapOf(0 to "Перевод ноль.", 1 to "Перевод один.")
+        controller.playFrom(
+            document = multiBlockDoc,
+            translations = mutableMap,
+            blockIndex = 0,
+            language = TtsLanguage.Translation,
+        )
+        engine.voiceCatalogReads = 0
+        engine.voiceSets = 0
+
+        // Unchanged translations -> fast seek without binder/catalog reloads.
+        controller.seekToBlock(
+            document = multiBlockDoc,
+            translations = mutableMap.toMap(),
+            blockIndex = 1,
+            language = TtsLanguage.Translation,
+        )
+        assertEquals(0, engine.voiceCatalogReads)
+        assertEquals(0, engine.voiceSets)
+        assertEquals("Перевод один.", engine.spokenTexts.last())
+
+        // Mutating the original MutableMap in place must still be detected as changed!
+        mutableMap[0] = "Обновлённый ноль."
+        engine.spokenTexts.clear()
+        controller.seekToBlock(
+            document = multiBlockDoc,
+            translations = mutableMap,
+            blockIndex = 0,
+            language = TtsLanguage.Translation,
+        )
+        assertEquals(listOf("Обновлённый ноль.", "Перевод один."), engine.spokenTexts)
+    }
+
+    @Test
+    fun `playing seekToBlock fast-paths same chapter without reloading voice catalog`() = runTest {
+        val engine = FakeEngine()
+        val chUrl = "local://book#chapter=1"
+        val multiBlockDoc = ReaderDocument(
+            bookUrl = "local://book",
+            chapterUrl = chUrl,
+            chapterIndex = 1,
+            title = "Ch 1",
+            blocks = listOf(
+                ReaderBlock(BlockId(chUrl, 0), BlockKind.Paragraph, "Block zero."),
+                ReaderBlock(BlockId(chUrl, 1), BlockKind.Paragraph, "Block one."),
+                ReaderBlock(BlockId(chUrl, 2), BlockKind.Paragraph, "Block two."),
+            ),
+        )
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore())
+        controller.play(multiBlockDoc, emptyMap())
+        engine.voiceCatalogReads = 0
+        engine.voiceSets = 0
+        engine.rateSets = 0
+        engine.pitchSets = 0
+
+        controller.seekToBlock(multiBlockDoc, emptyMap(), blockIndex = 2)
+
+        assertEquals(0, engine.voiceCatalogReads)
+        assertEquals(0, engine.voiceSets)
+        assertEquals(0, engine.rateSets)
+        assertEquals(0, engine.pitchSets)
+        assertEquals(TtsStatus.Playing, controller.state.value.status)
+        assertEquals(2, controller.state.value.currentChunk)
+        assertEquals("Block two.", engine.spokenTexts.last())
+    }
+
+    @Test
+    fun `playing seekToBlock re-chunks on updated translations and rejects stale handoff`() = runTest {
+        val engine = FakeEngine()
+        val chUrl = "local://book#chapter=1"
+        val multiBlockDoc = ReaderDocument(
+            bookUrl = "local://book",
+            chapterUrl = chUrl,
+            chapterIndex = 1,
+            title = "Ch 1",
+            blocks = listOf(
+                ReaderBlock(BlockId(chUrl, 0), BlockKind.Paragraph, "Original zero."),
+                ReaderBlock(BlockId(chUrl, 1), BlockKind.Paragraph, "Original one."),
+            ),
+        )
+        val settings = InMemoryTtsSettingsStore(
+            TtsSettings(voiceId = "voice-a", translatedVoiceId = "voice-b"),
+        )
+        val controller = TtsController(engine, this, InMemoryTtsSessionStore(), settings)
+
+        // Start in Translation when block 1 is not yet translated.
+        controller.playFrom(
+            document = multiBlockDoc,
+            translations = mapOf(0 to "Перевод ноль."),
+            blockIndex = 0,
+            language = TtsLanguage.Translation,
+        )
+        assertEquals("Original one.", engine.spokenTexts[1])
+
+        // Block 1 finishes translating later: seekToBlock must rebuild chunks to speak the translation.
+        controller.seekToBlock(
+            document = multiBlockDoc,
+            translations = mapOf(0 to "Перевод ноль.", 1 to "Перевод один."),
+            blockIndex = 1,
+            language = TtsLanguage.Translation,
+        )
+        assertEquals(TtsStatus.Playing, controller.state.value.status)
+        assertEquals("Перевод один.", engine.spokenTexts.last())
+
+        // Start a chapter hand-off (Loading/handoffPending): seekToBlock on current chapter must clear it.
+        finishChapter(engine)
+        controller.seekToBlock(
+            document = multiBlockDoc,
+            translations = mapOf(0 to "Перевод ноль.", 1 to "Перевод один."),
+            blockIndex = 0,
+            language = TtsLanguage.Translation,
+        )
+        assertFalse(controller.isHandoffPending)
+        assertFalse(controller.playHandoff(multiBlockDoc, mapOf(0 to "Перевод ноль.", 1 to "Перевод один.")))
+    }
 }
 
 private class FakeVoicePreviewer : TtsVoicePreviewer {
