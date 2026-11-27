@@ -65,6 +65,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
@@ -97,6 +98,7 @@ import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruRoundIconButton
 import dev.mirutime.uikit.MiruSearchBar
 import dev.mirutime.uikit.MiruSectionCard
+import dev.mirutime.uikit.MiruSelectionPlate
 import dev.mirutime.uikit.compactTouchTarget
 import dev.mirutime.uikit.isLargeText
 import dev.mirutime.uikit.miruCardBorder
@@ -335,381 +337,282 @@ fun ManageExtensionsScreen(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(top = contentPadding.calculateTopPadding()),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+    val selectionBarBottom = contentPadding.calculateBottomPadding() + MiruSpace.S
+    // Measured, never a constant: the plate grows with the font scale, and the
+    // list must still scroll its last row clear of it.
+    var selectionBarHeightPx by remember { mutableStateOf(0) }
+    val selectionBarInset = if (selectionMode) {
+        selectionBarBottom + with(LocalDensity.current) { selectionBarHeightPx.toDp() } + MiruSpace.S
+    } else {
+        contentPadding.calculateBottomPadding() + MiruSpace.L
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(
+                .fillMaxSize()
+                .padding(top = contentPadding.calculateTopPadding()),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = MiruSize.ScreenPad,
+                        end = MiruSize.ScreenPad,
+                        top = MiruSpace.Xs,
+                        bottom = MiruSpace.S,
+                    ),
+            ) {
+                MiruSearchBar(
+                    value = filters.query,
+                    onValueChange = { filters = filters.copy(query = it) },
+                    placeholder = stringResource(R.string.finder_ext_query_hint),
+                    modifier = Modifier.weight(1f),
+                )
+                MiruRoundIconButton(
+                    icon = Icons.Filled.Tune,
+                    contentDescription = stringResource(R.string.finder_cd_filters),
+                    onClick = { filterOpen = true },
+                    badgeCount = filters.types.size + filters.languages.size,
+                )
+                MiruRoundIconButton(
+                    icon = Icons.Filled.Refresh,
+                    contentDescription = stringResource(R.string.finder_repo_refresh),
+                    enabled = !repoBusy,
+                    busy = repoBusy,
+                    busyDescription = stringResource(R.string.finder_repo_refreshing),
+                    onClick = { scope.launch { refreshRepository() } },
+                )
+            }
+            val compactActions = largeText || LocalDensity.current.fontScale > 1.15f
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(MiruSpace.M),
+                contentPadding = PaddingValues(
                     start = MiruSize.ScreenPad,
                     end = MiruSize.ScreenPad,
                     top = MiruSpace.Xs,
-                    bottom = MiruSpace.S,
+                    bottom = selectionBarInset,
                 ),
-        ) {
-            MiruSearchBar(
-                value = filters.query,
-                onValueChange = { filters = filters.copy(query = it) },
-                placeholder = stringResource(R.string.finder_ext_query_hint),
-                modifier = Modifier.weight(1f),
-            )
-            MiruRoundIconButton(
-                icon = Icons.Filled.Tune,
-                contentDescription = stringResource(R.string.finder_cd_filters),
-                onClick = { filterOpen = true },
-                badgeCount = filters.types.size + filters.languages.size,
-            )
-            MiruRoundIconButton(
-                icon = Icons.Filled.Refresh,
-                contentDescription = stringResource(R.string.finder_repo_refresh),
-                enabled = !repoBusy,
-                busy = repoBusy,
-                busyDescription = stringResource(R.string.finder_repo_refreshing),
-                onClick = { scope.launch { refreshRepository() } },
-            )
-        }
-        val compactActions = largeText || LocalDensity.current.fontScale > 1.15f
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(MiruSpace.M),
-            contentPadding = PaddingValues(
-                start = MiruSize.ScreenPad,
-                end = MiruSize.ScreenPad,
-                top = MiruSpace.Xs,
-                bottom = contentPadding.calculateBottomPadding() + MiruSpace.L,
-            ),
-        ) {
-            item(key = "quick-actions") {
-                val repoLabel = stringResource(R.string.finder_repo_title)
-                val addLabel = stringResource(R.string.finder_add_extension)
-                val onOpenRepo: () -> Unit = {
-                    repoText = provider.repoUrl()
-                    repoSheetOpen = true
-                }
-                val onAddExtension: () -> Unit = { installLauncher.launch(arrayOf("*/*")) }
-                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                    val stackTiles = compactActions || maxWidth < MiruSize.NarrowContent
-                    if (stackTiles) {
-                        Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                            ExtensionActionTile(
-                                icon = Icons.Filled.Code,
-                                label = repoLabel,
-                                onClick = onOpenRepo,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            ExtensionActionTile(
-                                icon = Icons.Filled.Add,
-                                label = addLabel,
-                                enabled = !installBusy,
-                                busy = installBusy,
-                                onClick = onAddExtension,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    } else {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(IntrinsicSize.Max),
-                        ) {
-                            ExtensionActionTile(
-                                icon = Icons.Filled.Code,
-                                label = repoLabel,
-                                onClick = onOpenRepo,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight(),
-                            )
-                            ExtensionActionTile(
-                                icon = Icons.Filled.Add,
-                                label = addLabel,
-                                enabled = !installBusy,
-                                busy = installBusy,
-                                onClick = onAddExtension,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight(),
-                            )
-                        }
+            ) {
+                item(key = "quick-actions") {
+                    val repoLabel = stringResource(R.string.finder_repo_title)
+                    val addLabel = stringResource(R.string.finder_add_extension)
+                    val onOpenRepo: () -> Unit = {
+                        repoText = provider.repoUrl()
+                        repoSheetOpen = true
                     }
-                }
-            }
-            if (selectionMode) {
-                item(key = "selection") {
-                    MiruCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(
-                            start = MiruSpace.Xs,
-                            end = MiruSpace.M,
-                            top = MiruSpace.Xs,
-                            bottom = MiruSpace.Xs,
-                        ),
-                    ) {
-                        if (largeText) {
-                            Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.Xs)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    IconButton(
-                                        onClick = { selection = selection.close() },
-                                        modifier = Modifier.size(MiruSize.Touch),
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Close,
-                                            contentDescription = stringResource(R.string.finder_cd_cancel_selection),
-                                        )
-                                    }
-                                    Text(
-                                        text = stringResource(R.string.finder_selected_fmt, selected.size),
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                }
-                                MiruButton(
-                                    onClick = {
-                                        selection = selection.selectAll(
-                                            installedShown.map { it.id },
-                                            additive = true,
-                                        )
-                                    },
-                                    style = MiruButtonStyle.Secondary,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(start = MiruSpace.S),
-                                ) {
-                                    Text(text = stringResource(R.string.finder_select_all))
-                                }
-                                MiruButton(
-                                    onClick = { confirmBulk = true },
-                                    style = MiruButtonStyle.Destructive,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(start = MiruSpace.S, bottom = MiruSpace.Xs),
-                                ) {
-                                    Text(text = stringResource(R.string.finder_uninstall))
-                                }
+                    val onAddExtension: () -> Unit = { installLauncher.launch(arrayOf("*/*")) }
+                    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                        val stackTiles = compactActions || maxWidth < MiruSize.NarrowContent
+                        if (stackTiles) {
+                            Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                                ExtensionActionTile(
+                                    icon = Icons.Filled.Code,
+                                    label = repoLabel,
+                                    onClick = onOpenRepo,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                ExtensionActionTile(
+                                    icon = Icons.Filled.Add,
+                                    label = addLabel,
+                                    enabled = !installBusy,
+                                    busy = installBusy,
+                                    onClick = onAddExtension,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
                             }
                         } else {
-                            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                                val actionMax = maxWidth * 0.30f
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    IconButton(
-                                        onClick = { selection = selection.close() },
-                                        modifier = Modifier.size(MiruSize.Touch),
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Close,
-                                            contentDescription = stringResource(R.string.finder_cd_cancel_selection),
-                                        )
-                                    }
-                                    Text(
-                                        text = stringResource(R.string.finder_selected_fmt, selected.size),
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.weight(1f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .widthIn(max = actionMax)
-                                            .width(IntrinsicSize.Max),
-                                    ) {
-                                        MiruCompactButton(
-                                            label = stringResource(R.string.finder_select_all),
-                                            onClick = {
-                                                selection = selection.selectAll(
-                                                    installedShown.map { it.id },
-                                                    additive = true,
-                                                )
-                                            },
-                                        )
-                                    }
-                                    Box(
-                                        modifier = Modifier
-                                            .widthIn(max = actionMax)
-                                            .width(IntrinsicSize.Max),
-                                    ) {
-                                        MiruCompactButton(
-                                            label = stringResource(R.string.finder_uninstall),
-                                            ink = MaterialTheme.colorScheme.error,
-                                            onClick = { confirmBulk = true },
-                                        )
-                                    }
-                                }
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(IntrinsicSize.Max),
+                            ) {
+                                ExtensionActionTile(
+                                    icon = Icons.Filled.Code,
+                                    label = repoLabel,
+                                    onClick = onOpenRepo,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                )
+                                ExtensionActionTile(
+                                    icon = Icons.Filled.Add,
+                                    label = addLabel,
+                                    enabled = !installBusy,
+                                    busy = installBusy,
+                                    onClick = onAddExtension,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                )
                             }
                         }
                     }
                 }
-            }
-            // A real spinner only while there is nothing to show; once any row is
-            // known, the background repository refresh stays inside the overview card.
-            if (plugins == null || (all.isEmpty() && repoBusy)) {
-                item(key = "loading") {
-                    MiruCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(MiruSpace.Xl),
-                    ) {
-                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = extra.accent)
+                // A real spinner only while there is nothing to show; once any row is
+                // known, the background repository refresh stays inside the overview card.
+                if (plugins == null || (all.isEmpty() && repoBusy)) {
+                    item(key = "loading") {
+                        MiruCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(MiruSpace.Xl),
+                        ) {
+                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(color = extra.accent)
+                            }
                         }
                     }
-                }
-            } else {
-                item(key = "installed") {
-                    MiruSectionCard(
-                        title = stringResource(
-                            R.string.finder_tab_installed_fmt,
-                            installedShown.size,
-                        ),
-                        trailing = if (updates >= 1) {
-                            {
-                                val updateAllLabel = stringResource(R.string.finder_update_all)
-                                val fullUpdateAllLabel = "$updateAllLabel ($updates)"
-                                if (compactActions) {
-                                    MiruIconButton(
-                                        icon = Icons.Filled.Refresh,
-                                        contentDescription = fullUpdateAllLabel,
-                                        selected = true,
-                                        onClick = ::runUpdateAll,
-                                        enabled = !updateAllBusy,
-                                        busy = updateAllBusy,
-                                        busyDescription = updateAllLabel,
-                                        style = MiruIconButtonStyle.Plate,
-                                    )
-                                } else {
-                                    Box(modifier = Modifier.width(IntrinsicSize.Max)) {
-                                        MiruCompactButton(
+                } else {
+                    item(key = "installed") {
+                        MiruSectionCard(
+                            title = stringResource(
+                                R.string.finder_tab_installed_fmt,
+                                installedShown.size,
+                            ),
+                            trailing = if (updates >= 1) {
+                                {
+                                    val updateAllLabel = stringResource(R.string.finder_update_all)
+                                    val fullUpdateAllLabel = "$updateAllLabel ($updates)"
+                                    if (compactActions) {
+                                        MiruIconButton(
                                             icon = Icons.Filled.Refresh,
-                                            label = fullUpdateAllLabel,
+                                            contentDescription = fullUpdateAllLabel,
                                             selected = true,
+                                            onClick = ::runUpdateAll,
                                             enabled = !updateAllBusy,
                                             busy = updateAllBusy,
-                                            onClick = ::runUpdateAll,
+                                            busyDescription = updateAllLabel,
+                                            style = MiruIconButtonStyle.Plate,
+                                        )
+                                    } else {
+                                        Box(modifier = Modifier.width(IntrinsicSize.Max)) {
+                                            MiruCompactButton(
+                                                icon = Icons.Filled.Refresh,
+                                                label = fullUpdateAllLabel,
+                                                selected = true,
+                                                enabled = !updateAllBusy,
+                                                busy = updateAllBusy,
+                                                onClick = ::runUpdateAll,
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                null
+                            },
+                            contentPadding = PaddingValues(0.dp),
+                        ) {
+                            if (installed.isNotEmpty() || filters.status != ExtensionStatus.Any) {
+                                ChipRail(
+                                    contentPadding = PaddingValues(
+                                        horizontal = MiruSpace.L,
+                                        vertical = MiruSpace.S,
+                                    ),
+                                ) {
+                                    items(ExtensionStatus.entries, key = { it.name }) { status ->
+                                        MiruFilterChip(
+                                            selected = filters.status == status,
+                                            onClick = { filters = filters.copy(status = status) },
+                                            label = stringResource(
+                                                when (status) {
+                                                    ExtensionStatus.Any -> R.string.finder_filter_all
+                                                    ExtensionStatus.Enabled -> R.string.finder_ext_status_enabled
+                                                    ExtensionStatus.Disabled -> R.string.finder_ext_status_disabled
+                                                    ExtensionStatus.Updates -> R.string.finder_ext_status_updates
+                                                },
+                                            ),
+                                        )
+                                    }
+                                }
+                                HorizontalDivider(
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                )
+                            }
+                            if (installedShown.isEmpty()) {
+                                SectionMessage(
+                                    stringResource(
+                                        if (filters != ExtensionFilters()) {
+                                            R.string.finder_ext_no_match
+                                        } else {
+                                            R.string.finder_installed_empty
+                                        },
+                                    ),
+                                )
+                            } else {
+                                installedShown.forEachIndexed { index, plugin ->
+                                    if (index > 0) MiruRowDivider()
+                                    key(plugin.id) {
+                                        InstalledRow(
+                                            plugin = plugin,
+                                            busy = plugin.id in busyIds,
+                                            selectionMode = selectionMode,
+                                            selected = plugin.id in selected,
+                                            onClick = {
+                                                when {
+                                                    selectionMode -> selection = selection.toggle(
+                                                        plugin.id,
+                                                        autoDeactivateWhenEmpty = true,
+                                                    )
+                                                    plugin.error != null -> healthFor = plugin
+                                                    else -> actionsFor = plugin
+                                                }
+                                            },
+                                            onLongClick = {
+                                                val next = selection.longPress(
+                                                    plugin.id,
+                                                    installedShown.map { it.id },
+                                                )
+                                                logRangeSelect("extensions", selection.count, next.count)
+                                                selection = next
+                                            },
+                                            onToggle = { enabled ->
+                                                scope.launch {
+                                                    provider.setEnabled(plugin.id, enabled)
+                                                    reload()
+                                                }
+                                            },
+                                            onUpdate = { runFor(plugin.id) { provider.update(plugin.id) } },
+                                            onMore = { actionsFor = plugin },
                                         )
                                     }
                                 }
                             }
-                        } else {
-                            null
-                        },
-                        contentPadding = PaddingValues(0.dp),
-                    ) {
-                        if (installed.isNotEmpty() || filters.status != ExtensionStatus.Any) {
-                            ChipRail(
-                                contentPadding = PaddingValues(
-                                    horizontal = MiruSpace.L,
-                                    vertical = MiruSpace.S,
-                                ),
-                            ) {
-                                items(ExtensionStatus.entries, key = { it.name }) { status ->
-                                    MiruFilterChip(
-                                        selected = filters.status == status,
-                                        onClick = { filters = filters.copy(status = status) },
-                                        label = stringResource(
-                                            when (status) {
-                                                ExtensionStatus.Any -> R.string.finder_filter_all
-                                                ExtensionStatus.Enabled -> R.string.finder_ext_status_enabled
-                                                ExtensionStatus.Disabled -> R.string.finder_ext_status_disabled
-                                                ExtensionStatus.Updates -> R.string.finder_ext_status_updates
-                                            },
-                                        ),
-                                    )
-                                }
-                            }
-                            HorizontalDivider(
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                            )
-                        }
-                        if (installedShown.isEmpty()) {
-                            SectionMessage(
-                                stringResource(
-                                    if (filters != ExtensionFilters()) {
-                                        R.string.finder_ext_no_match
-                                    } else {
-                                        R.string.finder_installed_empty
-                                    },
-                                ),
-                            )
-                        } else {
-                            installedShown.forEachIndexed { index, plugin ->
-                                if (index > 0) MiruRowDivider()
-                                key(plugin.id) {
-                                    InstalledRow(
-                                        plugin = plugin,
-                                        busy = plugin.id in busyIds,
-                                        selectionMode = selectionMode,
-                                        selected = plugin.id in selected,
-                                        onClick = {
-                                            when {
-                                                selectionMode -> selection = selection.toggle(
-                                                    plugin.id,
-                                                    autoDeactivateWhenEmpty = true,
-                                                )
-                                                plugin.error != null -> healthFor = plugin
-                                                else -> actionsFor = plugin
-                                            }
-                                        },
-                                        onLongClick = {
-                                            val next = selection.longPress(
-                                                plugin.id,
-                                                installedShown.map { it.id },
-                                            )
-                                            logRangeSelect("extensions", selection.count, next.count)
-                                            selection = next
-                                        },
-                                        onToggle = { enabled ->
-                                            scope.launch {
-                                                provider.setEnabled(plugin.id, enabled)
-                                                reload()
-                                            }
-                                        },
-                                        onUpdate = { runFor(plugin.id) { provider.update(plugin.id) } },
-                                        onMore = { actionsFor = plugin },
-                                    )
-                                }
-                            }
                         }
                     }
-                }
-                item(key = "repository") {
-                    MiruSectionCard(
-                        title = stringResource(
-                            R.string.finder_tab_catalogue_fmt,
-                            repositoryShown.size,
-                        ),
-                        contentPadding = PaddingValues(0.dp),
-                    ) {
-                        if (repositoryShown.isEmpty()) {
-                            SectionMessage(
-                                stringResource(
-                                    if (repositoryFiltered) {
-                                        R.string.finder_ext_no_match
-                                    } else {
-                                        R.string.finder_available_empty
-                                    },
-                                ),
-                            )
-                        } else {
-                            repositoryShown.forEachIndexed { index, plugin ->
-                                if (index > 0) MiruRowDivider()
-                                key(plugin.id) {
-                                    CatalogueRow(
-                                        plugin = plugin,
-                                        busy = plugin.id in busyIds,
-                                        onInstall = { runFor(plugin.id) { provider.install(plugin.id) } },
-                                        onUpdate = { runFor(plugin.id) { provider.update(plugin.id) } },
-                                    )
+                    item(key = "repository") {
+                        MiruSectionCard(
+                            title = stringResource(
+                                R.string.finder_tab_catalogue_fmt,
+                                repositoryShown.size,
+                            ),
+                            contentPadding = PaddingValues(0.dp),
+                        ) {
+                            if (repositoryShown.isEmpty()) {
+                                SectionMessage(
+                                    stringResource(
+                                        if (repositoryFiltered) {
+                                            R.string.finder_ext_no_match
+                                        } else {
+                                            R.string.finder_available_empty
+                                        },
+                                    ),
+                                )
+                            } else {
+                                repositoryShown.forEachIndexed { index, plugin ->
+                                    if (index > 0) MiruRowDivider()
+                                    key(plugin.id) {
+                                        CatalogueRow(
+                                            plugin = plugin,
+                                            busy = plugin.id in busyIds,
+                                            onInstall = { runFor(plugin.id) { provider.install(plugin.id) } },
+                                            onUpdate = { runFor(plugin.id) { provider.update(plugin.id) } },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -717,6 +620,58 @@ fun ManageExtensionsScreen(
                 }
             }
         }
+    if (selectionMode) {
+        // Bottom float, same plate as the library: pinned to the list it
+        // scrolled away and Uninstall needed a scroll-up.
+        MiruSelectionPlate(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(
+                    start = MiruSize.ScreenPad,
+                    end = MiruSize.ScreenPad,
+                    bottom = selectionBarBottom,
+                )
+                .onSizeChanged { selectionBarHeightPx = it.height },
+            header = {
+                MiruIconButton(
+                    icon = Icons.Filled.Close,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    iconSize = MiruSize.IconCompact,
+                    onClick = { selection = selection.close() },
+                    contentDescription = stringResource(R.string.finder_cd_cancel_selection),
+                )
+                Text(
+                    text = stringResource(R.string.finder_selected_fmt, selected.size),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            },
+            actions = {
+                // Header keeps only the count: at 200% the buttons next to it
+                // pushed the number into the ellipsis.
+                MiruCompactButton(
+                    icon = Icons.Filled.Check,
+                    label = stringResource(R.string.finder_select_all),
+                    enabled = selected.size < installedShown.size,
+                    onClick = {
+                        selection = selection.selectAll(
+                            installedShown.map { it.id },
+                            additive = true,
+                        )
+                    },
+                )
+                MiruCompactButton(
+                    icon = Icons.Filled.Delete,
+                    label = stringResource(R.string.finder_uninstall),
+                    ink = MaterialTheme.colorScheme.error,
+                    onClick = { confirmBulk = true },
+                )
+            },
+        )
+    }
     }
 
     val hasOtherSheetOpen = actionsFor != null ||

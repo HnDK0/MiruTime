@@ -2,7 +2,6 @@ package dev.mirutime.app.features.dashboard.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -12,19 +11,21 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -35,6 +36,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.selected as semanticsSelected
 import androidx.compose.ui.semantics.semantics
@@ -51,10 +55,12 @@ import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.uikit.CardProgressBar
 import dev.mirutime.uikit.CoverInset
 import dev.mirutime.uikit.LocalMiruExtraColors
-import dev.mirutime.uikit.MiruButton
-import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruCard
+import dev.mirutime.uikit.MiruCompactButton
+import dev.mirutime.uikit.MiruIconButton
 import dev.mirutime.uikit.MiruRadius
+import dev.mirutime.uikit.MiruSelectionPlate
+import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.SkeletonBar
 import dev.mirutime.uikit.SkeletonBox
@@ -85,6 +91,9 @@ fun HistoryScreen(
     val selected = selection.selected
     var request by remember { mutableStateOf<HistoryDeleteRequest?>(null) }
     var busy by remember { mutableStateOf(false) }
+    // Measured, never a constant: the plate grows with the font scale, and the
+    // list must still scroll its last row clear of it.
+    var selectionBarHeightPx by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
 
     suspend fun reload() {
@@ -116,10 +125,18 @@ fun HistoryScreen(
                 start = 16.dp,
                 end = 16.dp,
                 top = contentPadding.calculateTopPadding() + 8.dp,
-                // The selection bar floats over the list: reserve its height so
+                // The selection plate floats over the list: reserve its height so
                 // the last row stays reachable while selecting.
                 bottom = contentPadding.calculateBottomPadding() +
-                    if (selectionMode) 96.dp else 24.dp,
+                    if (selectionMode) {
+                        // The plate's own top gap is MiruSpace.S, so the
+                        // reservation must match it: measured height excludes
+                        // the plate's bottom padding.
+                        with(LocalDensity.current) { selectionBarHeightPx.toDp() } +
+                            MiruSpace.S * 2
+                    } else {
+                        24.dp
+                    },
             ),
         ) {
             when {
@@ -140,20 +157,6 @@ fun HistoryScreen(
                 }
 
                 else -> {
-                    if (selectionMode) {
-                        item(key = "history-selection-toolbar") {
-                            HistorySelectionToolbar(
-                                onSelectAll = {
-                                    selection = selection.selectAll(history.map { it.book.bookKey })
-                                },
-                                onClear = { selection = selection.clear(keepActive = true) },
-                                onExit = { selection = selection.close() },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = MiruSpace.S),
-                            )
-                        }
-                    }
                     itemsIndexed(
                         history,
                         key = { index, entry -> "history:${entry.book.bookKey}:$index" },
@@ -192,41 +195,68 @@ fun HistoryScreen(
         }
 
         if (selectionMode) {
-            Surface(
+            MiruSelectionPlate(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 3.dp,
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        // The surface paints behind the gesture bar, the buttons
-                        // sit above it: the bar must not be clipped at the edge.
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = MiruSpace.S),
-                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    MiruButton(
-                        onClick = { request = HistoryDeleteRequest.Selected(selected.size) },
-                        style = MiruButtonStyle.Destructive,
+                    .padding(
+                        start = MiruSize.ScreenPad,
+                        end = MiruSize.ScreenPad,
+                        bottom = contentPadding.calculateBottomPadding() + MiruSpace.S,
+                    )
+                    .onSizeChanged { selectionBarHeightPx = it.height },
+                header = {
+                    MiruIconButton(
+                        icon = Icons.Filled.Close,
+                        contentDescription = stringResource(R.string.lib_selection_close),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        iconSize = MiruSize.IconCompact,
+                        onClick = { selection = selection.close() },
+                    )
+                    Text(
+                        text = pluralStringResource(
+                            R.plurals.plural_selected_books,
+                            selected.size,
+                            selected.size,
+                        ),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                },
+                actions = {
+                    // Header keeps only the count: at 200% the buttons next to
+                    // it pushed the number into the ellipsis.
+                    MiruCompactButton(
+                        icon = Icons.Filled.Check,
+                        label = stringResource(R.string.lib_select_all),
+                        enabled = selected.size < history.size,
+                        onClick = {
+                            selection = selection.selectAll(history.map { it.book.bookKey })
+                        },
+                    )
+                    MiruCompactButton(
+                        icon = Icons.Filled.RemoveCircleOutline,
+                        label = stringResource(R.string.lib_clear_selection),
+                        enabled = selected.isNotEmpty(),
+                        onClick = { selection = selection.clear(keepActive = true) },
+                    )
+                    MiruCompactButton(
+                        icon = Icons.Filled.Delete,
+                        label = stringResource(R.string.lib_bulk_delete),
+                        ink = MaterialTheme.colorScheme.error,
                         enabled = selected.isNotEmpty() && !busy,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(stringResource(R.string.lib_bulk_delete))
-                    }
-                    MiruButton(
-                        onClick = { request = HistoryDeleteRequest.All },
-                        style = MiruButtonStyle.Secondary,
+                        onClick = { request = HistoryDeleteRequest.Selected(selected.size) },
+                    )
+                    MiruCompactButton(
+                        icon = Icons.Filled.DeleteSweep,
+                        label = stringResource(R.string.dash_history_clear_all),
                         enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(stringResource(R.string.dash_history_clear_all))
-                    }
-                }
-            }
+                        onClick = { request = HistoryDeleteRequest.All },
+                    )
+                },
+            )
         }
     }
 
@@ -253,39 +283,6 @@ fun HistoryScreen(
                 }
             },
         )
-    }
-}
-
-@Composable
-private fun HistorySelectionToolbar(
-    onSelectAll: () -> Unit,
-    onClear: () -> Unit,
-    onExit: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    MiruCard(
-        modifier = modifier,
-        contentPadding = PaddingValues(horizontal = MiruSpace.Xs, vertical = MiruSpace.Xxs),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val toolbarColors = ButtonDefaults.textButtonColors(
-                contentColor = LocalMiruExtraColors.current.accent,
-            )
-            val toolbarPadding = PaddingValues(horizontal = MiruSpace.S, vertical = MiruSpace.Xs)
-            TextButton(onClick = onExit, colors = toolbarColors, contentPadding = toolbarPadding) {
-                Text(stringResource(R.string.lib_selection_close))
-            }
-            Spacer(modifier = Modifier.weight(1f))
-            TextButton(onClick = onSelectAll, colors = toolbarColors, contentPadding = toolbarPadding) {
-                Text(stringResource(R.string.lib_select_all))
-            }
-            TextButton(onClick = onClear, colors = toolbarColors, contentPadding = toolbarPadding) {
-                Text(stringResource(R.string.lib_clear_selection))
-            }
-        }
     }
 }
 
