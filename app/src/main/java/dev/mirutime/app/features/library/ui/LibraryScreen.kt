@@ -75,6 +75,7 @@ import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.app.R
+import dev.mirutime.app.design.logRangeSelect
 import dev.mirutime.app.shell.TabBarDecoration
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.compactTouchTarget
@@ -528,10 +529,12 @@ fun LibraryScreen(
     }
 
     fun longPressSelection(bookKey: String) {
-        selection = reduceLibrarySelection(
+        val next = reduceLibrarySelection(
             selection,
-            LibrarySelectionAction.LongPress(bookKey),
+            LibrarySelectionAction.LongPress(bookKey, shown.map { it.bookKey }),
         )
+        logRangeSelect("library", selection.count, next.count)
+        selection = next
     }
 
     fun bulkMessage(action: BulkAction, result: BulkActionResult): String {
@@ -970,44 +973,48 @@ fun LibraryScreen(
                 onSelectAll = {
                     if (!selectAllBusy) {
                         selectAllBusy = true
+                        val requestQuery = appliedQuery
+                        val requestFilters = filters
                         ioScope.launch {
                             var failed = false
-                            val sources = try {
-                                provider.matchingLibrarySources(appliedQuery, filters)
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                MiruLog.w("library", "Select-all sources failed", e)
-                                failed = true
-                                emptyMap()
-                            } finally {
-                                selectAllBusy = false
-                            }
-                            val keys = if (failed) {
-                                emptySet()
-                            } else if (sources.isNotEmpty()) {
-                                sources.flatMap { (url, installs) ->
-                                    if (installs.isEmpty()) {
-                                        listOf(url)
-                                    } else {
-                                        installs.map { libraryBookKey(it, url) }
-                                    }
-                                }.toSet()
-                            } else {
-                                try {
-                                    val urls = provider
-                                        .matchingLibraryUrls(appliedQuery, filters)
-                                        .toSet()
-                                    shown.filter { it.bookUrl in urls }
-                                        .map { it.bookKey }
-                                        .toSet()
+                            val keys = try {
+                                val sources = try {
+                                    provider.matchingLibrarySources(requestQuery, requestFilters)
                                 } catch (e: CancellationException) {
                                     throw e
                                 } catch (e: Exception) {
-                                    MiruLog.w("library", "Select-all failed", e)
+                                    MiruLog.w("library", "Select-all sources failed", e)
                                     failed = true
-                                    emptySet()
+                                    emptyMap()
                                 }
+                                if (failed) {
+                                    emptySet()
+                                } else if (sources.isNotEmpty()) {
+                                    sources.flatMap { (url, installs) ->
+                                        if (installs.isEmpty()) {
+                                            listOf(url)
+                                        } else {
+                                            installs.map { libraryBookKey(it, url) }
+                                        }
+                                    }.toSet()
+                                } else {
+                                    try {
+                                        val urls = provider
+                                            .matchingLibraryUrls(requestQuery, requestFilters)
+                                            .toSet()
+                                        shown.filter { it.bookUrl in urls }
+                                            .map { it.bookKey }
+                                            .toSet()
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (e: Exception) {
+                                        MiruLog.w("library", "Select-all failed", e)
+                                        failed = true
+                                        emptySet()
+                                    }
+                                }
+                            } finally {
+                                selectAllBusy = false
                             }
                             if (failed) {
                                 android.widget.Toast.makeText(
@@ -1015,7 +1022,10 @@ fun LibraryScreen(
                                     R.string.lib_select_all_failed,
                                     android.widget.Toast.LENGTH_SHORT,
                                 ).show()
-                            } else {
+                            } else if (selection.active &&
+                                appliedQuery == requestQuery &&
+                                filters == requestFilters
+                            ) {
                                 selection = reduceLibrarySelection(
                                     selection,
                                     LibrarySelectionAction.SelectAll(keys),

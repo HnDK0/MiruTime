@@ -18,6 +18,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import dev.mirutime.app.R
+import dev.mirutime.app.design.RangeSelection
+import dev.mirutime.app.design.logRangeSelect
 import dev.mirutime.app.di.MigrationGraph
 import dev.mirutime.app.features.finder.domain.CatalogSource
 import dev.mirutime.app.features.migration.domain.MigrationCandidateBook
@@ -79,6 +81,7 @@ class MassMigrationState(
     private val sourceSelection: MigrationSourceSelection = MigrationSourceSelection(),
 ) {
     var selectedUrls by mutableStateOf<Set<String>>(emptySet())
+    private var anchorUrl: String? = null
     val selectedSources: Set<String> get() = sourceSelection.selected
     var options by mutableStateOf(BookMigrationOptions())
     var searchUi by mutableStateOf<MassSearchUi>(MassSearchUi.Idle)
@@ -104,19 +107,56 @@ class MassMigrationState(
     fun resetForSource() {
         cancelSearch()
         selectedUrls = emptySet()
+        anchorUrl = null
         searchUi = MassSearchUi.Idle
         runUi = MassRunUi.Idle
         progress = emptyList()
         searchingUrls = emptySet()
     }
 
+    fun syncBooks(books: List<MigrationCandidateBook>) {
+        if (selectedUrls.isEmpty() && anchorUrl == null) return
+        val next = RangeSelection(
+            active = true,
+            selected = selectedUrls,
+            anchor = anchorUrl,
+        ).prune(books.map { it.bookUrl }.toSet())
+        if (next.selected != selectedUrls) {
+            selectedUrls = next.selected
+            anchorUrl = next.anchor
+            resetSearch()
+        } else {
+            anchorUrl = next.anchor
+        }
+    }
+
     fun toggleBook(url: String) {
-        selectedUrls = if (url in selectedUrls) selectedUrls - url else selectedUrls + url
+        val next = RangeSelection(
+            active = true,
+            selected = selectedUrls,
+            anchor = anchorUrl,
+        ).toggle(url)
+        selectedUrls = next.selected
+        anchorUrl = next.anchor
+        resetSearch()
+    }
+
+    fun longPressBook(url: String, orderedUrls: List<String>) {
+        val current = RangeSelection(
+            active = true,
+            selected = selectedUrls,
+            anchor = anchorUrl,
+        )
+        val next = current.longPress(url, orderedUrls)
+        logRangeSelect("migration", current.count, next.count)
+        selectedUrls = next.selected
+        anchorUrl = next.anchor
         resetSearch()
     }
 
     fun toggleBooks(urls: Set<String>, select: Boolean) {
         selectedUrls = if (select) selectedUrls + urls else selectedUrls - urls
+        anchorUrl = null
         resetSearch()
     }
 

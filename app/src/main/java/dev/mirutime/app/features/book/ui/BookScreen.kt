@@ -137,6 +137,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
+import dev.mirutime.app.design.RangeSelection
+import dev.mirutime.app.design.logRangeSelect
 import dev.mirutime.uikit.R as UiKitR
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.LocalMiruLocale
@@ -4081,11 +4083,18 @@ private fun ChapterBrowser(
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberPersistedEnum("book.chapter_filter.${book.bookUrl}", ChapterFilter.All)
-    var selection by remember { mutableStateOf(emptySet<Int>()) }
+    var selectionState by remember(book.bookUrl) { mutableStateOf(RangeSelection<Int>()) }
+    val selection = selectionState.selected
     val focusManager = LocalFocusManager.current
-    // Long-press starts manual selection; the Select toolbar button is a
+    // Long-press starts manual range selection; the Select toolbar button is a
     // separate range sheet for marking a from-to span read/unread.
-    val selectionActive = selection.isNotEmpty()
+    val selectionActive = selectionState.active
+    LaunchedEffect(book.chapters) {
+        selectionState = selectionState.prune(
+            validKeys = book.chapters.map { it.index }.toSet(),
+            autoDeactivateWhenEmpty = true,
+        )
+    }
     // Chapter the "Last read" button should land on; consumed once the list
     // (possibly un-filtered by clearing the search) contains it.
     var jumpTo by remember { mutableStateOf<Int?>(null) }
@@ -4385,12 +4394,22 @@ private fun ChapterBrowser(
                                 selected = chapter.index in selection,
                                 onClick = {
                                     if (selectionActive) {
-                                        selection = toggleIn(selection, chapter.index)
+                                        selectionState = selectionState.toggle(
+                                            chapter.index,
+                                            autoDeactivateWhenEmpty = true,
+                                        )
                                     } else {
                                         onOpenChapter(chapter.index)
                                     }
                                 },
-                                onLongClick = { selection = selection + chapter.index },
+                                onLongClick = {
+                                    val next = selectionState.longPress(
+                                        chapter.index,
+                                        visible.map { it.index },
+                                    )
+                                    logRangeSelect("chapters", selectionState.count, next.count)
+                                    selectionState = next
+                                },
                                 onRetryTranslation = { onRetryTranslation(chapter.index) },
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -4418,18 +4437,25 @@ private fun ChapterBrowser(
                     translatedCount = selectedTranslated,
                     downloadedCount = selectedDownloaded,
                     busy = bulkBusy,
-                    onSelectAll = { selection = selection + visible.map { it.index } },
-                    onTranslate = { onTranslate(selection) { selection = emptySet() } },
-                    onMarkRead = { read -> onMarkRead(selection, read) { selection = emptySet() } },
+                    onSelectAll = {
+                        selectionState = selectionState.selectAll(
+                            visible.map { it.index },
+                            additive = true,
+                        )
+                    },
+                    onTranslate = { onTranslate(selection) { selectionState = selectionState.close() } },
+                    onMarkRead = { read ->
+                        onMarkRead(selection, read) { selectionState = selectionState.close() }
+                    },
                     onDeleteTranslations = {
-                        onDeleteTranslations(selection) { selection = emptySet() }
+                        onDeleteTranslations(selection) { selectionState = selectionState.close() }
                     },
                     onDownloadSelected = { onDownloadSelected(selection) },
                     onDeleteDownloads = {
-                        onDeleteDownloads(selection) { selection = emptySet() }
+                        onDeleteDownloads(selection) { selectionState = selectionState.close() }
                     },
-                    onClear = { selection = emptySet() },
-                    onClose = { selection = emptySet() },
+                    onClear = { selectionState = selectionState.clear(keepActive = true) },
+                    onClose = { selectionState = selectionState.close() },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         // The stock window accessors clamp to the scroll

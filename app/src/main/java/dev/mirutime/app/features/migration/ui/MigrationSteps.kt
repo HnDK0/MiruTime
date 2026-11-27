@@ -198,6 +198,7 @@ fun MigrationBooksStep(
     onOpenOptions: () -> Unit,
     onChangeSource: () -> Unit,
     onBook: (MigrationCandidateBook) -> Unit,
+    onBookLongPress: ((MigrationCandidateBook, List<MigrationCandidateBook>) -> Unit)? = null,
     onSelectAll: (Set<String>) -> Unit,
     onClearAll: () -> Unit,
 ) {
@@ -308,6 +309,7 @@ fun MigrationBooksStep(
                     selectedUrls = selectedUrls,
                     selectionMode = true,
                     onBook = onBook,
+                    onBookLongPress = onBookLongPress?.let { handler -> { book -> handler(book, shown) } },
                 )
             }
         }

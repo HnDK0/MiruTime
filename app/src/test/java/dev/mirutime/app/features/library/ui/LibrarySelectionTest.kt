@@ -3,6 +3,7 @@ package dev.mirutime.app.features.library.ui
 import dev.mirutime.data.library.libraryBookKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -101,5 +102,62 @@ class LibrarySelectionTest {
         state = reduceLibrarySelection(state, LibrarySelectionAction.Clear)
         assertEquals(0, state.count)
         assertTrue(state.active)
+    }
+
+    @Test
+    fun `long press selects inclusive range across ordered keys downward and upward`() {
+        val order = listOf("k1", "k2", "k3", "k4", "k5")
+        val downward = reduceLibrarySelection(
+            LibrarySelection(),
+            LibrarySelectionAction.LongPress("k2", order),
+        ).let {
+            reduceLibrarySelection(it, LibrarySelectionAction.LongPress("k4", order))
+        }
+        assertTrue(downward.active)
+        assertEquals(setOf("k2", "k3", "k4"), downward.selected)
+        assertEquals("k4", downward.anchor)
+
+        val upward = reduceLibrarySelection(
+            LibrarySelection(),
+            LibrarySelectionAction.LongPress("k5", order),
+        ).let {
+            reduceLibrarySelection(it, LibrarySelectionAction.LongPress("k3", order))
+        }
+        assertEquals(setOf("k3", "k4", "k5"), upward.selected)
+        assertEquals("k3", upward.anchor)
+    }
+
+    @Test
+    fun `anchor updates across toggle selectAll clear and filtered order fallback`() {
+        val order = listOf("k1", "k2", "k3", "k4", "k5")
+        val toggled = reduceLibrarySelection(
+            LibrarySelection(),
+            LibrarySelectionAction.LongPress("k1", order),
+        ).let {
+            reduceLibrarySelection(it, LibrarySelectionAction.Toggle("k3"))
+        }
+        assertEquals("k3", toggled.anchor)
+
+        val ranged = reduceLibrarySelection(toggled, LibrarySelectionAction.LongPress("k5", order))
+        assertEquals(setOf("k1", "k3", "k4", "k5"), ranged.selected)
+        assertEquals("k5", ranged.anchor)
+
+        val clearedAnchor = reduceLibrarySelection(ranged, LibrarySelectionAction.Toggle("k5"))
+        assertNull(clearedAnchor.anchor)
+
+        val selectAllClears = reduceLibrarySelection(toggled, LibrarySelectionAction.SelectAll(order))
+        assertNull(selectAllClears.anchor)
+
+        val clearClears = reduceLibrarySelection(toggled, LibrarySelectionAction.Clear)
+        assertNull(clearClears.anchor)
+
+        val filteredFallback = reduceLibrarySelection(
+            LibrarySelection(),
+            LibrarySelectionAction.LongPress("k1", order),
+        ).let {
+            reduceLibrarySelection(it, LibrarySelectionAction.LongPress("k4", listOf("k3", "k4", "k5")))
+        }
+        assertEquals(setOf("k1", "k4"), filteredFallback.selected)
+        assertEquals("k4", filteredFallback.anchor)
     }
 }

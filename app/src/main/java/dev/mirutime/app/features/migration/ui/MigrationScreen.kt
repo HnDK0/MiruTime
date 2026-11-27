@@ -218,6 +218,9 @@ fun MigrationScreen(
     LaunchedEffect(massTargetSources) {
         massState.syncSources(massTargetSources)
     }
+    LaunchedEffect(massBooks) {
+        massState.syncBooks(massBooks)
+    }
     LaunchedEffect(massOptions) {
         massState.options = massOptions
     }
@@ -268,7 +271,7 @@ fun MigrationScreen(
     }
 
     fun startMassSearch() {
-        if (massState.selectedUrls.isEmpty()) return
+        if (massState.selectedUrls.isEmpty() || massTargetSources.isEmpty()) return
         massState.search(massBooks, massTargetSources)
         massStepKey = MigrationStep.Results.key
     }
@@ -541,6 +544,12 @@ fun MigrationScreen(
                                                 massStepKey = MigrationStep.Source.key
                                             },
                                             onBook = { massState.toggleBook(it.bookUrl) },
+                                            onBookLongPress = { book, visibleBooks ->
+                                                massState.longPressBook(
+                                                    book.bookUrl,
+                                                    visibleBooks.map { it.bookUrl },
+                                                )
+                                            },
                                             onSelectAll = { urls ->
                                                 massState.toggleBooks(urls, select = true)
                                             },

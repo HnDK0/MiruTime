@@ -36,11 +36,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.selected as semanticsSelected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
+import dev.mirutime.app.design.RangeSelection
 import dev.mirutime.app.design.components.BookCover
+import dev.mirutime.app.design.logRangeSelect
 import dev.mirutime.app.features.dashboard.data.DashboardDataProvider
 import dev.mirutime.app.features.dashboard.domain.HistoryEntry
 import dev.mirutime.uikit.AppBottomSheet
@@ -76,8 +80,9 @@ fun HistoryScreen(
     // Skeleton rows until fullHistory() returns; the empty history card must
     // not flash before the first Room read.
     var loaded by remember { mutableStateOf(false) }
-    var selectionMode by remember { mutableStateOf(false) }
-    var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var selection by remember { mutableStateOf(RangeSelection<String>()) }
+    val selectionMode = selection.active
+    val selected = selection.selected
     var request by remember { mutableStateOf<HistoryDeleteRequest?>(null) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -97,12 +102,10 @@ fun HistoryScreen(
     // Selection cannot outlive the rows it points at: clear deleted urls and
     // leave selection mode when the list is empty.
     LaunchedEffect(history) {
-        if (history.isEmpty()) {
-            selectionMode = false
-            selected = emptySet()
+        selection = if (history.isEmpty()) {
+            selection.close()
         } else {
-            val urls = history.map { it.book.bookKey }.toSet()
-            if (selected.any { it !in urls }) selected = selected.intersect(urls)
+            selection.prune(history.map { it.book.bookKey }.toSet())
         }
     }
 
@@ -140,12 +143,11 @@ fun HistoryScreen(
                     if (selectionMode) {
                         item(key = "history-selection-toolbar") {
                             HistorySelectionToolbar(
-                                onSelectAll = { selected = history.map { it.book.bookKey }.toSet() },
-                                onClear = { selected = emptySet() },
-                                onExit = {
-                                    selectionMode = false
-                                    selected = emptySet()
+                                onSelectAll = {
+                                    selection = selection.selectAll(history.map { it.book.bookKey })
                                 },
+                                onClear = { selection = selection.clear(keepActive = true) },
+                                onExit = { selection = selection.close() },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(bottom = MiruSpace.S),
@@ -169,20 +171,18 @@ fun HistoryScreen(
                                 selected = url in selected,
                                 onOpen = {
                                     if (selectionMode) {
-                                        selected = if (url in selected) {
-                                            selected - url
-                                        } else {
-                                            selected + url
-                                        }
+                                        selection = selection.toggle(url)
                                     } else {
                                         onBookOpen(url)
                                     }
                                 },
                                 onLongPress = {
-                                    if (!selectionMode) {
-                                        selectionMode = true
-                                        selected = selected + url
-                                    }
+                                    val next = selection.longPress(
+                                        url,
+                                        history.map { it.book.bookKey },
+                                    )
+                                    logRangeSelect("history", selection.count, next.count)
+                                    selection = next
                                 },
                             )
                         }
@@ -245,8 +245,7 @@ fun HistoryScreen(
                                 provider.deleteHistory(selected.toList())
                         }
                         request = null
-                        selectionMode = false
-                        selected = emptySet()
+                        selection = selection.close()
                         reload()
                     } finally {
                         busy = false
@@ -390,6 +389,7 @@ fun HistoryRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(MiruRadius.Inner))
+            .semantics(mergeDescendants = true) { if (selectionMode) semanticsSelected = selected }
             .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
             .defaultMinSize(minHeight = 72.dp)
             .padding(start = CoverInset, top = 8.dp, end = 12.dp, bottom = 8.dp),
@@ -398,7 +398,7 @@ fun HistoryRow(
         if (selectionMode) {
             Checkbox(
                 checked = selected,
-                onCheckedChange = { onOpen() },
+                onCheckedChange = null,
             )
             Spacer(modifier = Modifier.width(MiruSpace.Xs))
         }

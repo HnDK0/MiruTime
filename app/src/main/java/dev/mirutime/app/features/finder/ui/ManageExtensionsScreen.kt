@@ -73,6 +73,7 @@ import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.selected as semanticsSelected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -102,7 +103,9 @@ import dev.mirutime.uikit.miruCardBorder
 import dev.mirutime.uikit.miruCardElevation
 import dev.mirutime.uikit.miruCardSurface
 import dev.mirutime.app.di.InstallReport
+import dev.mirutime.app.design.RangeSelection
 import dev.mirutime.app.design.components.PluginAvatar
+import dev.mirutime.app.design.logRangeSelect
 import dev.mirutime.app.design.rememberPersistedState
 import dev.mirutime.app.features.finder.data.FinderDataProvider
 import dev.mirutime.app.features.finder.data.importPluginFile
@@ -168,7 +171,9 @@ fun ManageExtensionsScreen(
     var settingsFor by remember { mutableStateOf<PluginExtension?>(null) }
     var translationFor by remember { mutableStateOf<PluginExtension?>(null) }
     var pendingUninstall by remember { mutableStateOf<PluginExtension?>(null) }
-    var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var selection by remember { mutableStateOf(RangeSelection<String>()) }
+    val selected = selection.selected
+    val selectionMode = selection.active
     var confirmBulk by remember { mutableStateOf(false) }
     var repoText by remember { mutableStateOf(provider.repoUrl()) }
     var repoSheetOpen by remember { mutableStateOf(false) }
@@ -216,7 +221,14 @@ fun ManageExtensionsScreen(
     val repositoryFiltered = filters.query.isNotBlank() ||
         filters.types.isNotEmpty() ||
         filters.languages.isNotEmpty()
-    val selectionMode = selected.isNotEmpty()
+    LaunchedEffect(plugins, installed) {
+        if (plugins != null) {
+            selection = selection.prune(
+                validKeys = installed.map { it.id }.toSet(),
+                autoDeactivateWhenEmpty = true,
+            )
+        }
+    }
 
     fun toast(message: String) =
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
@@ -444,7 +456,7 @@ fun ManageExtensionsScreen(
                             Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.Xs)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     IconButton(
-                                        onClick = { selected = emptySet() },
+                                        onClick = { selection = selection.close() },
                                         modifier = Modifier.size(MiruSize.Touch),
                                     ) {
                                         Icon(
@@ -460,7 +472,12 @@ fun ManageExtensionsScreen(
                                     )
                                 }
                                 MiruButton(
-                                    onClick = { selected = installedShown.map { it.id }.toSet() },
+                                    onClick = {
+                                        selection = selection.selectAll(
+                                            installedShown.map { it.id },
+                                            additive = true,
+                                        )
+                                    },
                                     style = MiruButtonStyle.Secondary,
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -487,7 +504,7 @@ fun ManageExtensionsScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
                                     IconButton(
-                                        onClick = { selected = emptySet() },
+                                        onClick = { selection = selection.close() },
                                         modifier = Modifier.size(MiruSize.Touch),
                                     ) {
                                         Icon(
@@ -510,7 +527,12 @@ fun ManageExtensionsScreen(
                                     ) {
                                         MiruCompactButton(
                                             label = stringResource(R.string.finder_select_all),
-                                            onClick = { selected = installedShown.map { it.id }.toSet() },
+                                            onClick = {
+                                                selection = selection.selectAll(
+                                                    installedShown.map { it.id },
+                                                    additive = true,
+                                                )
+                                            },
                                         )
                                     }
                                     Box(
@@ -630,13 +652,22 @@ fun ManageExtensionsScreen(
                                         selected = plugin.id in selected,
                                         onClick = {
                                             when {
-                                                selectionMode -> selected =
-                                                    if (plugin.id in selected) selected - plugin.id else selected + plugin.id
+                                                selectionMode -> selection = selection.toggle(
+                                                    plugin.id,
+                                                    autoDeactivateWhenEmpty = true,
+                                                )
                                                 plugin.error != null -> healthFor = plugin
                                                 else -> actionsFor = plugin
                                             }
                                         },
-                                        onLongClick = { selected = selected + plugin.id },
+                                        onLongClick = {
+                                            val next = selection.longPress(
+                                                plugin.id,
+                                                installedShown.map { it.id },
+                                            )
+                                            logRangeSelect("extensions", selection.count, next.count)
+                                            selection = next
+                                        },
                                         onToggle = { enabled ->
                                             scope.launch {
                                                 provider.setEnabled(plugin.id, enabled)
@@ -934,9 +965,9 @@ fun ManageExtensionsScreen(
             doneDanger = true,
             closeLabel = stringResource(R.string.lib_cancel),
             onDone = {
-                val ids = selected
+                val ids = selection.selected
                 confirmBulk = false
-                selected = emptySet()
+                selection = selection.close()
                 busyIds = busyIds + ids
                 scope.launch {
                     try {
@@ -1010,7 +1041,9 @@ private fun InstalledRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .semantics(mergeDescendants = true) { if (selectionMode) semanticsSelected = selected }
             .combinedClickable(
+                enabled = !busy,
                 role = Role.Button,
                 onClick = onClick,
                 onLongClick = onLongClick,
@@ -1073,7 +1106,7 @@ private fun InstalledRow(
                             .padding(end = MiruSpace.M)
                             .size(22.dp),
                     )
-                    selectionMode -> Checkbox(checked = selected, onCheckedChange = { onClick() })
+                    selectionMode -> Checkbox(checked = selected, onCheckedChange = null)
                     else -> {
                         if (!largeText && plugin.updateAvailable) {
                             Box(

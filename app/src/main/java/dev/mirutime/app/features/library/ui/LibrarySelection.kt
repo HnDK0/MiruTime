@@ -1,10 +1,13 @@
 package dev.mirutime.app.features.library.ui
 
+import dev.mirutime.app.design.RangeSelection
+
 // Pure library multi-select state. Identity is the opaque BookKey
 // (installId + URL): two installs may expose different works under one URL.
 data class LibrarySelection(
     val active: Boolean = false,
     val selected: Set<String> = emptySet(),
+    val anchor: String? = null,
 ) {
     val count: Int get() = selected.size
     val isEmpty: Boolean get() = selected.isEmpty()
@@ -13,7 +16,10 @@ data class LibrarySelection(
 }
 
 sealed interface LibrarySelectionAction {
-    data class LongPress(val bookKey: String) : LibrarySelectionAction
+    data class LongPress(
+        val bookKey: String,
+        val orderedKeys: List<String> = emptyList(),
+    ) : LibrarySelectionAction
     data class Toggle(val bookKey: String) : LibrarySelectionAction
     data class SelectAll(val bookKeys: Collection<String>) : LibrarySelectionAction
     data object Clear : LibrarySelectionAction
@@ -24,28 +30,19 @@ fun reduceLibrarySelection(
     state: LibrarySelection,
     action: LibrarySelectionAction,
 ): LibrarySelection = when (action) {
-    is LibrarySelectionAction.LongPress -> {
-        val key = action.bookKey
-        if (state.active) {
-            state.toggled(key)
-        } else {
-            LibrarySelection(active = true, selected = setOf(key))
-        }
-    }
+    is LibrarySelectionAction.LongPress ->
+        state.toRangeSelection().longPress(action.bookKey, action.orderedKeys).toLibrarySelection()
     is LibrarySelectionAction.Toggle ->
-        if (state.active) state.toggled(action.bookKey) else state
+        state.toRangeSelection().toggle(action.bookKey).toLibrarySelection()
     is LibrarySelectionAction.SelectAll ->
-        if (state.active) {
-            state.copy(
-                selected = action.bookKeys.filter { it.isNotBlank() }.toSet(),
-            )
-        } else {
-            state
-        }
+        state.toRangeSelection().selectAll(action.bookKeys.filter { it.isNotBlank() }).toLibrarySelection()
     LibrarySelectionAction.Clear ->
-        if (state.active) state.copy(selected = emptySet()) else state
+        state.toRangeSelection().clear(keepActive = true).toLibrarySelection()
     LibrarySelectionAction.Close -> LibrarySelection()
 }
 
-private fun LibrarySelection.toggled(key: String): LibrarySelection =
-    copy(selected = if (key in selected) selected - key else selected + key)
+private fun LibrarySelection.toRangeSelection(): RangeSelection<String> =
+    RangeSelection(active = active, selected = selected, anchor = anchor)
+
+private fun RangeSelection<String>.toLibrarySelection(): LibrarySelection =
+    LibrarySelection(active = active, selected = selected, anchor = anchor)

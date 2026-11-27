@@ -184,6 +184,7 @@ fun MigrationLibraryCards(
     selectedUrls: Set<String>,
     selectionMode: Boolean,
     onBook: (MigrationCandidateBook) -> Unit,
+    onBookLongPress: ((MigrationCandidateBook) -> Unit)? = null,
 ) {
     // Reading the settings here makes both tabs re-layout the moment the
     // library filter sheet (or Settings -> Library) changes them.
@@ -194,6 +195,7 @@ fun MigrationLibraryCards(
         gridColumns = columns,
         cardStyle = AppSettings.cardStyle,
     )
+    val longPress = onBookLongPress ?: onBook
     if (layout.rows) {
         Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.CardGap)) {
             books.forEach { book ->
@@ -203,6 +205,7 @@ fun MigrationLibraryCards(
                     selected = selectionMode && book.bookUrl in selectedUrls,
                     selectionMode = selectionMode,
                     onBook = onBook,
+                    onLongPress = longPress,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -221,6 +224,7 @@ fun MigrationLibraryCards(
                             selected = selectionMode && book.bookUrl in selectedUrls,
                             selectionMode = selectionMode,
                             onBook = onBook,
+                            onLongPress = longPress,
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -243,6 +247,7 @@ private fun MigrationBookCard(
     selected: Boolean,
     selectionMode: Boolean,
     onBook: (MigrationCandidateBook) -> Unit,
+    onLongPress: (MigrationCandidateBook) -> Unit = onBook,
     modifier: Modifier,
 ) {
     LibraryCard(
@@ -251,7 +256,7 @@ private fun MigrationBookCard(
         selected = selected,
         selectionMode = selectionMode,
         onOpen = { onBook(book) },
-        onLongPress = { onBook(book) },
+        onLongPress = { onLongPress(book) },
         modifier = modifier.fillMaxWidth(),
     )
 }
