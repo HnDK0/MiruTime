@@ -362,7 +362,7 @@ fun ManageExtensionsScreen(
                         start = MiruSize.ScreenPad,
                         end = MiruSize.ScreenPad,
                         top = MiruSpace.Xs,
-                        bottom = MiruSpace.S,
+                        bottom = MiruSpace.Xxs,
                     ),
             ) {
                 MiruSearchBar(
@@ -390,7 +390,7 @@ fun ManageExtensionsScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(MiruSpace.M),
+                verticalArrangement = Arrangement.spacedBy(MiruSize.Gap),
                 contentPadding = PaddingValues(
                     start = MiruSize.ScreenPad,
                     end = MiruSize.ScreenPad,

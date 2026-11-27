@@ -139,7 +139,7 @@ fun UpdatesScreen(
         contentPadding = PaddingValues(
             start = MiruSize.ScreenPad,
             end = MiruSize.ScreenPad,
-            top = contentPadding.calculateTopPadding() + MiruSpace.S,
+            top = contentPadding.calculateTopPadding() + MiruSpace.Xs,
             bottom = contentPadding.calculateBottomPadding() + BottomClearance,
         ),
     ) {
@@ -150,7 +150,7 @@ fun UpdatesScreen(
                 pending = updates.size,
                 onCheckNow = ::runCheck,
                 onOpenSettings = onOpenSettings,
-                modifier = Modifier.padding(bottom = MiruSpace.M),
+                modifier = Modifier.padding(bottom = MiruSize.Gap),
             )
         }
         failure?.let { report ->
@@ -162,7 +162,7 @@ fun UpdatesScreen(
                     detailText = report.detailText,
                     reportText = report.reportText,
                     onRetry = ::runCheck,
-                    modifier = Modifier.padding(bottom = MiruSpace.M),
+                    modifier = Modifier.padding(bottom = MiruSize.Gap),
                 )
             }
         }
@@ -180,7 +180,7 @@ fun UpdatesScreen(
                 UpdateRowSkeleton(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 8.dp),
+                        .padding(bottom = 6.dp),
                 )
             }
         } else {
@@ -189,7 +189,7 @@ fun UpdatesScreen(
                     update = update,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 8.dp),
+                        .padding(bottom = 6.dp),
                     onOpen = { onBookOpen(update.book.bookKey) },
                 )
             }
@@ -454,8 +454,7 @@ fun UpdateRow(
                 coverUrl = update.book.coverUrl,
                 modifier = Modifier
                     .width(76.dp)
-                    .aspectRatio(1f / 1.45f)
-                    .padding(CoverInset),
+                    .aspectRatio(1f / 1.45f),
                 corner = MiruRadius.Cover,
             )
             Column(modifier = Modifier.weight(1f)) {

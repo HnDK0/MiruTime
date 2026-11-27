@@ -170,7 +170,7 @@ internal val LocalImeBottom = compositionLocalOf { 0.dp }
 // What the shell's bottom bar spends above the tab pill: the fade strip plus
 // the plate's own top padding. One owner here, used by the gradient/plate
 // below and by screens that float their own bar above the pill.
-internal val TabBarFadeStrip = 16.dp
+internal val TabBarFadeStrip = 12.dp
 internal val TabBarPlateTopInset = 4.dp
 internal val TabBarDecoration = TabBarFadeStrip + TabBarPlateTopInset
 
@@ -1223,10 +1223,10 @@ private fun MiruTabBar(
             // Floating plate: 8dp above the gesture bar, with the nav inset
             // inside the surface. The root strip paints only the inset.
             .padding(
-                start = 10.dp,
-                end = 10.dp,
+                start = MiruSize.ScreenPad,
+                end = MiruSize.ScreenPad,
                 top = TabBarPlateTopInset,
-                bottom = 8.dp,
+                bottom = 6.dp,
             )
             .windowInsetsPadding(WindowInsets.navigationBars),
         shape = RoundedCornerShape(MiruRadius.Plate),

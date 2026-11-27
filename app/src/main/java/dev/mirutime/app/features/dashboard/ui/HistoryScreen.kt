@@ -122,9 +122,9 @@ fun HistoryScreen(
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
-                top = contentPadding.calculateTopPadding() + 8.dp,
+                start = MiruSize.ScreenPad,
+                end = MiruSize.ScreenPad,
+                top = contentPadding.calculateTopPadding() + MiruSpace.Xs,
                 // The selection plate floats over the list: reserve its height so
                 // the last row stays reachable while selecting.
                 bottom = contentPadding.calculateBottomPadding() +
@@ -144,7 +144,7 @@ fun HistoryScreen(
                     HistoryRowSkeleton(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 8.dp),
+                            .padding(bottom = 6.dp),
                     )
                 }
 
@@ -165,7 +165,7 @@ fun HistoryScreen(
                         MiruCard(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 8.dp),
+                                .padding(bottom = 6.dp),
                             contentPadding = PaddingValues(0.dp),
                         ) {
                             HistoryRow(
@@ -404,8 +404,7 @@ fun HistoryRow(
             coverUrl = entry.book.coverUrl,
             modifier = Modifier
                 .width(48.dp)
-                .height(72.dp)
-                .padding(CoverInset),
+                .height(72.dp),
             corner = MiruRadius.Cover,
         )
         Column(

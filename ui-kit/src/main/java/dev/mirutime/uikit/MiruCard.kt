@@ -123,7 +123,7 @@ fun MiruListCard(
                 modifier = Modifier
                     .width(96.dp)
                     .aspectRatio(1f / 1.45f)
-                    .clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp)),
+                    .clip(RoundedCornerShape(topEnd = MiruRadius.Cover, bottomEnd = MiruRadius.Cover)),
                 content = thumb,
             )
             Column(

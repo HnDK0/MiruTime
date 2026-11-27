@@ -7,14 +7,14 @@ import org.junit.Test
 class CardTokensTest {
     @Test
     fun `card geometry is the approved compact set`() {
-        assertEquals(16.dp, MiruRadius.Card)
-        assertEquals(12.dp, MiruRadius.Control)
-        assertEquals(12.dp, MiruRadius.Cover)
-        assertEquals(12.dp, MiruRadius.Chip)
-        assertEquals(24.dp, MiruRadius.Sheet)
-        assertEquals(6.dp, MiruRadius.Split)
-        assertEquals(4.dp, CoverInset)
-        assertEquals(4.dp, MiruSpace.CardGap)
+        assertEquals(8.dp, MiruRadius.Card)
+        assertEquals(6.dp, MiruRadius.Control)
+        assertEquals(6.dp, MiruRadius.Cover)
+        assertEquals(8.dp, MiruRadius.Chip)
+        assertEquals(8.dp, MiruRadius.Sheet)
+        assertEquals(4.dp, MiruRadius.Split)
+        assertEquals(3.dp, CoverInset)
+        assertEquals(3.dp, MiruSpace.CardGap)
     }
 
     @Test

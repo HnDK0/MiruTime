@@ -666,7 +666,7 @@ fun LibraryScreen(
             }
 
             item {
-                Spacer(modifier = Modifier.height(MiruSpace.S))
+                Spacer(modifier = Modifier.height(MiruSpace.Xxs))
             }
             item {
                 ShelfTabsRow(
@@ -683,9 +683,9 @@ fun LibraryScreen(
             }
 
             item {
-                // A full step of air below the shelf plate: the filter chips are
-                // their own group, not a continuation of the tab track.
-                Box(modifier = Modifier.padding(top = MiruSpace.S, bottom = MiruSpace.S)) {
+                // A tight gap below the shelf plate: chip rows already carry
+                // their own touch-target padding around the visual chip faces.
+                Box(modifier = Modifier.padding(top = MiruSpace.Xxs, bottom = MiruSpace.Xxs)) {
                     MiniFilters(
                         sources = selSources,
                         genres = genres,
@@ -725,7 +725,7 @@ fun LibraryScreen(
                 if (lastRead != null && (selShelves.isEmpty() || "reading" in selShelves)) {
                     item {
                         lastRead?.let { book ->
-                            Box(modifier = Modifier.padding(bottom = MiruSpace.Xs)) {
+                            Box(modifier = Modifier.padding(top = MiruSpace.Xxs)) {
                                 ResumeCard(
                                     book = fixCover(book),
                                     onOpen = { onBookOpen(book.bookKey) },
@@ -785,9 +785,7 @@ fun LibraryScreen(
                         // Counter row: hug-content mini-pill + compact Import pill on
                         // the same 32dp visual height grid.
                         BoxWithConstraints(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = MiruSpace.Xs),
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
                             val maxCountWidth = maxWidth * 0.45f
                             Row(

@@ -217,7 +217,7 @@ internal fun ReaderChrome(
                     onDragChange = onAutoScrollSpeedDragChange,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = MiruSpace.M),
+                        .padding(horizontal = MiruSize.ScreenPad),
                 )
             }
         }
@@ -227,7 +227,7 @@ internal fun ReaderChrome(
                 .zIndex(1f)
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(horizontal = MiruSize.ScreenPad, vertical = 6.dp)
                 .fillMaxWidth(),
             shape = RoundedCornerShape(MiruRadius.Sheet),
             color = miruCardSurface().let { if (it.alpha < 1f) it.copy(alpha = 0.96f) else it },

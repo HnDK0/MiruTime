@@ -102,7 +102,7 @@ fun MiruPlateHeader(
     Surface(
         modifier = modifier
             .windowInsetsPadding(WindowInsets.statusBars)
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .padding(horizontal = MiruSize.ScreenPad, vertical = 4.dp),
         shape = RoundedCornerShape(MiruRadius.Plate),
         // The plate floats over scrolling content: 0.96 keeps the glass tint
         // without letting the list ghost through the title.

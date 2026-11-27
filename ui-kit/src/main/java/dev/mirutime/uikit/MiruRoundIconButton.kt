@@ -16,7 +16,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 
 // THE single place for round icon buttons: 40dp visible plate inside a 48dp
 // hit box (visual and touch sizes are separate by rule). Shape is a moderate
-// 12dp radius — full ovals are banned app-wide. The disc is the plate with
+// 6dp radius — full ovals are banned app-wide. The disc is the plate with
 // onSurface ink in every theme. A filter count rides as a badge; the count is
 // exposed as the button's state description, not as a stray text node.
 @Composable

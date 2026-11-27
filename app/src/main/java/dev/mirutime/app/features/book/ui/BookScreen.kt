@@ -1578,11 +1578,11 @@ internal fun BookScreen(
     LazyColumn(
         state = if (current == null) loadingListState else pageListState,
         modifier = Modifier.fillMaxSize(),
-        // The book page keeps a denser 12dp rhythm so Chapters stays visible above the fold.
-        verticalArrangement = Arrangement.spacedBy(MiruSpace.M),
+        // The book page keeps a compact 8dp edge and gap rhythm so Chapters stays above the fold.
+        verticalArrangement = Arrangement.spacedBy(MiruSize.Gap),
         contentPadding = PaddingValues(
-            start = MiruSpace.M,
-            end = MiruSpace.M,
+            start = MiruSize.ScreenPad,
+            end = MiruSize.ScreenPad,
             top = contentPadding.calculateTopPadding() + MiruSpace.Xs,
             bottom = contentPadding.calculateBottomPadding() + BottomClearance +
                 if (searchFocused) imeBottom else 0.dp,

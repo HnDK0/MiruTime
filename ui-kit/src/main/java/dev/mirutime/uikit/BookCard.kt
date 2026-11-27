@@ -161,7 +161,7 @@ fun MiruBookCard(
                 contentDescription = progressDescription,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .padding(start = CoverInset, end = CoverInset, top = CoverInset),
             )
         }
         if (spec.statusAbove && !source.isNullOrBlank()) {
@@ -172,7 +172,7 @@ fun MiruBookCard(
                 newChapters = newChapters,
                 progressDescription = progressDescription,
                 splitWidth = splitWidth,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.padding(start = CoverInset, end = CoverInset, top = CoverInset),
             )
         }
         CoverBox(
@@ -194,6 +194,7 @@ fun MiruBookCard(
             bottomNewChapters = if (spec.progressFullWidth) newChapters else 0,
             cover = cover,
         )
+        val hasBottomStatus = !spec.progressFullWidth && !spec.statusAbove && !source.isNullOrBlank()
         if (spec.titleOnCover) {
             // The cover carries the only title; nothing below it.
         } else {
@@ -201,7 +202,11 @@ fun MiruBookCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(titleSlot)
-                    .padding(horizontal = 8.dp),
+                    .padding(
+                        start = 6.dp,
+                        end = 6.dp,
+                        bottom = if (!hasBottomStatus && footer == null) CoverInset else 0.dp,
+                    ),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 Text(
@@ -213,7 +218,8 @@ fun MiruBookCard(
                 )
             }
         }
-        if (!spec.progressFullWidth && !spec.statusAbove && !source.isNullOrBlank()) {
+        if (hasBottomStatus) {
+            val statusHorizontal = if (spec.titleOnCover) CoverInset else 6.dp
             StatusRow(
                 source = source,
                 read = readChapters,
@@ -221,7 +227,11 @@ fun MiruBookCard(
                 newChapters = newChapters,
                 progressDescription = progressDescription,
                 splitWidth = splitWidth,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.padding(
+                    start = statusHorizontal,
+                    end = statusHorizontal,
+                    bottom = 4.dp,
+                ),
             )
         }
         footer?.invoke()
@@ -278,7 +288,7 @@ private fun ListCard(
                 onClick = onClick,
                 onLongClick = onLongClick,
             )
-            .padding(8.dp),
+            .padding(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(

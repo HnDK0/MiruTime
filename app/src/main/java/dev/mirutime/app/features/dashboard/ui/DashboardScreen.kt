@@ -197,7 +197,7 @@ fun DashboardScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(MiruSpace.M),
+        verticalArrangement = Arrangement.spacedBy(MiruSize.Gap),
         contentPadding = PaddingValues(
             start = MiruSize.ScreenPad,
             end = MiruSize.ScreenPad,
@@ -207,10 +207,7 @@ fun DashboardScreen(
     ) {
         item(key = "today") {
             MiruCard(
-                contentPadding = PaddingValues(
-                    horizontal = MiruSpace.L,
-                    vertical = MiruSpace.M,
-                ),
+                contentPadding = PaddingValues(MiruSpace.M),
             ) {
                 TimeStatsPanel(stats = state.stats!!)
             }
@@ -232,10 +229,7 @@ fun DashboardScreen(
         item(key = "history") {
             if (state.history.isEmpty()) {
                 MiruCard(
-                    contentPadding = PaddingValues(
-                        horizontal = MiruSpace.L,
-                        vertical = MiruSpace.M,
-                    ),
+                    contentPadding = PaddingValues(MiruSpace.M),
                 ) {
                     Text(
                         text = stringResource(R.string.dash_history),
@@ -250,7 +244,7 @@ fun DashboardScreen(
                     )
                 }
             } else {
-                Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.Xs)) {
                     SectionHeader(
                         title = stringResource(R.string.dash_history),
                         compact = true,
@@ -269,7 +263,7 @@ fun DashboardScreen(
             if (state.updates.isEmpty()) {
                 MiruCard(
                     contentPadding = PaddingValues(
-                        horizontal = MiruSpace.L,
+                        horizontal = MiruSpace.M,
                         vertical = MiruSpace.S,
                     ),
                 ) {
@@ -303,7 +297,7 @@ fun DashboardScreen(
                     }
                 }
             } else {
-                Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.Xs)) {
                     SectionHeader(
                         title = stringResource(R.string.dash_updates),
                         compact = true,
