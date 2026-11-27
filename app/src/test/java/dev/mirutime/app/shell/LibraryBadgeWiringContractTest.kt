@@ -29,9 +29,22 @@ class LibraryBadgeWiringContractTest {
     fun `the library route drops caches without a revision bump`() {
         val shell = source("src/main/java/dev/mirutime/app/shell/MiruShell.kt")
 
-        assertTrue(shell.contains("val invalidateCachedBadges"))
-        assertTrue(shell.contains("onLibraryChanged = invalidateCachedBadges"))
+        assertTrue(shell.contains("val invalidateCatalogSessions"))
+        assertTrue(shell.contains("onLibraryChanged = invalidateCatalogSessions"))
         assertTrue(shell.contains("catalogSessions.invalidateAll()"))
+    }
+
+    @Test
+    fun `a restored search snapshot rereads membership before it is shown`() {
+        val search = source("src/main/java/dev/mirutime/app/features/finder/ui/GlobalSearchScreen.kt")
+
+        // The re-read must sit in the seeding branch itself: a separate effect
+        // loses the race with `results = resume.results` and replays stale flags.
+        val seeding = search.indexOf("val resume = resumeGlobalSearch(cached, targets)")
+        val badges = search.indexOf("provider.withMembership(books)")
+        assertTrue(seeding >= 0 && badges > seeding)
+        assertTrue(search.contains("event=search-badges"))
+        assertFalse(search.contains("LaunchedEffect(cached)"))
     }
 
     @Test

@@ -83,6 +83,7 @@ import dev.mirutime.app.features.translation.data.TitleTranslationJob
 import dev.mirutime.app.features.translation.data.metadataConfigFor
 import dev.mirutime.app.features.translation.data.translationPresentationFor
 import dev.mirutime.app.features.library.domain.ContentType
+import dev.mirutime.core.log.MiruLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -204,7 +205,23 @@ fun GlobalSearchScreen(
         } else {
             // Cache hit (e.g. back from a book, possibly mid-fan-out): keep
             // every valid answer and ask only the sources still missing.
-            results = resume.results
+            // A badge is DB truth, not snapshot data: one batch read corrects
+            // the replayed cards, so a write made on another screen (book page,
+            // library delete) is never shown stale. Scroll and results stay.
+            val books = resume.results.flatMap { it.books }
+            val badges = if (books.isEmpty()) {
+                emptyMap()
+            } else {
+                provider.withMembership(books).associateBy { it.bookKey }
+            }
+            results = resume.results.map { result ->
+                result.copy(books = result.books.map { badges[it.bookKey] ?: it })
+            }
+            MiruLog.d(
+                "finder",
+                "event=search-badges books=${books.size} " +
+                    "inLibrary=${badges.values.count { it.inLibrary }}",
+            )
             total = resume.total
             done = resume.done
             listState.scrollToItem(cached.scrollIndex, cached.scrollOffset)
