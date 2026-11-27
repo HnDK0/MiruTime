@@ -7,6 +7,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -18,8 +22,8 @@ import dev.mirutime.uikit.MiruSize
 
 // One source avatar for every list that names a plugin (Extensions, Browse,
 // the filter sheets, Migration): the declared icon over its monogram. The
-// letter sits underneath, so a missing, loading or broken image never leaves
-// a blank tile and no screen needs its own fallback.
+// letter is only a fallback and is dropped the moment the icon renders — a
+// transparent PNG must not show it through its own holes.
 @Composable
 fun PluginAvatar(
     name: String,
@@ -28,6 +32,7 @@ fun PluginAvatar(
 ) {
     val extra = LocalMiruExtraColors.current
     val shape = RoundedCornerShape(MiruRadius.Control)
+    var loaded by remember(iconUrl) { mutableStateOf(false) }
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
@@ -35,17 +40,21 @@ fun PluginAvatar(
             .clip(shape)
             .background(extra.accent.copy(alpha = 0.14f)),
     ) {
-        Text(
-            text = name.firstOrNull()?.uppercase() ?: "?",
-            style = MaterialTheme.typography.titleMedium,
-            color = extra.accent,
-        )
+        if (!loaded) {
+            Text(
+                text = name.firstOrNull()?.uppercase() ?: "?",
+                style = MaterialTheme.typography.titleMedium,
+                color = extra.accent,
+            )
+        }
         if (!iconUrl.isNullOrBlank()) {
             AsyncImage(
                 model = iconUrl,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.matchParentSize().clip(shape),
+                onSuccess = { loaded = true },
+                onError = { loaded = false },
             )
         }
     }

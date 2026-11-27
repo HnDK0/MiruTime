@@ -101,6 +101,9 @@ fun BookCover(
     var attempt by remember(coverUrl, reloadKey) { mutableIntStateOf(0) }
     var failed by remember(coverUrl, reloadKey) { mutableStateOf(false) }
     var repaired by remember(coverUrl, reloadKey) { mutableStateOf(false) }
+    // The initial/icon is only a fallback: keep it while nothing renders, drop
+    // it once the art succeeds so a transparent image never shows it through.
+    var loaded by remember(coverUrl, reloadKey) { mutableStateOf(false) }
     var autoRetries by remember(coverUrl, reloadKey) { mutableIntStateOf(0) }
     var retryJob by remember(coverUrl, reloadKey) { mutableStateOf<Job?>(null) }
     Surface(
@@ -110,7 +113,7 @@ fun BookCover(
         shadowElevation = 0.dp,
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            if (showInitial) {
+            if (showInitial && !loaded) {
                 Text(
                     text = title.firstOrNull()?.uppercase() ?: "?",
                     style = MaterialTheme.typography.displaySmall,
@@ -118,7 +121,7 @@ fun BookCover(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.align(Alignment.Center),
                 )
-            } else if (placeholderIcon != null) {
+            } else if (placeholderIcon != null && !loaded) {
                 Icon(
                     imageVector = placeholderIcon,
                     contentDescription = null,
@@ -162,6 +165,7 @@ fun BookCover(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                         onError = {
+                            loaded = false
                             val remote = displayedUrl?.startsWith("http") == true
                             if (remote && autoRetries < AUTO_RETRY_ATTEMPTS) {
                                 // Transient failures (timeout, CDN hiccup) are
@@ -185,7 +189,7 @@ fun BookCover(
                                 }
                             }
                         },
-                        onSuccess = { failed = false },
+                        onSuccess = { failed = false; loaded = true },
                     )
                 }
                 if (failed && onRetry != null) {

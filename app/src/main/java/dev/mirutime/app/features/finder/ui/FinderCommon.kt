@@ -38,13 +38,6 @@ internal fun typeLabel(type: ContentType): String = stringResource(
     },
 )
 
-// Plugin tile: the shared avatar (declared icon over its monogram). Kept as a
-// named helper because the Extensions rows spell the no-icon case out.
-@Composable
-internal fun MonogramTile(name: String) {
-    PluginAvatar(name = name, iconUrl = null)
-}
-
 @Composable
 internal fun sourceDisplayName(source: CatalogSource): String = when {
     source.id == LocalSources.Books -> stringResource(R.string.finder_local_books_title)

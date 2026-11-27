@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import dev.mirutime.app.R
 import dev.mirutime.app.design.components.CatalogTile
+import dev.mirutime.app.design.components.PluginAvatar
 import dev.mirutime.app.design.components.SelectionBadge
 import dev.mirutime.app.design.components.BookCover
 import dev.mirutime.app.design.components.toMiruBadge
@@ -313,19 +314,7 @@ fun MigrationSourceRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(MiruSpace.M),
     ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(MiruSize.Control)
-                .clip(RoundedCornerShape(MiruRadius.Inner))
-                .background(extra.accent.copy(alpha = 0.14f)),
-        ) {
-            Text(
-                text = source.name.firstOrNull()?.uppercase() ?: "?",
-                style = MaterialTheme.typography.titleMedium,
-                color = extra.accent,
-            )
-        }
+        PluginAvatar(name = source.name, iconUrl = source.iconUrl)
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = source.name,

@@ -20,7 +20,7 @@ class CoverReactivityContractTest {
     fun `cover reload key resets every remembered load state`() {
         val cover = source("src/main/java/dev/mirutime/app/design/components/BookCover.kt")
         assertTrue(cover.contains("reloadKey: Any? = null"))
-        for (field in listOf("displayedUrl", "attempt", "failed", "repaired")) {
+        for (field in listOf("displayedUrl", "attempt", "failed", "repaired", "loaded")) {
             assertTrue(
                 "$field must be keyed on reloadKey",
                 cover.contains("var $field by remember(coverUrl, reloadKey)"),
@@ -33,7 +33,22 @@ class CoverReactivityContractTest {
         val cover = source("src/main/java/dev/mirutime/app/design/components/BookCover.kt")
         assertTrue(cover.contains("AUTO_RETRY_ATTEMPTS = 2"))
         assertTrue(cover.contains("remote && autoRetries < AUTO_RETRY_ATTEMPTS"))
-        assertTrue(cover.contains("onSuccess = { failed = false }"))
+        assertTrue(cover.contains("onSuccess = { failed = false; loaded = true }"))
+    }
+
+    @Test
+    fun `fallback letter hides once the image renders`() {
+        // A transparent PNG used to show the monogram through its own holes:
+        // the letter must be fallback-only, not a permanent underlay.
+        val avatar = source("src/main/java/dev/mirutime/app/design/components/PluginAvatar.kt")
+        assertTrue(avatar.contains("var loaded by remember(iconUrl)"))
+        assertTrue(avatar.contains("if (!loaded) {"))
+        assertTrue(avatar.contains("onSuccess = { loaded = true }"))
+        assertTrue(avatar.contains("onError = { loaded = false }"))
+
+        val cover = source("src/main/java/dev/mirutime/app/design/components/BookCover.kt")
+        assertTrue(cover.contains("if (showInitial && !loaded)"))
+        assertTrue(cover.contains("else if (placeholderIcon != null && !loaded)"))
     }
 
     @Test
