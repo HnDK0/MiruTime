@@ -85,9 +85,8 @@ val MiruTypography = Typography(
 object MiruCardType {
     val Title = style(FontWeight.SemiBold, 13, 18).copy(
         fontSize = 13.5.sp,
-        // Greedy line breaking: the first line is as full as possible; hyphen
-        // dictionaries handle Latin/Cyrillic. Heading/Paragraph can leave a
-        // short first line, which is exactly what the user rejected.
+        // Greedy line breaking: MiruCardTitleText handles cross-script syllable
+        // hyphenation and compound wrapping so line 1 stays filled on API 26+.
         lineBreak = LineBreak.Simple,
         hyphens = Hyphens.Auto,
     )

@@ -53,6 +53,7 @@ import dev.mirutime.app.features.dashboard.data.DashboardDataProvider
 import dev.mirutime.app.features.dashboard.domain.HistoryEntry
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.uikit.CardProgressBar
+import dev.mirutime.uikit.MiruCardTitleText
 import dev.mirutime.uikit.CoverInset
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruCard
@@ -412,12 +413,11 @@ fun HistoryRow(
                 .weight(1f)
                 .padding(horizontal = 12.dp),
         ) {
-            Text(
-                text = entry.book.translatedTitle ?: entry.book.title,
+            MiruCardTitleText(
+                title = entry.book.translatedTitle ?: entry.book.title,
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = "${entry.book.sourceLabel} · ${entry.readLabel}",

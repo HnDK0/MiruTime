@@ -52,6 +52,7 @@ import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruButton
 import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruCard
+import dev.mirutime.uikit.MiruCardTitleText
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
 import dev.mirutime.uikit.MiruActionRow
@@ -493,12 +494,11 @@ fun UpdateRow(
                             .padding(start = MiruSpace.S),
                     )
                 }
-                Text(
-                    text = update.book.translatedTitle ?: update.book.title,
+                MiruCardTitleText(
+                    title = update.book.translatedTitle ?: update.book.title,
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 4.dp),
                 )
                 Text(

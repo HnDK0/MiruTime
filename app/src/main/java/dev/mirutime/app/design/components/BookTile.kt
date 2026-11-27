@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.MiruCardTitleText
 import dev.mirutime.uikit.miruCardElevation
 import dev.mirutime.uikit.miruCardSurface
 
@@ -107,15 +108,14 @@ fun BookTile(
                 }
             }
             Column(modifier = Modifier.padding(TilePad)) {
-                Text(
-                    text = title,
+                MiruCardTitleText(
+                    title = title,
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.SemiBold,
                     ),
                     color = MaterialTheme.colorScheme.onSurface,
                     minLines = 2,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(

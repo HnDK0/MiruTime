@@ -152,10 +152,9 @@ fun MiruListCard(
                         }
                     }
                 }
-                Text(
-                    text = title,
+                MiruCardTitleText(
+                    title = title,
                     maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.padding(top = MiruSpace.S),

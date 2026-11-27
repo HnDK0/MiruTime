@@ -55,6 +55,7 @@ import dev.mirutime.app.design.components.BookTileWidth
 import dev.mirutime.uikit.MiruButton
 import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruCard
+import dev.mirutime.uikit.MiruCardTitleText
 import dev.mirutime.uikit.SectionHeader
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.SkeletonBar
@@ -447,12 +448,11 @@ private fun ContinueCard(
                         }
                     }
                 }
-                Text(
-                    text = title,
+                MiruCardTitleText(
+                    title = title,
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
                 )
                 if (authorMeta.isNotBlank()) {
                     Text(

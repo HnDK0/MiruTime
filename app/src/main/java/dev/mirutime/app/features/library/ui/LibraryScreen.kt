@@ -70,6 +70,7 @@ import dev.mirutime.uikit.CoverInset
 import dev.mirutime.uikit.MiruButton
 import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruCard
+import dev.mirutime.uikit.MiruCardTitleText
 import dev.mirutime.uikit.MiruCompactButton
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
@@ -1527,12 +1528,11 @@ private fun ResumeCard(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    text = title,
+                MiruCardTitleText(
+                    title = title,
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = if (book.progressChapter > 0) {
