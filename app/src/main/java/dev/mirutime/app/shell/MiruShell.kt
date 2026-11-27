@@ -53,7 +53,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -419,11 +418,6 @@ fun MiruShell(
     // shows through); on classic themes it is the plain background.
     val hasBg = themeMode == ThemeMode.Custom && customBg != null
 
-    // Read BEFORE the Scaffold consumes the insets; this is the only strip
-    // the root overlay needs. A fixed 48dp covered the tab bar and reader.
-    val navBottom = WindowInsets.navigationBars
-        .asPaddingValues()
-        .calculateBottomPadding()
     Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         containerColor = if (hasBg) {
@@ -600,27 +594,12 @@ fun MiruShell(
                         Modifier
                     },
                 ) {
-                    // Fade the last content above the plate; on custom photos
-                    // the whole bottom dock carries a soft vertical veil so
-                    // there is never a hard stripe above the floating pill.
+                    // Spacing only: fading the last content into the background
+                    // painted a dark stripe above the plate on classic themes.
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(TabBarFadeStrip)
-                            .then(
-                                if (!hasBg) {
-                                    Modifier.background(
-                                        Brush.verticalGradient(
-                                            colors = listOf(
-                                                Color.Transparent,
-                                                MaterialTheme.colorScheme.background,
-                                            ),
-                                        ),
-                                    )
-                                } else {
-                                    Modifier
-                                },
-                            ),
+                            .height(TabBarFadeStrip),
                     )
                     MiruTabBar(
                         currentRoute = currentRoute,
@@ -1130,16 +1109,6 @@ fun MiruShell(
         }
         }
     }
-    // Root-level opaque strip over the gesture inset. Scaffold's content can
-    // draw above its bottomBar in this layout; this strip is composed after
-    // the Scaffold, so a card edge can never show under the navigation area.
-    Box(
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .fillMaxWidth()
-            .height(navBottom)
-            .background(if (hasBg) Color.Transparent else MaterialTheme.colorScheme.surface),
-    )
     }
 
     if (themeSheetOpen) {
