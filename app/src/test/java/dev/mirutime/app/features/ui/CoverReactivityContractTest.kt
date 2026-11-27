@@ -77,6 +77,9 @@ class CoverReactivityContractTest {
         assertTrue(library.contains("val fixCover: (LibraryBook) -> LibraryBook"))
         assertTrue(library.contains("book = fixCover(book)"))
         assertTrue(library.contains("reloadKey = pager.generation"))
-        assertTrue(library.contains("onRetry = onRetry"))
+        // The shared continue block gets the same repair callback; the screen
+        // now owns it instead of the deleted private resume card.
+        assertTrue(library.contains("onRetry = {"))
+        assertTrue(library.contains("provider.refreshCover(book.bookKey).getOrNull()?.also { fresh ->"))
     }
 }

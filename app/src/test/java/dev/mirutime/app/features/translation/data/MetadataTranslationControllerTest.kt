@@ -643,6 +643,60 @@ class MetadataTranslationControllerTest {
     }
 
     @Test
+    fun `hydrated history titles are not re-requested beyond the cache limit`() = runTest {
+        val engine = FakeEngine(::echo)
+        val store = FakeMetadataStore()
+        val config = config()
+        // The History screen hydrates up to 500 rows; the state cache must hold
+        // them all so submitTitles never re-requests a persisted title.
+        val jobs = (1..500).map { index ->
+            TitleTranslationJob("fake://history/$index", "Original $index", config)
+        }
+        jobs.forEach { job ->
+            store.save(
+                job.bookKey,
+                controllerKey(config),
+                MetadataTranslationPatch(title = "Cached ${job.title}"),
+            )
+        }
+        val controller = MetadataTranslationController(engine, this, store)
+
+        controller.hydrateTitles(jobs)
+        controller.submitTitles(jobs)
+        advanceUntilIdle()
+
+        assertTrue(engine.requests.isEmpty())
+        assertEquals("Cached Original 1", controller.state.value["fake://history/1"]?.title)
+        assertEquals("Cached Original 500", controller.state.value["fake://history/500"]?.title)
+    }
+
+    @Test
+    fun `persisted titles survive an evicted cache without a provider call`() = runTest {
+        val engine = FakeEngine(::echo)
+        val store = FakeMetadataStore()
+        val config = config()
+        // 600 > CACHE_LIMIT: hydrate evicts the oldest keys, so the decision to
+        // re-request must come from the store, not only from _state.
+        val jobs = (1..600).map { index ->
+            TitleTranslationJob("fake://evicted/$index", "Original $index", config)
+        }
+        jobs.forEach { job ->
+            store.save(
+                job.bookKey,
+                controllerKey(config),
+                MetadataTranslationPatch(title = "Cached ${job.title}"),
+            )
+        }
+        val controller = MetadataTranslationController(engine, this, store)
+
+        controller.hydrateTitles(jobs)
+        controller.submitTitles(jobs)
+        advanceUntilIdle()
+
+        assertTrue(engine.requests.isEmpty())
+    }
+
+    @Test
     fun `different language pairs use different persisted keys`() = runTest {
         val engine = FakeEngine(::echo)
         val store = FakeMetadataStore()

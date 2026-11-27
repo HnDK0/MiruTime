@@ -76,6 +76,9 @@ object MiruSize {
     // Book detail cover (2:3). Bigger than a library thumb, the page's hero.
     val DetailCoverWidth = 104.dp
     val DetailCoverHeight = 152.dp
+    // Continue/resume cover: 1:1.45 portrait, sized so the cover drives the
+    // card height instead of a plate frame around a small thumb.
+    val ContinueCover = 76.dp
     // Catalogue/global-search tile width (CatalogTile in a LazyRow).
     val Tile = 140.dp
     val IconSmall = 14.dp

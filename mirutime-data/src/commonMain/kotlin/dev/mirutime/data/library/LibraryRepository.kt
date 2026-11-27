@@ -1397,15 +1397,18 @@ class LibraryRepository(
         val ids = LinkedHashMap<String, Long>()
         for (chunk in urls.chunked(SqliteIdChunk)) {
             currentCoroutineContext().ensureActive()
-            val identities = chunk.associateWith(::decodeLibraryBookKey)
-            identities.forEach { (key, identity) ->
-                if (identity != null) {
-                    dao.bookByInstallAndUrl(identity.installId, identity.url)?.let { row ->
-                        ids[key] = row.bookId
-                    }
+            val identities = chunk.mapNotNull { key ->
+                decodeLibraryBookKey(key)?.let { key to it }
+            }.toMap()
+            if (identities.isNotEmpty()) {
+                // One batch per chunk: a composite key is exact by (installId, url).
+                val rows = dao.bookKeysByUrlsAll(identities.values.map { it.url }.distinct())
+                    .associateBy { it.installId to it.url }
+                identities.forEach { (key, identity) ->
+                    rows[identity.installId to identity.url]?.let { ids[key] = it.bookId }
                 }
             }
-            val plain = chunk.filter { identities[it] == null }
+            val plain = chunk.filter { it !in identities }
             if (plain.isNotEmpty()) {
                 dao.booksByUrls(plain).forEach { ids[it.url] = it.bookId }
             }
@@ -1423,15 +1426,18 @@ class LibraryRepository(
         val ids = LinkedHashMap<String, Long>()
         for (chunk in urls.chunked(SqliteIdChunk)) {
             currentCoroutineContext().ensureActive()
-            val identities = chunk.associateWith(::decodeLibraryBookKey)
-            identities.forEach { (key, identity) ->
-                if (identity != null) {
-                    dao.bookByInstallAndUrl(identity.installId, identity.url)?.let { row ->
-                        ids[key] = row.bookId
-                    }
+            val identities = chunk.mapNotNull { key ->
+                decodeLibraryBookKey(key)?.let { key to it }
+            }.toMap()
+            if (identities.isNotEmpty()) {
+                // One batch per chunk: a composite key is exact by (installId, url).
+                val rows = dao.bookKeysByUrlsAll(identities.values.map { it.url }.distinct())
+                    .associateBy { it.installId to it.url }
+                identities.forEach { (key, identity) ->
+                    rows[identity.installId to identity.url]?.let { ids[key] = it.bookId }
                 }
             }
-            val plain = chunk.filter { identities[it] == null }
+            val plain = chunk.filter { it !in identities }
             if (plain.isNotEmpty()) {
                 val byUrl = dao.booksByUrls(plain).groupBy { it.url }
                 plain.forEach { url ->

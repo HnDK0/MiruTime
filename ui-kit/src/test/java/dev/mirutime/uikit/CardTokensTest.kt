@@ -2,6 +2,7 @@ package dev.mirutime.uikit
 
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CardTokensTest {
@@ -15,6 +16,11 @@ class CardTokensTest {
         assertEquals(4.dp, MiruRadius.Split)
         assertEquals(3.dp, CoverInset)
         assertEquals(3.dp, MiruSpace.CardGap)
+        // Resume cover is taller than the list row thumb, so the cover sets
+        // the card height (76 * 1.45 ≈ 110dp).
+        assertEquals(76.dp, MiruSize.ContinueCover)
+        assertTrue(MiruSize.ContinueCover > 64.dp)
+        assertTrue(MiruSize.ContinueCover < MiruSize.DetailCoverWidth)
     }
 
     @Test

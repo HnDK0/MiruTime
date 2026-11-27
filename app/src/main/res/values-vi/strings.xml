@@ -308,7 +308,6 @@
     <string name="lib_import">Nhập EPUB / FB2 / TXT / PDF</string>
     <string name="lib_empty_title">Không có gì ở đây</string>
     <string name="lib_empty_hint">Thử kệ, từ khóa hoặc bộ lọc khác.</string>
-    <string name="lib_resume_eyebrow">TIẾP TỤC TỪ CHỖ ĐÃ DỪNG</string>
     <string name="lib_resume_meta_fmt">%1$d/%2$d · %3$s · %4$s</string>
     <string name="lib_resume_meta_chapter_fmt">%1$d/%2$d · Ch. %3$d · %4$s · %5$s</string>
     <string name="lib_resume_complete_fmt">%1$d%% hoàn thành</string>
@@ -465,7 +464,6 @@
     <string name="book_genres_less">Bớt</string>
 
     <!-- Dashboard -->
-    <string name="dash_continue_reading">Tiếp tục đọc</string>
     <string name="dash_today">Hôm nay</string>
     <string name="dash_today_desc">Thời gian bạn đã đọc và nghe</string>
     <string name="dash_stat_read">đã đọc</string>

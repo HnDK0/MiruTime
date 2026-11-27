@@ -307,7 +307,6 @@
     <string name="lib_import">استيراد EPUB / FB2 / TXT / PDF</string>
     <string name="lib_empty_title">لا شيء هنا</string>
     <string name="lib_empty_hint">جرّب رفًا أو استعلامًا أو مرشحًا آخر.</string>
-    <string name="lib_resume_eyebrow">أكمل من حيث توقفت</string>
     <string name="lib_resume_meta_fmt">%1$d/%2$d · %3$s · %4$s</string>
     <string name="lib_resume_meta_chapter_fmt">%1$d/%2$d · الفصل %3$d · %4$s · %5$s</string>
     <string name="lib_resume_complete_fmt">%1$d%% مكتمل</string>
@@ -464,7 +463,6 @@
     <string name="book_genres_less">أقل</string>
 
     <!-- لوحة التحكم -->
-    <string name="dash_continue_reading">متابعة القراءة</string>
     <string name="dash_today">اليوم</string>
     <string name="dash_today_desc">الوقت الذي أمضيته في القراءة والاستماع</string>
     <string name="dash_stat_read">قراءة</string>

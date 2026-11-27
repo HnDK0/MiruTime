@@ -657,6 +657,7 @@ fun MiruShell(
                 DashboardScreen(
                     contentPadding = padding,
                     provider = dashboardProvider,
+                    metadataTranslations = readerGraph.metadataTranslations,
                     refreshKey = dataRevision,
                     onBookOpen = { bookKey ->
                         navController.navigate("book/${Uri.encode(bookKey)}")
@@ -1092,6 +1093,7 @@ fun MiruShell(
                 UpdatesScreen(
                     contentPadding = padding,
                     provider = dashboardProvider,
+                    metadataTranslations = readerGraph.metadataTranslations,
                     refreshKey = dataRevision,
                     onRefresh = { onProgress -> updateService.checkAll(onProgress) },
                     onOpenSettings = { navController.navigate(SettingsRoutes.Updates) },
@@ -1119,6 +1121,7 @@ fun MiruShell(
                 HistoryScreen(
                     contentPadding = padding,
                     provider = dashboardProvider,
+                    metadataTranslations = readerGraph.metadataTranslations,
                     onBookOpen = { bookKey ->
                         navController.navigate("book/${Uri.encode(bookKey)}")
                     },

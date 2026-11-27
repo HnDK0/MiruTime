@@ -28,9 +28,9 @@ data class MetadataConfig(
     val prompt: PromptSpec?,
 )
 
-/** Library cards translate only the title, before the book page is opened. */
+/** Title lane identity: composite `libraryBookKey(installId, url)` or a raw URL. */
 data class TitleTranslationJob(
-    val bookUrl: String,
+    val bookKey: String,
     val title: String,
     val config: MetadataConfig,
 )
@@ -91,8 +91,8 @@ data class BookMetadataTranslation(
 /**
  * Translates book metadata for FULL scope. Titles are batched per identical
  * config, so the library warms N cards with one request; opening a book sends
- * its synopsis and chapter titles in another batch. Results are keyed by
- * bookUrl and only shown while the config still matches.
+ * its synopsis and chapter titles in another batch. Results are keyed by the
+ * composite book key and only shown while the config still matches.
  */
 class MetadataTranslationController(
     private val engine: TranslationEngine,
@@ -105,22 +105,53 @@ class MetadataTranslationController(
     private val queueLock = Any()
     private val pending = ArrayDeque<Pending>()
     private val queued = mutableSetOf<String>()
-    // Insertion-ordered bookUrls for the small in-memory cache.
+    // Insertion-ordered book keys for the small in-memory cache.
     private val order = LinkedHashSet<String>()
     private var worker: Job? = null
 
-    fun submitTitles(jobs: List<TitleTranslationJob>) {
+    suspend fun submitTitles(jobs: List<TitleTranslationJob>) {
         val missing = jobs
             .filter { it.title.isNotBlank() }
-            .filterNot { hasTitle(it.bookUrl, it.config) }
+            .filterNot { hasTitle(it.bookKey, it.config) }
         if (missing.isEmpty()) return
 
+        // Cache-size independent: a title already persisted for this config is
+        // restored from the store and never re-sent to the provider.
+        var restored = 0
+        val requests = mutableListOf<TitleTranslationJob>()
         missing.groupBy { it.config }.forEach { (config, group) ->
+            val stored = store?.let {
+                runCatching { it.loadTitles(group.map { job -> job.bookKey }, config.storeKey()) }
+                    .onFailure { error ->
+                        MiruLog.e("translation", "metadata title fallback failed", error)
+                    }
+                    .getOrDefault(emptyMap())
+            }.orEmpty()
+            group.forEach { job ->
+                val hit = stored[job.bookKey]
+                if (hit != null && !hit.title.isNullOrBlank()) {
+                    mergeStored(job.bookKey, config, hit)
+                    restored++
+                } else {
+                    requests += job
+                }
+            }
+        }
+        MiruLog.event(
+            "translation",
+            "titles-store-fallback",
+            "missing" to missing.size,
+            "restored" to restored,
+            "requested" to requests.size,
+        )
+        if (requests.isEmpty()) return
+
+        requests.groupBy { it.config }.forEach { (config, group) ->
             val units = group.mapIndexed { index, job ->
                 TranslationUnit(id = index.toString(), text = job.title)
             }
             val request = MetadataRequest(
-                bookId = group.first().bookUrl.hashCode().toLong(),
+                bookId = group.first().bookKey.hashCode().toLong(),
                 key = "meta-titles:${config.cacheKey()}",
                 units = units,
                 source = config.source,
@@ -129,12 +160,12 @@ class MetadataTranslationController(
                 prompt = config.prompt,
             )
             val pendingKey = "titles:${config.cacheKey()}:" +
-                group.joinToString("|") { it.bookUrl }
-            group.forEach { markLoading(it.bookUrl, config, pendingKey) }
+                group.joinToString("|") { it.bookKey }
+            group.forEach { markLoading(it.bookKey, config, pendingKey) }
             enqueue(
                 Pending(
                     key = pendingKey,
-                    books = group.map { it.bookUrl },
+                    books = group.map { it.bookKey },
                     config = config,
                     request = request,
                     kind = MetadataKind.Titles,
@@ -502,15 +533,15 @@ class MetadataTranslationController(
         val store = store ?: return
         val missing = jobs
             .filter { it.title.isNotBlank() }
-            .filterNot { hasTitle(it.bookUrl, it.config) }
+            .filterNot { hasTitle(it.bookKey, it.config) }
         if (missing.isEmpty()) return
         missing.groupBy { it.config }.forEach { (config, group) ->
             val stored = runCatching {
-                store.loadTitles(group.map { it.bookUrl }, config.storeKey())
+                store.loadTitles(group.map { it.bookKey }, config.storeKey())
             }.onFailure { MiruLog.e("translation", "metadata title hydrate failed", it) }
                 .getOrDefault(emptyMap())
             group.forEach { job ->
-                stored[job.bookUrl]?.let { mergeStored(job.bookUrl, config, it) }
+                stored[job.bookKey]?.let { mergeStored(job.bookKey, config, it) }
             }
             MiruLog.event(
                 "translation",
@@ -641,9 +672,12 @@ class MetadataTranslationController(
         const val STATUS_ID = -1
         // Genre units use -2, -3, ... in list order.
         const val GENRE_ID_BASE = -2
-        // A catalogue page is 50 books and the library reloads its own page on
-        // every visit; the old 40-entry cap evicted the whole fresh batch right
-        // after it was applied, so no card ever showed a translated title.
-        const val CACHE_LIMIT = 160
+        // Must cover the largest title lane: the History screen hydrates up to
+        // 500 rows, and a lane larger than this cache is trimmed mid-hydrate so
+        // submitTitles re-requests titles that are already persisted. Bounded
+        // memory: only hydrated/requested rows ever enter, never the library.
+        // This is a memory bound only: the store fallback in submitTitles is
+        // what guarantees no redundant provider call past an eviction.
+        const val CACHE_LIMIT = 512
     }
 }

@@ -8,8 +8,11 @@ import dev.mirutime.data.library.BookCoverEntity
 import dev.mirutime.data.library.BookEntity
 import dev.mirutime.data.library.BookTranslationEntity
 import dev.mirutime.data.library.LibraryDao
+import dev.mirutime.data.library.BookKeyRow
 import dev.mirutime.data.library.BookUrlRow
 import dev.mirutime.data.library.LibraryRepository
+import dev.mirutime.data.library.bookKeyUrl
+import dev.mirutime.data.library.libraryBookKey
 import java.lang.reflect.Proxy
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -35,6 +38,8 @@ class TitleOverlayTest {
     ) {
         var translationCalls = 0
         var booksByUrlCalls = 0
+        var bookKeyCalls = 0
+        var bookKeyBatchCalls = 0
         var perBookCalls = 0
 
         val proxy: LibraryDao = Proxy.newProxyInstance(
@@ -50,11 +55,23 @@ class TitleOverlayTest {
                 "readChapterStats", "readChapterStatsFor" -> emptyList<Any>()
                 "tagsByBook", "tagsByBookFor" -> emptyList<Any>()
                 "bookCovers", "bookCoversFor" -> emptyList<BookCoverEntity>()
+                "bookByInstallAndUrl" -> {
+                    bookKeyCalls++
+                    val installId = args!![0] as String
+                    val url = args[1] as String
+                    books.firstOrNull { it.installId == installId && it.url == url }
+                }
                 "booksByUrls" -> {
                     booksByUrlCalls++
                     val urls = args!![0] as List<*>
                     books.filter { it.url in urls }
                         .map { BookUrlRow(bookId = it.bookId, url = it.url) }
+                }
+                "bookKeysByUrlsAll" -> {
+                    bookKeyBatchCalls++
+                    val urls = args!![0] as List<*>
+                    books.filter { it.url in urls }
+                        .map { BookKeyRow(bookId = it.bookId, installId = it.installId, url = it.url) }
                 }
                 "booksByUrl" -> {
                     val url = args!![0] as String
@@ -108,7 +125,10 @@ class TitleOverlayTest {
     @After
     fun tearDown() {
         AppSettings.novelTranslation.keys
-            .filter { it.startsWith("https://site/book/") }
+            .filter {
+                it.startsWith("https://site/book/") ||
+                    bookKeyUrl(it).startsWith("https://site/")
+            }
             .forEach { AppSettings.novelTranslation.remove(it) }
     }
 
@@ -178,7 +198,9 @@ class TitleOverlayTest {
         assertNull(mapped[2].translatedTitle)
         // One batch per distinct config, never one query per book.
         assertEquals(2, dao.translationCalls)
-        assertEquals(2, dao.booksByUrlCalls)
+        assertEquals(0, dao.bookKeyCalls)
+        assertEquals(2, dao.bookKeyBatchCalls)
+        assertEquals(0, dao.booksByUrlCalls)
         assertEquals(0, dao.perBookCalls)
     }
 
@@ -213,10 +235,32 @@ class TitleOverlayTest {
         val mapped = provider(dao).books()
 
         assertEquals(1, dao.translationCalls)
-        assertEquals(1, dao.booksByUrlCalls)
+        assertEquals(0, dao.bookKeyCalls)
+        assertEquals(1, dao.bookKeyBatchCalls)
+        assertEquals(0, dao.booksByUrlCalls)
         assertEquals(0, dao.perBookCalls)
         assertEquals("Книга 1", mapped.first().translatedTitle)
         assertEquals("Книга 120", mapped.last().translatedTitle)
+    }
+
+    @Test
+    fun `two installs sharing a url read their own title`() = runTest {
+        val shared = "https://site/shared"
+        AppSettings.novelTranslation[libraryBookKey("a", shared)] = pair("ru")
+        AppSettings.novelTranslation[libraryBookKey("b", shared)] = pair("ru")
+        val rows = listOf(
+            books()[0].copy(bookId = 11, installId = "a", url = shared),
+            books()[0].copy(bookId = 12, installId = "b", url = shared),
+        )
+        val dao = CountingDao(
+            books = rows,
+            titles = listOf(TitleRow(11, "ru", "A"), TitleRow(12, "ru", "B")),
+        )
+
+        val mapped = provider(dao).books()
+
+        assertEquals("A", mapped[0].translatedTitle)
+        assertEquals("B", mapped[1].translatedTitle)
     }
 
     @Test

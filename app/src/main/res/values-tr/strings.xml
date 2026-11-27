@@ -308,7 +308,6 @@
     <string name="lib_import">EPUB / FB2 / TXT / PDF içe aktar</string>
     <string name="lib_empty_title">Burada bir şey yok</string>
     <string name="lib_empty_hint">Başka bir raf, arama veya filtre deneyin.</string>
-    <string name="lib_resume_eyebrow">KALDIĞINIZ YERDEN DEVAM EDİN</string>
     <string name="lib_resume_meta_fmt">%1$d/%2$d · %3$s · %4$s</string>
     <string name="lib_resume_meta_chapter_fmt">%1$d/%2$d · Böl. %3$d · %4$s · %5$s</string>
     <string name="lib_resume_complete_fmt">%1$d%% tamamlandı</string>
@@ -465,7 +464,6 @@
     <string name="book_genres_less">Daha az</string>
 
     <!-- Dashboard -->
-    <string name="dash_continue_reading">Okumaya devam et</string>
     <string name="dash_today">Bugün</string>
     <string name="dash_today_desc">Okuma ve dinlemeye ayırdığınız süre</string>
     <string name="dash_stat_read">okunan</string>

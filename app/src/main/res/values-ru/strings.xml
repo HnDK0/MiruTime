@@ -314,7 +314,6 @@
     <string name="lib_import">Импорт EPUB / FB2 / TXT / PDF</string>
     <string name="lib_empty_title">Здесь пусто</string>
     <string name="lib_empty_hint">Попробуйте другую полку, запрос или фильтр.</string>
-    <string name="lib_resume_eyebrow">ПРОДОЛЖИТЬ ЧТЕНИЕ</string>
     <string name="lib_resume_meta_fmt">%1$d/%2$d · %3$s · %4$s</string>
     <string name="lib_resume_meta_chapter_fmt">%1$d/%2$d · гл. %3$d · %4$s · %5$s</string>
     <string name="lib_resume_complete_fmt">готово на %1$d%%</string>
@@ -467,7 +466,6 @@
     <string name="import_err_no_space_fmt">Не хватает свободного места: для импорта нужно %1$d МБ.</string>
 
     <!-- Dashboard -->
-    <string name="dash_continue_reading">Продолжить чтение</string>
     <string name="dash_today">Сегодня</string>
     <string name="dash_today_desc">Время, которое вы читали и слушали</string>
     <string name="dash_stat_read">прочитано</string>

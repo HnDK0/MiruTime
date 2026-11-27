@@ -635,7 +635,7 @@ internal fun SourceCatalogScreen(
         readerGraph.metadataTranslations.submitTitles(metadataJobs)
     }
     val metadataConfigs = remember(metadataJobs) {
-        metadataJobs.associate { it.bookUrl to it.config }
+        metadataJobs.associate { it.bookKey to it.config }
     }
     val translatedTitles = remember(books, metadata, metadataConfigs) {
         books.mapNotNull { book ->

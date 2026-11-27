@@ -28,10 +28,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.UploadFile
@@ -42,7 +40,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -66,12 +63,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.mirutime.uikit.CoverInset
 import dev.mirutime.uikit.MiruButton
 import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruCard
-import dev.mirutime.uikit.MiruCardTitleText
 import dev.mirutime.uikit.MiruCompactButton
+import dev.mirutime.uikit.MiruContinueCard
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
@@ -79,7 +75,6 @@ import dev.mirutime.app.R
 import dev.mirutime.app.design.logRangeSelect
 import dev.mirutime.app.shell.TabBarDecoration
 import dev.mirutime.uikit.LocalMiruExtraColors
-import dev.mirutime.uikit.compactTouchTarget
 import dev.mirutime.uikit.isLargeText
 import dev.mirutime.uikit.miruCardBorder
 import dev.mirutime.uikit.miruCardElevation
@@ -88,7 +83,6 @@ import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.app.design.components.BookCover
 import dev.mirutime.app.design.components.CardStylePicker
 import dev.mirutime.uikit.MiruSearchBar
-import dev.mirutime.uikit.CardProgressBar
 import dev.mirutime.uikit.ChipRail
 import dev.mirutime.uikit.MiruChipFlow
 import dev.mirutime.uikit.MiruFilterChip
@@ -122,10 +116,9 @@ import dev.mirutime.app.features.library.domain.LibraryBook
 import dev.mirutime.app.features.library.domain.LibrarySort
 import dev.mirutime.app.features.library.domain.defaultDirection
 import dev.mirutime.app.features.settings.data.AppSettings
-import dev.mirutime.app.features.translation.data.TitleTranslationJob
 import dev.mirutime.app.features.translation.data.TitleSurface
-import dev.mirutime.app.features.translation.data.metadataConfigFor
-import dev.mirutime.app.features.translation.data.translationPresentationFor
+import dev.mirutime.app.features.translation.ui.TitleItem
+import dev.mirutime.app.features.translation.ui.rememberTranslatedTitles
 import dev.mirutime.app.features.library.domain.Shelf
 import dev.mirutime.app.features.library.domain.SortDirection
 import kotlin.math.roundToInt
@@ -462,35 +455,24 @@ fun LibraryScreen(
     }
 
     // FULL-mode titles: one batch per identical config, warmed before a card
-    // leaves the original title. The state map is shared with the book page.
-    val metadata by readerGraph.metadataTranslations.state.collectAsState()
-    val metadataJobs by remember(pager.books) {
-        derivedStateOf {
-            pager.books.mapNotNull { book ->
-                if (!translationPresentationFor(book.bookKey).showsTitle(TitleSurface.Library)) {
-                    return@mapNotNull null
-                }
-                metadataConfigFor(book.bookKey)?.let { config ->
-                    TitleTranslationJob(book.bookKey, book.title, config)
-                }
-            }
-        }
+    // leaves the original title. The state map is shared with the book page;
+    // the resume block reads the same live map with the provider value as the
+    // fallback (it can paint before the pager has rows).
+    val titleItems = remember(pager.books, lastRead) {
+        (pager.books + listOfNotNull(lastRead)).map { TitleItem(it.bookKey, it.title) }
     }
-    LaunchedEffect(metadataJobs) {
-        readerGraph.metadataTranslations.hydrateTitles(metadataJobs)
-        readerGraph.metadataTranslations.submitTitles(metadataJobs)
-    }
-    val configs = remember(metadataJobs) { metadataJobs.associate { it.bookUrl to it.config } }
+    val titles = rememberTranslatedTitles(
+        controller = readerGraph.metadataTranslations,
+        items = titleItems,
+        surface = TitleSurface.Library,
+    )
     // Pages are already deduped by the pager; the overlay is page-local.
     val fixCover: (LibraryBook) -> LibraryBook = { book ->
         coverFixes[book.bookKey]?.let { book.copy(coverUrl = it) } ?: book
     }
-    val shown = remember(pager.books, metadata, configs) {
+    val shown = remember(pager.books, titles) {
         pager.books.map { book ->
-            val translated = metadata[book.bookKey]
-                ?.takeIf { it.config == configs[book.bookKey] }
-                ?.title
-            if (translated != null) book.copy(translatedTitle = translated) else book
+            titles[book.bookKey]?.let { book.copy(translatedTitle = it) } ?: book
         }
     }
     // Near-end prefetch: one page ahead of the last visible row.
@@ -726,16 +708,57 @@ fun LibraryScreen(
                 if (lastRead != null && (selShelves.isEmpty() || "reading" in selShelves)) {
                     item {
                         lastRead?.let { book ->
+                            val shown = fixCover(book)
+                            val total = shown.totalChapters.coerceAtLeast(0)
+                            val read = shown.readChapters.coerceIn(0, total)
+                            val fraction = if (total > 0) read.toFloat() / total else 0f
+                            val title = titles[book.bookKey] ?: shown.translatedTitle ?: shown.title
                             Box(modifier = Modifier.padding(top = MiruSpace.Xxs)) {
-                                ResumeCard(
-                                    book = fixCover(book),
-                                    onOpen = { onBookOpen(book.bookKey) },
-                                    onRetry = {
-                                        provider.refreshCover(book.bookKey).getOrNull()?.also { fresh ->
-                                            coverFixes[book.bookKey] = fresh
-                                        }
+                                MiruContinueCard(
+                                    title = title,
+                                    meta = if (shown.progressChapter > 0) {
+                                        stringResource(
+                                            R.string.lib_resume_meta_chapter_fmt,
+                                            read,
+                                            total,
+                                            shown.progressChapter,
+                                            shown.sourceLabel,
+                                            shown.lastReadLabel,
+                                        )
+                                    } else {
+                                        stringResource(
+                                            R.string.lib_resume_meta_fmt,
+                                            read,
+                                            total,
+                                            shown.sourceLabel,
+                                            shown.lastReadLabel,
+                                        )
                                     },
-                                    reloadKey = pager.generation,
+                                    progressFraction = fraction,
+                                    progressLabel = stringResource(
+                                        R.string.lib_resume_complete_fmt,
+                                        (fraction * 100).roundToInt(),
+                                    ),
+                                    continueDescription = stringResource(
+                                        R.string.lib_continue_desc_fmt,
+                                        shown.continueLabel,
+                                    ),
+                                    onClick = { onBookOpen(book.bookKey) },
+                                    cover = {
+                                        BookCover(
+                                            title = title,
+                                            coverUrl = shown.coverUrl,
+                                            hasUpdateDot = shown.hasUpdate,
+                                            modifier = Modifier.fillMaxSize(),
+                                            corner = MiruRadius.Cover,
+                                            onRetry = {
+                                                provider.refreshCover(book.bookKey).getOrNull()?.also { fresh ->
+                                                    coverFixes[book.bookKey] = fresh
+                                                }
+                                            },
+                                            reloadKey = pager.generation,
+                                        )
+                                    },
                                 )
                             }
                         }
@@ -1474,123 +1497,6 @@ private fun SkeletonCoverGrid(columns: Int) {
                         .aspectRatio(1 / 1.45f)
                         .clip(RoundedCornerShape(MiruRadius.Cover))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
-                )
-            }
-        }
-    }
-}
-
-// Resume card (prototype visuals: cover left, label ON the card, compact):
-// 64x96 cover inside a 4dp frame, eyebrow + title + meta on the right, a 3dp
-// progress track with "% complete", and a trailing circular Continue-to-point
-// button. Roughly half the height of the old header + block + full-width
-// button.
-@Composable
-private fun ResumeCard(
-    book: LibraryBook,
-    onOpen: () -> Unit,
-    onRetry: (suspend () -> String?)? = null,
-    reloadKey: Any? = null,
-) {
-    val title = book.translatedTitle ?: book.title
-    // Progress counts finished chapters (the same metric as the grid cards);
-    // the saved Continue position stays visible as its own meta segment.
-    val total = book.totalChapters.coerceAtLeast(0)
-    val read = book.readChapters.coerceIn(0, total)
-    val progress = if (total > 0) read.toFloat() / total else 0f
-    val percent = (progress * 100).roundToInt()
-    MiruCard(
-        contentPadding = PaddingValues(0.dp),
-        onClick = onOpen,
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(MiruSpace.M),
-        ) {
-            BookCover(
-                title = title,
-                coverUrl = book.coverUrl,
-                hasUpdateDot = book.hasUpdate,
-                modifier = Modifier
-                    .width(64.dp)
-                    .aspectRatio(1f / 1.45f)
-                    .padding(CoverInset),
-                corner = MiruRadius.Cover,
-                onRetry = onRetry,
-                reloadKey = reloadKey,
-            )
-            Spacer(modifier = Modifier.width(MiruSpace.M))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = stringResource(R.string.lib_resume_eyebrow),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = LocalMiruExtraColors.current.muted,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                MiruCardTitleText(
-                    title = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                )
-                Text(
-                    text = if (book.progressChapter > 0) {
-                        stringResource(
-                            R.string.lib_resume_meta_chapter_fmt,
-                            read,
-                            total,
-                            book.progressChapter,
-                            book.sourceLabel,
-                            book.lastReadLabel,
-                        )
-                    } else {
-                        stringResource(
-                            R.string.lib_resume_meta_fmt,
-                            read,
-                            total,
-                            book.sourceLabel,
-                            book.lastReadLabel,
-                        )
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = LocalMiruExtraColors.current.muted,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                CardProgressBar(
-                    fraction = progress,
-                    height = 3.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = MiruSpace.S),
-                )
-                Text(
-                    text = stringResource(R.string.lib_resume_complete_fmt, percent),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = LocalMiruExtraColors.current.muted,
-                    modifier = Modifier.padding(top = 3.dp),
-                )
-            }
-            Spacer(modifier = Modifier.width(MiruSpace.S))
-            val extra = LocalMiruExtraColors.current
-            Box(
-                modifier = Modifier
-                    .compactTouchTarget(36.dp)
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(extra.accent.copy(alpha = 0.16f))
-                    .border(1.dp, extra.accent.copy(alpha = 0.32f), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                    contentDescription = stringResource(
-                        R.string.lib_continue_desc_fmt,
-                        book.continueLabel,
-                    ),
-                    tint = extra.accent,
-                    modifier = Modifier.size(20.dp),
                 )
             }
         }

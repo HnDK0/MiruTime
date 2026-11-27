@@ -294,7 +294,7 @@ fun GlobalSearchScreen(
         metadataTranslations.submitTitles(metadataJobs)
     }
     val metadataConfigs = remember(metadataJobs) {
-        metadataJobs.associate { it.bookUrl to it.config }
+        metadataJobs.associate { it.bookKey to it.config }
     }
     val translatedTitles = remember(allBooks, metadata, metadataConfigs) {
         allBooks.mapNotNull { book ->

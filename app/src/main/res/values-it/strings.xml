@@ -308,7 +308,6 @@
     <string name="lib_import">Importa EPUB / FB2 / TXT / PDF</string>
     <string name="lib_empty_title">Niente qui</string>
     <string name="lib_empty_hint">Prova un altro scaffale, una ricerca o un filtro.</string>
-    <string name="lib_resume_eyebrow">RIPRENDI DA DOVE AVEVI LASCIATO</string>
     <string name="lib_resume_meta_fmt">%1$d/%2$d · %3$s · %4$s</string>
     <string name="lib_resume_meta_chapter_fmt">%1$d/%2$d · cap. %3$d · %4$s · %5$s</string>
     <string name="lib_resume_complete_fmt">%1$d%% completato</string>
@@ -465,7 +464,6 @@
     <string name="book_genres_less">Meno</string>
 
     <!-- Dashboard -->
-    <string name="dash_continue_reading">Continua a leggere</string>
     <string name="dash_today">Oggi</string>
     <string name="dash_today_desc">Tempo passato leggendo e ascoltando</string>
     <string name="dash_stat_read">letto</string>

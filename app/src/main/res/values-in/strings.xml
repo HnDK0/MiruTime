@@ -308,7 +308,6 @@
     <string name="lib_import">Impor EPUB / FB2 / TXT / PDF</string>
     <string name="lib_empty_title">Tidak ada apa pun di sini</string>
     <string name="lib_empty_hint">Coba rak, kueri, atau filter lain.</string>
-    <string name="lib_resume_eyebrow">LANJUTKAN DARI TEMPAT TERAKHIR</string>
     <string name="lib_resume_meta_fmt">%1$d/%2$d · %3$s · %4$s</string>
     <string name="lib_resume_meta_chapter_fmt">%1$d/%2$d · Bab %3$d · %4$s · %5$s</string>
     <string name="lib_resume_complete_fmt">%1$d%% selesai</string>
@@ -465,7 +464,6 @@
     <string name="book_genres_less">Lebih sedikit</string>
 
     <!-- Dashboard -->
-    <string name="dash_continue_reading">Lanjutkan membaca</string>
     <string name="dash_today">Hari ini</string>
     <string name="dash_today_desc">Waktu yang Anda habiskan untuk membaca dan mendengarkan</string>
     <string name="dash_stat_read">dibaca</string>

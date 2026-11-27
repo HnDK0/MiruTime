@@ -51,6 +51,10 @@ import dev.mirutime.app.design.components.BookCover
 import dev.mirutime.app.design.logRangeSelect
 import dev.mirutime.app.features.dashboard.data.DashboardDataProvider
 import dev.mirutime.app.features.dashboard.domain.HistoryEntry
+import dev.mirutime.app.features.translation.data.MetadataTranslationController
+import dev.mirutime.app.features.translation.data.TitleSurface
+import dev.mirutime.app.features.translation.ui.TitleItem
+import dev.mirutime.app.features.translation.ui.rememberTranslatedTitles
 import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.uikit.CardProgressBar
 import dev.mirutime.uikit.MiruCardTitleText
@@ -81,6 +85,7 @@ private sealed interface HistoryDeleteRequest {
 fun HistoryScreen(
     contentPadding: PaddingValues,
     provider: DashboardDataProvider,
+    metadataTranslations: MetadataTranslationController,
     onBookOpen: (String) -> Unit = {},
 ) {
     var history by remember { mutableStateOf<List<HistoryEntry>>(emptyList()) }
@@ -118,6 +123,16 @@ fun HistoryScreen(
             selection.prune(history.map { it.book.bookKey }.toSet())
         }
     }
+
+    // FULL-mode titles: selection keeps the untranslated bookKey; only the
+    // rendered title changes.
+    val titles = rememberTranslatedTitles(
+        controller = metadataTranslations,
+        items = remember(history) {
+            history.map { TitleItem(it.book.bookKey, it.book.title) }
+        },
+        surface = TitleSurface.History,
+    )
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
@@ -163,6 +178,9 @@ fun HistoryScreen(
                         key = { index, entry -> "history:${entry.book.bookKey}:$index" },
                     ) { _, entry ->
                         val url = entry.book.bookKey
+                        val shown = titles[url]?.let {
+                            entry.copy(book = entry.book.copy(translatedTitle = it))
+                        } ?: entry
                         MiruCard(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -170,7 +188,7 @@ fun HistoryScreen(
                             contentPadding = PaddingValues(0.dp),
                         ) {
                             HistoryRow(
-                                entry = entry,
+                                entry = shown,
                                 selectionMode = selectionMode,
                                 selected = url in selected,
                                 onOpen = {

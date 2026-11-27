@@ -71,6 +71,10 @@ import dev.mirutime.uikit.miruCardElevation
 import dev.mirutime.uikit.miruCardSurface
 import dev.mirutime.app.features.dashboard.data.DashboardDataProvider
 import dev.mirutime.app.features.dashboard.domain.UpdateItem
+import dev.mirutime.app.features.translation.data.MetadataTranslationController
+import dev.mirutime.app.features.translation.data.TitleSurface
+import dev.mirutime.app.features.translation.ui.TitleItem
+import dev.mirutime.app.features.translation.ui.rememberTranslatedTitles
 
 // Drill-in route: the shell hides the floating tab panel here, so the
 // content only keeps a small breathing gap above the system navigation bar.
@@ -83,6 +87,7 @@ private val BottomClearance = 8.dp
 fun UpdatesScreen(
     contentPadding: PaddingValues,
     provider: DashboardDataProvider,
+    metadataTranslations: MetadataTranslationController,
     refreshKey: Int = 0,
     onRefresh: suspend ((UpdateProgress) -> Unit) -> UpdateCheckSummary = { UpdateCheckSummary(0, 0, 0) },
     onOpenSettings: () -> Unit = {},
@@ -135,6 +140,16 @@ fun UpdatesScreen(
         if (refreshKey > 0) updates = provider.updates()
     }
 
+    // FULL-mode titles: updates use the Library surface, like the provider's
+    // persisted overlay does.
+    val titles = rememberTranslatedTitles(
+        controller = metadataTranslations,
+        items = remember(updates) {
+            updates.map { TitleItem(it.book.bookKey, it.book.title) }
+        },
+        surface = TitleSurface.Library,
+    )
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
@@ -186,8 +201,11 @@ fun UpdatesScreen(
             }
         } else {
             itemsIndexed(updates, key = { index, update -> "update:${update.book.bookKey}:$index" }) { _, update ->
+                val shown = titles[update.book.bookKey]?.let {
+                    update.copy(book = update.book.copy(translatedTitle = it))
+                } ?: update
                 UpdateRow(
-                    update = update,
+                    update = shown,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 6.dp),
