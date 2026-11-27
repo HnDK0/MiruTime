@@ -39,7 +39,12 @@ fun ExtensionFilterSheet(
         onClose = onClose,
         doneLabel = stringResource(R.string.finder_apply),
         onDone = {
-            onApply(draft.copy(query = applied.query))
+            onApply(
+                draft.copy(
+                    query = applied.query,
+                    status = if (showStatus) draft.status else applied.status,
+                ),
+            )
             onClose()
         },
         // One Reset standard: the sheet header carries it (template:
@@ -50,13 +55,13 @@ fun ExtensionFilterSheet(
                     draft = draft.copy(
                         types = emptySet(),
                         languages = emptySet(),
-                        status = ExtensionStatus.Any,
+                        status = if (showStatus) ExtensionStatus.Any else draft.status,
                     )
                 },
                 style = MiruButtonStyle.Secondary,
                 enabled = draft.types.isNotEmpty() ||
                     draft.languages.isNotEmpty() ||
-                    draft.status != ExtensionStatus.Any,
+                    (showStatus && draft.status != ExtensionStatus.Any),
             ) {
                 Text(text = stringResource(R.string.finder_reset))
             }

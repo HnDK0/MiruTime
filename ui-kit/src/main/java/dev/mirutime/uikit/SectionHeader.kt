@@ -23,41 +23,72 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-// Section header with a description subtitle: a PLATE
-// in every theme (title + description + action on one surface, 20dp radius),
-// so headers read the same on a photo and on a classic palette. The action is
-// a 48dp hit box with a text-only look; its ink is the accent, guaranteed
-// readable on the plate.
+// Section header with optional description subtitle: a PLATE on classic
+// full-size sections and over custom photos (so headers keep WCAG contrast on
+// artwork). With `compact = true` on classic themes, renders directly on the
+// canvas without an enclosing box to avoid "boxes in boxes" above card rails.
 @Composable
 fun SectionHeader(
     title: String,
-    description: String,
+    description: String? = null,
     modifier: Modifier = Modifier,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    compact: Boolean = false,
     // Optional free slot at the row end (e.g. a sort toggle); sits after the
     // text action and brings its own 48dp hit box.
     trailing: (@Composable () -> Unit)? = null,
 ) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth(),
-        shape = RoundedCornerShape(MiruRadius.Card),
-        color = miruCardSurface(),
-        shadowElevation = miruCardElevation(),
-        border = miruPlateBorder(),
-        tonalElevation = 0.dp,
-    ) {
+    val onImage = LocalMiruOnImage.current
+    if (onImage || !compact) {
+        Surface(
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(if (compact) MiruRadius.Control else MiruRadius.Card),
+            color = miruCardSurface(),
+            shadowElevation = miruCardElevation(),
+            border = miruPlateBorder(),
+            tonalElevation = 0.dp,
+        ) {
+            HeaderRow(
+                title = title,
+                description = description,
+                actionLabel = actionLabel,
+                onAction = onAction,
+                trailing = trailing,
+                modifier = if (compact) {
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = MiruSize.Control)
+                        .padding(
+                            start = MiruSpace.M,
+                            end = if (actionLabel != null || trailing != null) MiruSpace.Xs else MiruSpace.M,
+                            top = MiruSpace.Xxs,
+                            bottom = MiruSpace.Xxs,
+                        )
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = MiruSize.Touch)
+                        .padding(
+                            start = MiruSpace.L,
+                            end = MiruSpace.Xs,
+                            top = MiruSpace.S,
+                            bottom = MiruSpace.S,
+                        )
+                },
+            )
+        }
+    } else {
         HeaderRow(
             title = title,
             description = description,
             actionLabel = actionLabel,
             onAction = onAction,
             trailing = trailing,
-            modifier = Modifier
+            modifier = modifier
                 .fillMaxWidth()
-                .heightIn(min = MiruSize.Touch)
-                .padding(start = MiruSpace.L, end = MiruSpace.Xs, top = MiruSpace.S, bottom = MiruSpace.S),
+                .heightIn(min = MiruSize.Control)
+                .padding(start = MiruSpace.Xxs, end = 0.dp),
         )
     }
 }
@@ -89,6 +120,7 @@ fun MiruSectionCard(
         shape = RoundedCornerShape(MiruRadius.Card),
         color = miruCardSurface(),
         shadowElevation = miruCardElevation(),
+        border = miruCardBorder(),
         tonalElevation = 0.dp,
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -108,7 +140,7 @@ fun MiruSectionCard(
                         bottom = MiruSpace.S,
                     ),
             )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             Column(modifier = Modifier.padding(contentPadding), content = content)
         }
     }

@@ -133,11 +133,13 @@ fun MiruBookCard(
     } else {
         Modifier.semantics(mergeDescendants = true) {}
     }
+    val cardBorder = miruCardBorder()
     val surfaceModifier = if (spec.surface) {
         Modifier
             .miruCardShadow(CardShape)
             .clip(CardShape)
             .background(miruCardSurface())
+            .then(if (!selected) Modifier.border(cardBorder, CardShape) else Modifier)
     } else {
         Modifier.clip(CardShape)
     }
@@ -262,11 +264,13 @@ private fun ListCard(
     } else {
         Modifier.semantics(mergeDescendants = true) {}
     }
+    val cardBorder = miruCardBorder()
     Row(
         modifier = modifier
             .miruCardShadow(CardShape)
             .clip(CardShape)
             .background(miruCardSurface())
+            .then(if (!selected) Modifier.border(cardBorder, CardShape) else Modifier)
             .then(selectedModifier)
             .then(stateSemantics)
             .combinedClickable(

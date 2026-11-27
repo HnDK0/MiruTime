@@ -7,21 +7,21 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-// === Shape scale ===
-// Sharp geometry: cards are 8dp, controls 6dp, chips 8dp, covers 6dp.
-// Nested radius = outer radius − padding where practical; a card (8) with an
-// 8dp padding holds a cover (6), which reads as one concentric family.
+// === Shape scale (Bento / Breezy geometry) ===
+// Modern rounded geometry: cards are 16dp, controls 12dp, chips 12dp, covers 12dp.
+// Nested radius = outer radius − padding where practical; a card (16) with a
+// 4dp cover inset holds a cover (12), which reads as one concentric family.
 object MiruRadius {
-    val Badge = 6.dp      // tiny tags on covers
-    val Split = 4.dp      // split-progress and small plates
-    val Cover = 6.dp      // book covers, inner thumbnails
-    val Chip = 8.dp       // filter chips
-    val Control = 6.dp    // buttons, outlined fields and compact controls
-    val Inner = 8.dp      // tiles nested inside a card
-    val Card = 8.dp       // cards, plates, panels
-    val Large = 8.dp      // medium containers and overlay surfaces
-    val Plate = 8.dp      // floating chrome (header, tab bar)
-    val Sheet = 8.dp      // bottom sheets / compact panels
+    val Badge = 8.dp      // tiny tags on covers
+    val Split = 6.dp      // split-progress and small plates
+    val Cover = 12.dp     // book covers, inner thumbnails
+    val Chip = 12.dp      // filter chips
+    val Control = 12.dp   // buttons, outlined fields and compact controls
+    val Inner = 12.dp     // tiles nested inside a card
+    val Card = 16.dp      // cards, plates, panels
+    val Large = 20.dp     // medium containers and overlay surfaces
+    val Plate = 16.dp     // floating chrome (header, tab bar)
+    val Sheet = 24.dp     // bottom sheets / compact panels
 }
 
 // === Spacing scale ===
@@ -106,8 +106,9 @@ fun compactTouchTarget(surface: Dp): Dp =
 
 // Reserves the compact touch slot around a smaller visual surface without
 // stretching it: the child is measured with loose minimums and centered in a
-// slot of at least compactTouchTarget(surface). Place it before the visual
-// size modifiers.
+// slot of at least compactTouchTarget(surface). Place clickable/semantics
+// before it (so the pointer hit-box covers the full slot), and visual size
+// modifiers after it.
 fun Modifier.compactTouchTarget(surface: Dp): Modifier = layout { measurable, constraints ->
     val target = dev.mirutime.uikit.compactTouchTarget(surface).roundToPx()
     // Only minimums below the slot are loosened: a caller fill (fillMaxWidth)

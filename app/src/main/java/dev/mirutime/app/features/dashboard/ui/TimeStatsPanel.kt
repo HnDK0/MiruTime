@@ -3,6 +3,7 @@ package dev.mirutime.app.features.dashboard.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,11 +12,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -29,17 +30,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSpace
-import dev.mirutime.uikit.miruCardElevation
-import dev.mirutime.uikit.miruCardSurface
+import dev.mirutime.uikit.isLargeText
 import dev.mirutime.app.features.dashboard.domain.ReadingStats
 import java.time.LocalDate
 import java.time.format.TextStyle
-import java.util.Locale
 import dev.mirutime.uikit.LocalMiruLocale
 import dev.mirutime.uikit.miruDecimal
 import kotlin.math.abs
@@ -61,15 +59,14 @@ internal fun formatDurationLocalized(ms: Long): String {
     }
 }
 
-private val WeekBarArea = 56.dp
-private val WeekBarMax = 26.dp
+private val WeekBarArea = 32.dp
+private val WeekBarMax = 16.dp
 
-// "Today" panel, one plate, three reads from top to bottom:
-//   1. the total (big) + how it compares with yesterday,
-//   2. how it splits between reading and listening (one bar + legend),
-//   3. the last 7 days as small bars, today highlighted, with the daily mean.
-// Inks are the plate-verified ones only: accent for read / today, muted for
-// listened / other days, so contrast holds on photo themes too.
+// Compact "Today" Bento stats block (no standalone outer plate; hosted inside a
+// MiruCard at the top of Dashboard):
+//   1. TODAY eyebrow + delta alongside total time and compact read/TTS legend,
+//   2. 5dp split bar,
+//   3. 7-day spark-chart (32dp bars) with daily mean.
 @Composable
 fun TimeStatsPanel(
     stats: ReadingStats,
@@ -77,38 +74,31 @@ fun TimeStatsPanel(
 ) {
     val extra = LocalMiruExtraColors.current
     val total = stats.today.totalMs
-    // No plate of its own: the dashboard puts it inside the "Today" section
-    // card (header + hairline + this), like every other titled section.
-    run {
-        Column(
-            modifier = modifier
-                .fillMaxWidth()
-                .semantics(mergeDescendants = true) {},
-        ) {
-            // 1. Total + delta
-            Row(verticalAlignment = Alignment.Bottom) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(R.string.dash_stat_today_total),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = extra.muted,
-                    )
-                    Text(
-                        text = formatDurationLocalized(total),
-                        style = MaterialTheme.typography.displaySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+    val largeText = isLargeText()
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {},
+    ) {
+        if (largeText) {
+            Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.Xxs)) {
+                Text(
+                    text = stringResource(R.string.dash_today),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = extra.accent,
+                )
                 DeltaLabel(todayMs = total, yesterdayMs = stats.yesterdayMs)
             }
-
-            // 2. Read / listened split
-            Spacer(modifier = Modifier.height(MiruSpace.L))
-            SplitBar(readMs = stats.today.readMs, listenMs = stats.today.listenMs)
-            Spacer(modifier = Modifier.height(MiruSpace.M))
-            Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.L)) {
+            Spacer(modifier = Modifier.height(MiruSpace.Xxs))
+            Text(
+                text = formatDurationLocalized(total),
+                style = MaterialTheme.typography.displaySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(modifier = Modifier.height(MiruSpace.Xs))
+            Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.Xxs)) {
                 LegendItem(
                     color = extra.accent,
                     value = formatDurationLocalized(stats.today.readMs),
@@ -120,13 +110,65 @@ fun TimeStatsPanel(
                     label = stringResource(R.string.dash_stat_listened),
                 )
             }
-
-            // 3. Last 7 days
-            Spacer(modifier = Modifier.height(MiruSpace.L))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-            Spacer(modifier = Modifier.height(MiruSpace.M))
-            WeekChart(weekMs = stats.weekMs)
+        } else {
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val maxLegendWidth = maxWidth * 0.48f
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.dash_today),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = extra.accent,
+                                maxLines = 1,
+                            )
+                            DeltaLabel(todayMs = total, yesterdayMs = stats.yesterdayMs)
+                        }
+                        Spacer(modifier = Modifier.height(MiruSpace.Xxs))
+                        Text(
+                            text = formatDurationLocalized(total),
+                            style = MaterialTheme.typography.displaySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(MiruSpace.Xxs),
+                        modifier = Modifier
+                            .widthIn(max = maxLegendWidth)
+                            .padding(start = MiruSpace.S),
+                    ) {
+                        LegendItem(
+                            color = extra.accent,
+                            value = formatDurationLocalized(stats.today.readMs),
+                            label = stringResource(R.string.dash_stat_read),
+                        )
+                        LegendItem(
+                            color = extra.muted,
+                            value = formatDurationLocalized(stats.today.listenMs),
+                            label = stringResource(R.string.dash_stat_listened),
+                        )
+                    }
+                }
+            }
         }
+
+        Spacer(modifier = Modifier.height(MiruSpace.S))
+        SplitBar(readMs = stats.today.readMs, listenMs = stats.today.listenMs)
+
+        Spacer(modifier = Modifier.height(MiruSpace.S))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+        Spacer(modifier = Modifier.height(MiruSpace.S))
+        WeekChart(weekMs = stats.weekMs)
     }
 }
 
@@ -146,12 +188,12 @@ private fun DeltaLabel(todayMs: Long, yesterdayMs: Long) {
         text = stringResource(R.string.dash_stat_vs_yesterday_fmt, sign + value),
         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
         color = if (delta > 0) LocalMiruExtraColors.current.accent else LocalMiruExtraColors.current.muted,
-        maxLines = 1,
-        modifier = Modifier.padding(start = MiruSpace.M, bottom = MiruSpace.Xs),
+        maxLines = if (isLargeText()) 2 else 1,
+        overflow = TextOverflow.Ellipsis,
     )
 }
 
-// One bar, two segments sized by share. With nothing logged yet it is just
+// One slim bar, two segments sized by share. With nothing logged yet it is just
 // the empty track.
 @Composable
 private fun SplitBar(readMs: Long, listenMs: Long) {
@@ -160,7 +202,7 @@ private fun SplitBar(readMs: Long, listenMs: Long) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(8.dp)
+            .height(5.dp)
             .clip(RoundedCornerShape(MiruRadius.Split))
             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f)),
     ) {
@@ -169,7 +211,7 @@ private fun SplitBar(readMs: Long, listenMs: Long) {
                 Box(
                     modifier = Modifier
                         .weight(readMs.toFloat())
-                        .height(8.dp)
+                        .height(5.dp)
                         .background(extra.accent),
                 )
             }
@@ -178,7 +220,7 @@ private fun SplitBar(readMs: Long, listenMs: Long) {
                 Box(
                     modifier = Modifier
                         .weight(listenMs.toFloat())
-                        .height(8.dp)
+                        .height(5.dp)
                         .background(extra.muted),
                 )
             }
@@ -191,22 +233,24 @@ private fun LegendItem(color: androidx.compose.ui.graphics.Color, value: String,
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
-                .size(8.dp)
+                .size(6.dp)
                 .background(color, CircleShape),
         )
-        Spacer(modifier = Modifier.width(MiruSpace.S))
+        Spacer(modifier = Modifier.width(MiruSpace.Xs))
         Text(
             text = value,
             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
-        Spacer(modifier = Modifier.width(4.dp))
+        Spacer(modifier = Modifier.width(MiruSpace.Xxs))
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
             color = LocalMiruExtraColors.current.muted,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -227,21 +271,46 @@ private fun WeekChart(weekMs: List<Long>) {
         }
     }
 
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = stringResource(R.string.dash_week_title),
-            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            text = stringResource(R.string.dash_week_avg_fmt, formatDurationLocalized(average)),
-            style = MaterialTheme.typography.bodySmall,
-            color = extra.muted,
-            maxLines = 1,
-        )
+    val avgText = stringResource(R.string.dash_week_avg_fmt, formatDurationLocalized(average))
+    if (isLargeText()) {
+        Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.Xxs)) {
+            Text(
+                text = stringResource(R.string.dash_week_title),
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = avgText,
+                style = MaterialTheme.typography.bodySmall,
+                color = extra.muted,
+            )
+        }
+    } else {
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val maxAvgWidth = maxWidth / 2
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(R.string.dash_week_title),
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = avgText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = extra.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .widthIn(max = maxAvgWidth)
+                        .padding(start = MiruSpace.S),
+                )
+            }
+        }
     }
-    Spacer(modifier = Modifier.height(MiruSpace.M))
+    Spacer(modifier = Modifier.height(MiruSpace.Xs))
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -260,22 +329,15 @@ private fun WeekChart(weekMs: List<Long>) {
                 ) {
                     // Empty day = a short neutral stub, never an invisible bar.
                     val barHeight = if (ms <= 0L) {
-                        4.dp
+                        3.dp
                     } else {
-                        (WeekBarArea * (ms.toFloat() / max)).coerceAtLeast(6.dp)
+                        (WeekBarArea * (ms.toFloat() / max)).coerceAtLeast(5.dp)
                     }
                     Box(
                         modifier = Modifier
                             .width(WeekBarMax)
                             .height(barHeight)
-                            .clip(
-                                RoundedCornerShape(
-                                    topStart = MiruRadius.Badge,
-                                    topEnd = MiruRadius.Badge,
-                                    bottomStart = MiruRadius.Split,
-                                    bottomEnd = MiruRadius.Split,
-                                ),
-                            )
+                            .clip(RoundedCornerShape(MiruRadius.Split))
                             .background(
                                 when {
                                     ms <= 0L -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f)
@@ -285,13 +347,13 @@ private fun WeekChart(weekMs: List<Long>) {
                             ),
                     )
                 }
-                Spacer(modifier = Modifier.height(MiruSpace.S))
+                Spacer(modifier = Modifier.height(MiruSpace.Xxs))
                 Text(
                     text = days[index],
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
                     ),
-                    color = if (isToday) MaterialTheme.colorScheme.onSurface else extra.muted,
+                    color = if (isToday) extra.accent else extra.muted,
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                 )

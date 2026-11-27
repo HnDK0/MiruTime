@@ -467,6 +467,7 @@
     <string name="import_err_no_space_fmt">Не хватает свободного места: для импорта нужно %1$d МБ.</string>
 
     <!-- Dashboard -->
+    <string name="dash_continue_reading">Продолжить чтение</string>
     <string name="dash_today">Сегодня</string>
     <string name="dash_today_desc">Время, которое вы читали и слушали</string>
     <string name="dash_stat_read">прочитано</string>
@@ -745,7 +746,7 @@
     <string name="finder_ext_no_match">Нет расширений под эти фильтры.</string>
     <string name="finder_ext_query_hint">Поиск расширений</string>
     <string name="finder_ext_row_fmt">%1$s · v%2$s · %3$s</string>
-    <string name="finder_ext_sheet_desc">Тип, язык и статус для списка. Запрос остаётся в поле поиска выше.</string>
+    <string name="finder_ext_sheet_desc">Тип и язык для списка. Запрос остаётся в поле поиска выше.</string>
     <string name="finder_ext_sheet_title">Фильтры</string>
     <string name="finder_ext_status_disabled">Выключено</string>
     <string name="finder_ext_status_enabled">Включено</string>

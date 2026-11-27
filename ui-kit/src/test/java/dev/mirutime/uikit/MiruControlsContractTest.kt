@@ -81,6 +81,12 @@ class MiruControlsContractTest {
         assertTrue(buttons.contains("Color.Transparent"))
         assertTrue(buttons.contains("selected: Boolean? = null"))
         assertTrue(buttons.contains("selected?.let { this.selected = it }"))
+
+        val roundButton = source("MiruRoundIconButton")
+        assertFalse(roundButton.contains("enabled && !busy"))
+        assertTrue(roundButton.contains("enabled = enabled"))
+        assertTrue(roundButton.contains("busy = busy"))
+        assertTrue(roundButton.contains("busyDescription = busyDescription"))
     }
 
     @Test

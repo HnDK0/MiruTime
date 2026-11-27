@@ -101,6 +101,7 @@ data class MiruExtraColors(
     val onScrim: Color,
     val scrimMuted: Color,
     val pillBg: Color,
+    val scrimStar: Color = Color(0xFFFFD166),
     // Photo-zone ink roles (custom background only): the per-band veil presses
     // each strip until white ink holds, so the zone only carries ink, soft ink
     // and the text shadow. Defaults = the dark-strip language classic
@@ -113,12 +114,11 @@ data class MiruExtraColors(
 // Cover tokens: gradient end and pill stay semi-transparent per user rule
 // (readable text + element, cover shows through) — never opaque black.
 // Chrome standard (header/nav on a custom image): one translucent veil so
-// the element AND the background stay visible. Slightly more transparent
-// than before (0.60/0.55 → 0.50/0.45) so art shows through on every theme.
+// the element AND the background stay visible.
 private val CardScrim = Color(0xFF000000).copy(alpha = 0.5f)
 private val CardOnScrim = Color(0xFFFFFFFF)
 private val CardScrimMuted = Color(0xFFC9C6BD)
-private val CardPillBg = Color(0xFF000000).copy(alpha = 0.45f)
+private val CardPillBg = Color(0xFF000000).copy(alpha = 0.62f)
 
 // === Photo zones: ink per strip over a custom background image ===
 // BgPalette presses each band with its own black veil (light ink holds 4.5:1
@@ -317,7 +317,18 @@ fun miruPlateBorder(): BorderStroke? =
     if (LocalMiruOnImage.current) {
         BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.20f))
     } else {
-        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        val edge = MaterialTheme.colorScheme.outlineVariant
+        BorderStroke(1.dp, if (edge == Color.White) edge.copy(alpha = 0.35f) else edge)
+    }
+
+@Composable
+fun miruCardBorder(): BorderStroke =
+    if (LocalMiruOnImage.current) {
+        BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+    } else {
+        val edge = MaterialTheme.colorScheme.outlineVariant
+        val factor = if (edge == Color.White) 0.22f else 0.40f
+        BorderStroke(1.dp, edge.copy(alpha = edge.alpha * factor))
     }
 
 private val PaperScheme = lightColorScheme(
@@ -410,10 +421,10 @@ private val SepiaExtra = MiruExtraColors(
 // Nord/Catppuccin/Mocha mirror NoveLA's signature dark palettes (same hex
 // roles, subset our UI reads).
 private val NordScheme = darkColorScheme(
-    background = Color(0xFF2E3440),
+    background = Color(0xFF242933),
     surface = Color(0xFF2E3440),
     surfaceVariant = Color(0xFF414C5C),
-    surfaceContainerLow = Color(0xFF3E4756),
+    surfaceContainerLow = Color(0xFF38404F),
     onBackground = Color(0xFFECEFF4),
     onSurface = Color(0xFFECEFF4),
     onSurfaceVariant = Color(0xFFECEFF4),
@@ -439,10 +450,10 @@ private val NordExtra = MiruExtraColors(
 )
 
 private val CatppuccinScheme = darkColorScheme(
-    background = Color(0xFF181825),
-    surface = Color(0xFF181825),
-    surfaceVariant = Color(0xFF1E1E2E),
-    surfaceContainerLow = Color(0xFF161622),
+    background = Color(0xFF141420),
+    surface = Color(0xFF1E1E2E),
+    surfaceVariant = Color(0xFF313244),
+    surfaceContainerLow = Color(0xFF28283D),
     onBackground = Color(0xFFCDD6F4),
     onSurface = Color(0xFFCDD6F4),
     onSurfaceVariant = Color(0xFFCDD6F4),
@@ -468,10 +479,10 @@ private val CatppuccinExtra = MiruExtraColors(
 )
 
 private val MochaScheme = darkColorScheme(
-    background = Color(0xFF19120C),
-    surface = Color(0xFF19120D),
+    background = Color(0xFF140E09),
+    surface = Color(0xFF201711),
     surfaceVariant = Color(0xFF52443C),
-    surfaceContainerLow = Color(0xFF221A14),
+    surfaceContainerLow = Color(0xFF2B2018),
     onBackground = Color(0xFFEFDFD6),
     onSurface = Color(0xFFF0DFD6),
     onSurfaceVariant = Color(0xFFD7C3B8),
@@ -500,15 +511,15 @@ private val MochaExtra = MiruExtraColors(
 // (subset our UI reads). Extras derive accent/warm from theme roles; muted
 // is a dim tone of each theme.
 private val TachiyomiScheme = darkColorScheme(
-    background = Color(0xFF0C0C0C),
-    surface = Color(0xFF0C0C0C),
-    surfaceVariant = Color(0xFF0C0C0C),
-    surfaceContainerLow = Color(0xFF0C0C0C),
+    background = Color(0xFF0B0C0E),
+    surface = Color(0xFF15171A),
+    surfaceVariant = Color(0xFF252930),
+    surfaceContainerLow = Color(0xFF1E2126),
     onBackground = Color(0xFFEBEEF1),
     onSurface = Color(0xFFEBEEF1),
     onSurfaceVariant = Color(0xBFE1E6EB),
-    outline = Color(0x1AE1E6EB),
-    outlineVariant = Color(0x1AE1E6EB),
+    outline = Color(0xFF4B535E),
+    outlineVariant = Color(0xFF3A414A),
     primary = Color(0xFF0088FF),
     onPrimary = Color(0xFFFFFFFF),
     primaryContainer = Color(0xFF003A7A),
@@ -529,10 +540,10 @@ private val TachiyomiExtra = MiruExtraColors(
 )
 
 private val GreenAppleScheme = darkColorScheme(
-    background = Color(0xFF0F1510),
-    surface = Color(0xFF0F1510),
+    background = Color(0xFF0B100C),
+    surface = Color(0xFF151D16),
     surfaceVariant = Color(0xFF3F493F),
-    surfaceContainerLow = Color(0xFF181D18),
+    surfaceContainerLow = Color(0xFF1E2820),
     onBackground = Color(0xFFDFE4DB),
     onSurface = Color(0xFFDFE4DB),
     onSurfaceVariant = Color(0xFFBECABC),
@@ -558,10 +569,10 @@ private val GreenAppleExtra = MiruExtraColors(
 )
 
 private val LavenderScheme = darkColorScheme(
-    background = Color(0xFF111129),
-    surface = Color(0xFF111129),
+    background = Color(0xFF0D0D20),
+    surface = Color(0xFF171633),
     surfaceVariant = Color(0xFF3D2F6B),
-    surfaceContainerLow = Color(0xFF171531),
+    surfaceContainerLow = Color(0xFF211F42),
     onBackground = Color(0xFFE7E0EC),
     onSurface = Color(0xFFE7E0EC),
     onSurfaceVariant = Color(0xFFCBC3D6),
@@ -587,10 +598,10 @@ private val LavenderExtra = MiruExtraColors(
 )
 
 private val MidnightDuskScheme = darkColorScheme(
-    background = Color(0xFF16151D),
-    surface = Color(0xFF16151D),
+    background = Color(0xFF121018),
+    surface = Color(0xFF1C1824),
     surfaceVariant = Color(0xFF281624),
-    surfaceContainerLow = Color(0xFF251522),
+    surfaceContainerLow = Color(0xFF271F30),
     onBackground = Color(0xFFE5E1E5),
     onSurface = Color(0xFFE5E1E5),
     onSurfaceVariant = Color(0xFFD6C1C4),
@@ -615,10 +626,10 @@ private val MidnightDuskExtra = MiruExtraColors(
 )
 
 private val StrawberryDaiquiriScheme = darkColorScheme(
-    background = Color(0xFF201A1A),
-    surface = Color(0xFF201A1A),
+    background = Color(0xFF181313),
+    surface = Color(0xFF241D1D),
     surfaceVariant = Color(0xFF322727),
-    surfaceContainerLow = Color(0xFF302525),
+    surfaceContainerLow = Color(0xFF302626),
     onBackground = Color(0xFFF7DCDD),
     onSurface = Color(0xFFF7DCDD),
     onSurfaceVariant = Color(0xFFE1BEC0),
@@ -644,10 +655,10 @@ private val StrawberryDaiquiriExtra = MiruExtraColors(
 )
 
 private val TakoScheme = darkColorScheme(
-    background = Color(0xFF21212E),
-    surface = Color(0xFF21212E),
+    background = Color(0xFF191924),
+    surface = Color(0xFF232332),
     surfaceVariant = Color(0xFF2A2A3C),
-    surfaceContainerLow = Color(0xFF21212E),
+    surfaceContainerLow = Color(0xFF2D2D40),
     onBackground = Color(0xFFE3E0F2),
     onSurface = Color(0xFFE3E0F2),
     onSurfaceVariant = Color(0xFFCBC4CE),
@@ -673,10 +684,10 @@ private val TakoExtra = MiruExtraColors(
 )
 
 private val TealTurquoiseScheme = darkColorScheme(
-    background = Color(0xFF202125),
-    surface = Color(0xFF202125),
+    background = Color(0xFF16181B),
+    surface = Color(0xFF202428),
     surfaceVariant = Color(0xFF233133),
-    surfaceContainerLow = Color(0xFF222F31),
+    surfaceContainerLow = Color(0xFF283035),
     onBackground = Color(0xFFDFDEDA),
     onSurface = Color(0xFFDFDEDA),
     onSurfaceVariant = Color(0xFFDFDEDA),
@@ -701,14 +712,15 @@ private val TealTurquoiseExtra = MiruExtraColors(
 )
 
 private val TidalWaveScheme = darkColorScheme(
-    background = Color(0xFF001C3B),
-    surface = Color(0xFF001C3B),
+    background = Color(0xFF00142B),
+    surface = Color(0xFF062242),
     surfaceVariant = Color(0xFF082B4B),
-    surfaceContainerLow = Color(0xFF072947),
+    surfaceContainerLow = Color(0xFF0D2E54),
     onBackground = Color(0xFFD5E3FF),
     onSurface = Color(0xFFD5E3FF),
     onSurfaceVariant = Color(0xFFBFC8CC),
     outline = Color(0xFF8A9296),
+    outlineVariant = Color(0xFF1A3A5C),
     primary = Color(0xFF5ED4FC),
     onPrimary = Color(0xFF003544),
     primaryContainer = Color(0xFF004D61),
@@ -728,10 +740,10 @@ private val TidalWaveExtra = MiruExtraColors(
 )
 
 private val YotsubaScheme = darkColorScheme(
-    background = Color(0xFF211A18),
-    surface = Color(0xFF211A18),
+    background = Color(0xFF191311),
+    surface = Color(0xFF251D1A),
     surfaceVariant = Color(0xFF332723),
-    surfaceContainerLow = Color(0xFF312521),
+    surfaceContainerLow = Color(0xFF312622),
     onBackground = Color(0xFFEDE0DD),
     onSurface = Color(0xFFEDE0DD),
     onSurfaceVariant = Color(0xFFD8C2BC),
@@ -785,10 +797,10 @@ private val MonochromeExtra = MiruExtraColors(
 )
 
 private val YinYangScheme = darkColorScheme(
-    background = Color(0xFF1E1E1E),
-    surface = Color(0xFF1E1E1E),
+    background = Color(0xFF141414),
+    surface = Color(0xFF1F1F1F),
     surfaceVariant = Color(0xFF313131),
-    surfaceContainerLow = Color(0xFF2D2D2D),
+    surfaceContainerLow = Color(0xFF2A2A2A),
     onBackground = Color(0xFFE6E6E6),
     onSurface = Color(0xFFE6E6E6),
     onSurfaceVariant = Color(0xFFD1D1D1),
@@ -813,10 +825,10 @@ private val YinYangExtra = MiruExtraColors(
 )
 
 private val CloudflareScheme = darkColorScheme(
-    background = Color(0xFF1B1B22),
-    surface = Color(0xFF1B1B22),
+    background = Color(0xFF131318),
+    surface = Color(0xFF1D1D25),
     surfaceVariant = Color(0xFF3F3F46),
-    surfaceContainerLow = Color(0xFF1B1B22),
+    surfaceContainerLow = Color(0xFF272731),
     onBackground = Color(0xFFEFF2F5),
     onSurface = Color(0xFFEFF2F5),
     onSurfaceVariant = Color(0xFFD0CDD4),
@@ -841,10 +853,10 @@ private val CloudflareExtra = MiruExtraColors(
 )
 
 private val CottonCandyScheme = darkColorScheme(
-    background = Color(0xFF1A1111),
-    surface = Color(0xFF1A1112),
+    background = Color(0xFF140D0E),
+    surface = Color(0xFF201617),
     surfaceVariant = Color(0xFF524343),
-    surfaceContainerLow = Color(0xFF22191A),
+    surfaceContainerLow = Color(0xFF2B1E20),
     onBackground = Color(0xFFF0DEDE),
     onSurface = Color(0xFFF0DEDF),
     onSurfaceVariant = Color(0xFFD7C1C1),
@@ -870,10 +882,10 @@ private val CottonCandyExtra = MiruExtraColors(
 )
 
 private val DoomScheme = darkColorScheme(
-    background = Color(0xFF1B1B1B),
-    surface = Color(0xFF1B1B1B),
+    background = Color(0xFF121212),
+    surface = Color(0xFF1D1D1D),
     surfaceVariant = Color(0xFF303030),
-    surfaceContainerLow = Color(0xFF181818),
+    surfaceContainerLow = Color(0xFF272727),
     onBackground = Color(0xFFFFFFFF),
     onSurface = Color(0xFFFFFFFF),
     onSurfaceVariant = Color(0xFFD0CCCC),
@@ -898,10 +910,10 @@ private val DoomExtra = MiruExtraColors(
 )
 
 private val MatrixScheme = darkColorScheme(
-    background = Color(0xFF111111),
-    surface = Color(0xFF111111),
+    background = Color(0xFF0A0D0A),
+    surface = Color(0xFF141914),
     surfaceVariant = Color(0xFF212121),
-    surfaceContainerLow = Color(0xFF0E0E0E),
+    surfaceContainerLow = Color(0xFF1C231C),
     onBackground = Color(0xFFFFFFFF),
     onSurface = Color(0xFFFFFFFF),
     onSurfaceVariant = Color(0xFFD0D0D0),
@@ -926,10 +938,10 @@ private val MatrixExtra = MiruExtraColors(
 )
 
 private val SapphireScheme = darkColorScheme(
-    background = Color(0xFF212121),
-    surface = Color(0xFF212121),
+    background = Color(0xFF14171C),
+    surface = Color(0xFF1E2229),
     surfaceVariant = Color(0xFF424242),
-    surfaceContainerLow = Color(0xFF1C2430),
+    surfaceContainerLow = Color(0xFF272D36),
     onBackground = Color(0xFFFFFFFF),
     onSurface = Color(0xFFFFFFFF),
     onSurfaceVariant = Color(0xFFD0D0D0),

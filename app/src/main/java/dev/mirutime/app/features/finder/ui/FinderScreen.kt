@@ -3,20 +3,26 @@
 package dev.mirutime.app.features.finder.ui
 
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Category
@@ -45,9 +51,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mirutime.app.R
@@ -55,6 +63,7 @@ import dev.mirutime.app.design.rememberPersistedState
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruIconButton
 import dev.mirutime.uikit.MiruIconButtonStyle
+import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSearchDecoration
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
@@ -63,6 +72,7 @@ import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
 import dev.mirutime.uikit.SkeletonBar
 import dev.mirutime.uikit.AppBottomSheet
+import dev.mirutime.uikit.miruCardBorder
 import dev.mirutime.uikit.miruCardElevation
 import dev.mirutime.uikit.isLargeText
 import dev.mirutime.uikit.miruCardSurface
@@ -160,7 +170,12 @@ fun FinderScreen(
     val all = sources
     val visible = remember(all, filters) { all.orEmpty().applyBrowse(filters) }
     val languages = remember(all) {
-        all.orEmpty().filter { !it.local }.map { it.language }.distinct().sorted()
+        all.orEmpty()
+            .filter { !it.local }
+            .map { it.language }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
     }
 
     LazyColumn(
@@ -176,29 +191,64 @@ fun FinderScreen(
         item(key = "global-search") {
             GlobalSearchEntry(onClick = onSearchOpen)
         }
-        item(key = "big-buttons") {
-            Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.M)) {
-                BigActionButton(
-                    icon = Icons.Filled.Link,
-                    label = stringResource(R.string.finder_big_add_url),
-                    onClick = { linkOpen = true },
-                    modifier = Modifier.weight(1f),
-                )
-                BigActionButton(
-                    icon = Icons.Filled.UploadFile,
-                    label = stringResource(R.string.finder_big_import),
-                    onClick = { importOpen = true },
-                    modifier = Modifier.weight(1f),
-                )
+        item(key = "quick-actions") {
+            val addUrlLabel = stringResource(R.string.finder_big_add_url)
+            val importLabel = stringResource(R.string.finder_big_import)
+            val opdsLabel = stringResource(R.string.opds_entry)
+            if (LocalDensity.current.fontScale > 1.1f || isLargeText()) {
+                Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
+                    BigActionButton(
+                        icon = Icons.Filled.Link,
+                        label = addUrlLabel,
+                        onClick = { linkOpen = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    BigActionButton(
+                        icon = Icons.Filled.UploadFile,
+                        label = importLabel,
+                        onClick = { importOpen = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    BigActionButton(
+                        icon = Icons.Filled.Language,
+                        label = opdsLabel,
+                        onClick = { opdsAddOpen = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            } else {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Max),
+                ) {
+                    QuickActionTile(
+                        icon = Icons.Filled.Link,
+                        label = addUrlLabel,
+                        onClick = { linkOpen = true },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                    )
+                    QuickActionTile(
+                        icon = Icons.Filled.UploadFile,
+                        label = importLabel,
+                        onClick = { importOpen = true },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                    )
+                    QuickActionTile(
+                        icon = Icons.Filled.Language,
+                        label = opdsLabel,
+                        onClick = { opdsAddOpen = true },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                    )
+                }
             }
-        }
-        item(key = "opds") {
-            BigActionButton(
-                icon = Icons.Filled.Language,
-                label = stringResource(R.string.opds_entry),
-                onClick = { opdsAddOpen = true },
-                modifier = Modifier.fillMaxWidth(),
-            )
         }
         item(key = "browse") {
             MiruSectionCard(
@@ -280,7 +330,7 @@ fun FinderScreen(
                         )
                     }
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 when {
                     all == null -> Column(
                         modifier = Modifier.padding(MiruSpace.L),
@@ -525,7 +575,7 @@ private fun SourceRow(
                         source.language,
                         source.libraryCount,
                         typeLabel(source.type),
-                    )
+                    ).trimStart().removePrefix("·").trimStart()
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = extra.muted,
@@ -546,7 +596,59 @@ private fun SourceRow(
     }
 }
 
-// Big action button: icon + up to two lines of label on a card plate.
+// Compact Bento tile for the 3-column quick-actions strip at normal text size.
+@Composable
+private fun QuickActionTile(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val extra = LocalMiruExtraColors.current
+    val shape = MaterialTheme.shapes.medium
+    Surface(
+        shape = shape,
+        color = miruCardSurface(),
+        shadowElevation = miruCardElevation(),
+        border = miruCardBorder(),
+        modifier = modifier.heightIn(min = 68.dp),
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(MiruSpace.Xs, Alignment.CenterVertically),
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(shape)
+                .clickable(role = Role.Button, onClick = onClick)
+                .padding(horizontal = MiruSpace.S, vertical = MiruSpace.S),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(MiruRadius.Badge))
+                    .background(extra.accent.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = extra.accent,
+                    modifier = Modifier.size(MiruSize.IconCompact),
+                )
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+// Large-text fallback row: icon + up to two lines of label on a card plate.
 @Composable
 private fun BigActionButton(
     icon: ImageVector,
@@ -559,6 +661,7 @@ private fun BigActionButton(
         shape = MaterialTheme.shapes.medium,
         color = miruCardSurface(),
         shadowElevation = miruCardElevation(),
+        border = miruCardBorder(),
         modifier = modifier.defaultMinSize(minHeight = MiruSize.ButtonPrimary),
     ) {
         Row(

@@ -25,6 +25,9 @@ fun MiruRoundIconButton(
     contentDescription: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    busy: Boolean = false,
+    busyDescription: String? = null,
     badgeCount: Int = 0,
     badgeContentDescription: String? = null,
 ) {
@@ -35,6 +38,9 @@ fun MiruRoundIconButton(
             contentDescription = contentDescription,
             onClick = onClick,
             style = MiruIconButtonStyle.Plate,
+            enabled = enabled,
+            busy = busy,
+            busyDescription = busyDescription,
             stateDescription = badgeContentDescription
                 ?: if (badgeCount > 0) {
                     if (badgeCount > 99) "99+" else badgeCount.toString()

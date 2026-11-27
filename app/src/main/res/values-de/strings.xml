@@ -465,6 +465,7 @@
     <string name="book_genres_less">Weniger</string>
 
     <!-- Dashboard -->
+    <string name="dash_continue_reading">Weiterlesen</string>
     <string name="dash_today">Heute</string>
     <string name="dash_today_desc">Zeit, die du mit Lesen und Hören verbracht hast</string>
     <string name="dash_stat_read">gelesen</string>
@@ -721,7 +722,7 @@
     <string name="finder_ext_no_match">Keine Erweiterungen passen zu diesen Filtern.</string>
     <string name="finder_ext_query_hint">Erweiterungen suchen</string>
     <string name="finder_ext_row_fmt">%1$s · v%2$s · %3$s</string>
-    <string name="finder_ext_sheet_desc">Typ, Sprache und Status für die Liste. Der Suchbegriff bleibt oben im Suchfeld.</string>
+    <string name="finder_ext_sheet_desc">Typ und Sprache für die Liste. Der Suchbegriff bleibt oben im Suchfeld.</string>
     <string name="finder_ext_sheet_title">Filter</string>
     <string name="finder_ext_status_disabled">Deaktiviert</string>
     <string name="finder_ext_status_enabled">Aktiviert</string>

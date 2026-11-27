@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -66,9 +67,11 @@ import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
+import dev.mirutime.uikit.ChipRail
 import dev.mirutime.app.design.components.BookCover
 import dev.mirutime.app.design.rememberPersistedEnum
 import dev.mirutime.uikit.MiruActionRow
+import dev.mirutime.uikit.MiruCard
 import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
@@ -253,23 +256,28 @@ fun DownloadsScreen(
     SettingsPage(contentPadding) {
         busyLabel?.let { label ->
             item(key = "busy") {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = MiruSpace.S),
+                MiruCard(
+                    contentPadding = PaddingValues(
+                        horizontal = MiruSpace.L,
+                        vertical = MiruSpace.S,
+                    ),
                 ) {
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        color = LocalMiruExtraColors.current.accent,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(modifier = Modifier.width(MiruSpace.S))
-                    Text(
-                        text = stringResource(label),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = LocalMiruExtraColors.current.muted,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            color = LocalMiruExtraColors.current.accent,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(modifier = Modifier.width(MiruSpace.S))
+                        Text(
+                            text = stringResource(label),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = LocalMiruExtraColors.current.muted,
+                        )
+                    }
                 }
             }
         }
@@ -283,21 +291,26 @@ fun DownloadsScreen(
                     if (!usageLoaded) {
                         SkeletonBar(
                             modifier = Modifier.fillMaxWidth(),
-                            height = 14.dp,
+                            height = 8.dp,
                         )
                     } else {
+                        val nonEmptySlices = remember(usage, slices) {
+                            slices.filter { it.bytes > 0L }
+                        }
                         Row(
+                            horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xxs),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(14.dp)
-                                .clip(RoundedCornerShape(MiruRadius.Chip))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(MiruRadius.Split))
+                                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f)),
                         ) {
-                            slices.filter { it.bytes > 0L }.forEach { slice ->
+                            nonEmptySlices.forEach { slice ->
                                 Box(
                                     modifier = Modifier
                                         .weight(slice.bytes.toFloat())
                                         .fillMaxHeight()
+                                        .clip(RoundedCornerShape(MiruRadius.Split))
                                         .background(slice.color),
                                 )
                             }
@@ -315,33 +328,35 @@ fun DownloadsScreen(
                 )
             }
         }
-        item(key = "tabs") {
-            Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                MiruFilterChip(
-                    selected = tab == DlTab.Downloaded,
-                    onClick = { tab = DlTab.Downloaded },
-                    label = downloadedLabel,
-                )
-                MiruFilterChip(
-                    selected = tab == DlTab.Queue,
-                    onClick = { tab = DlTab.Queue },
-                    label = queueLabel,
-                )
-            }
-        }
-        if (!rowsLoaded) {
-            item(key = "loading") {
-                DownloadsSkeleton()
-            }
-        } else if (shown.isEmpty()) {
-            item(key = "empty") {
-                MiruSectionCard(
-                    title = stringResource(
-                        if (tab == DlTab.Downloaded) R.string.dl_tab_downloaded else R.string.dl_tab_queue,
+        item(key = "downloads-list") {
+            MiruCard(contentPadding = PaddingValues(0.dp)) {
+                ChipRail(
+                    contentPadding = PaddingValues(
+                        horizontal = MiruSpace.L,
+                        vertical = MiruSpace.S,
                     ),
-                    contentPadding = PaddingValues(0.dp),
                 ) {
-                    SectionMessage(
+                    item(key = DlTab.Downloaded.name) {
+                        MiruFilterChip(
+                            selected = tab == DlTab.Downloaded,
+                            onClick = { tab = DlTab.Downloaded },
+                            label = downloadedLabel,
+                        )
+                    }
+                    item(key = DlTab.Queue.name) {
+                        MiruFilterChip(
+                            selected = tab == DlTab.Queue,
+                            onClick = { tab = DlTab.Queue },
+                            label = queueLabel,
+                        )
+                    }
+                }
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                )
+                when {
+                    !rowsLoaded -> DownloadsSkeleton()
+                    shown.isEmpty() -> SectionMessage(
                         stringResource(
                             if (tab == DlTab.Downloaded) {
                                 R.string.dl_empty_done
@@ -350,54 +365,49 @@ fun DownloadsScreen(
                             },
                         ),
                     )
-                }
-            }
-        } else if (tab == DlTab.Downloaded) {
-            item(key = "downloaded") {
-                MiruSectionCard(
-                    title = stringResource(R.string.dl_completed_fmt, historyRows.size),
-                    contentPadding = PaddingValues(0.dp),
-                ) {
-                    historyRows.forEachIndexed { index, row ->
-                        if (index > 0) MiruRowDivider()
-                        WorkRow(
-                            work = row,
-                            translation = translationSummaries[row.bookId]
-                                ?: TranslationQueueSummary(),
-                            onClick = { onOpenBook(row.bookUrl) },
-                            onMore = { actionsFor = row },
-                        )
+                    tab == DlTab.Downloaded -> {
+                        historyRows.forEachIndexed { index, row ->
+                            if (index > 0) MiruRowDivider()
+                            androidx.compose.runtime.key(row.bookId) {
+                                WorkRow(
+                                    work = row,
+                                    translation = translationSummaries[row.bookId]
+                                        ?: TranslationQueueSummary(),
+                                    onClick = { onOpenBook(row.bookUrl) },
+                                    onMore = { actionsFor = row },
+                                )
+                            }
+                        }
                     }
-                }
-            }
-        } else {
-            item(key = "queue") {
-                MiruSectionCard(
-                    title = stringResource(R.string.dl_in_progress_fmt, activeRows.size),
-                    contentPadding = PaddingValues(0.dp),
-                ) {
-                    activeRows.forEachIndexed { index, row ->
-                        if (index > 0) MiruRowDivider()
-                        QueueRow(
-                            work = row,
-                            translation = translationSummaries[row.bookId]
-                                ?: TranslationQueueSummary(),
-                            onPause = { engine.pause(row.bookId); refresh() },
-                            onResume = { engine.resume(row.bookId); refresh() },
-                            onRetry = { engine.retry(row.bookId); refresh() },
-                            onCancel = { engine.cancel(row.bookId); refresh() },
-                            onOpenSource = { onOpenSource(row.bookId, row.bookUrl) },
-                        )
+                    else -> {
+                        activeRows.forEachIndexed { index, row ->
+                            if (index > 0) MiruRowDivider()
+                            androidx.compose.runtime.key(row.bookId) {
+                                QueueRow(
+                                    work = row,
+                                    translation = translationSummaries[row.bookId]
+                                        ?: TranslationQueueSummary(),
+                                    onPause = { engine.pause(row.bookId); refresh() },
+                                    onResume = { engine.resume(row.bookId); refresh() },
+                                    onRetry = { engine.retry(row.bookId); refresh() },
+                                    onCancel = { engine.cancel(row.bookId); refresh() },
+                                    onOpenSource = { onOpenSource(row.bookId, row.bookUrl) },
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    if (settingsOpen) {
+    if (settingsOpen && pendingCleanup == null && pendingDelete == null && actionsFor == null) {
         DownloadSettingsSheet(
             onClose = { settingsOpen = false },
-            onCleanup = { pendingCleanup = it },
+            onCleanup = {
+                settingsOpen = false
+                pendingCleanup = it
+            },
         )
     }
 
@@ -655,6 +665,15 @@ private fun QueueRow(
             .padding(start = MiruSpace.L, end = MiruSpace.Xs, top = MiruSpace.S, bottom = MiruSpace.S),
         horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xs),
     ) {
+        BookCover(
+            title = work.title,
+            corner = MiruRadius.Cover,
+            coverUrl = work.coverUrl,
+            modifier = Modifier
+                .width(40.dp)
+                .aspectRatio(1f / 1.45f),
+        )
+        Spacer(modifier = Modifier.width(MiruSpace.Xs))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = work.title,
@@ -845,6 +864,7 @@ private fun DownloadActionsSheet(
             icon = Icons.Filled.Delete,
             title = stringResource(R.string.dl_action_delete),
             subtitle = stringResource(R.string.dl_action_delete_sub),
+            destructive = true,
             onClick = onDelete,
         )
     }
@@ -910,14 +930,11 @@ private fun DownloadSettingsSheet(
     }
 }
 
-// First Room load: three row skeletons in the real card geometry, so the
-// "nothing downloaded" card never flashes before data arrives.
+// First Room load: three row skeletons in the real list geometry, so the
+// "nothing downloaded" message never flashes before data arrives.
 @Composable
 private fun DownloadsSkeleton() {
-    MiruSectionCard(
-        title = stringResource(R.string.loading_downloads),
-        contentPadding = PaddingValues(0.dp),
-    ) {
+    Column {
         repeat(3) { index ->
             if (index > 0) MiruRowDivider()
             Row(

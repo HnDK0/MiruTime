@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -151,8 +152,11 @@ fun MiruSplitProgress(
     val state = splitProgressState(read, total)
     val extra = LocalMiruExtraColors.current
     val trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f)
+    val zeroLeftColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
+    val zeroRightColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
     val shape = RoundedCornerShape(MiruRadius.Split)
     val unknown = state.unknown
+    val hasProgress = !unknown && state.fraction > 0f
     val fontScale = LocalDensity.current.fontScale.coerceIn(1f, 2f)
     val layoutDirection = LocalLayoutDirection.current
     val semanticsModifier = if (contentDescription != null) {
@@ -165,7 +169,7 @@ fun MiruSplitProgress(
         modifier = modifier
             .heightIn(min = splitHeight)
             .clip(shape)
-            .background(trackColor)
+            .background(if (unknown || hasProgress) trackColor else Color.Transparent)
             .then(semanticsModifier),
     ) {
         val widthPx = constraints.maxWidth
@@ -210,7 +214,7 @@ fun MiruSplitProgress(
                                 ),
                             ),
                         )
-                    } else {
+                    } else if (hasProgress) {
                         val rtl = layoutDirection == LayoutDirection.Rtl
                         val startX = if (rtl) size.width else 0f
                         val edge = if (rtl) size.width - usableDivider else usableDivider
@@ -224,6 +228,30 @@ fun MiruSplitProgress(
                             close()
                         }
                         drawPath(path, color = extra.accent)
+                    } else {
+                        val rtl = layoutDirection == LayoutDirection.Rtl
+                        val startX = if (rtl) size.width else 0f
+                        val endX = if (rtl) 0f else size.width
+                        val edge = if (rtl) size.width - usableDivider else usableDivider
+                        val direction = if (rtl) -1f else 1f
+                        val slant = SlantWidth.toPx() / 2f
+                        val gapHalf = 0.75.dp.toPx()
+                        val leftPath = Path().apply {
+                            moveTo(startX, 0f)
+                            lineTo(edge + direction * (slant - gapHalf), 0f)
+                            lineTo(edge - direction * (slant + gapHalf), size.height)
+                            lineTo(startX, size.height)
+                            close()
+                        }
+                        val rightPath = Path().apply {
+                            moveTo(edge + direction * (slant + gapHalf), 0f)
+                            lineTo(endX, 0f)
+                            lineTo(endX, size.height)
+                            lineTo(edge - direction * (slant - gapHalf), size.height)
+                            close()
+                        }
+                        drawPath(leftPath, color = zeroLeftColor)
+                        drawPath(rightPath, color = zeroRightColor)
                     }
                 },
         ) {
@@ -244,7 +272,11 @@ fun MiruSplitProgress(
                         maxLines = 1,
                         overflow = TextOverflow.Clip,
                         style = fit.style,
-                        color = if (unknown) extra.muted else extra.onAccent,
+                        color = when {
+                            unknown -> extra.muted
+                            hasProgress -> extra.onAccent
+                            else -> MaterialTheme.colorScheme.onSurface
+                        },
                     )
                 }
                 Box(

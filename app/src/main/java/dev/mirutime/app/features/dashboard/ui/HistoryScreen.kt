@@ -264,23 +264,28 @@ private fun HistorySelectionToolbar(
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    MiruCard(
         modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
+        contentPadding = PaddingValues(horizontal = MiruSpace.Xs, vertical = MiruSpace.Xxs),
     ) {
-        val toolbarColors = ButtonDefaults.textButtonColors(
-            contentColor = LocalMiruExtraColors.current.accent,
-        )
-        val toolbarPadding = PaddingValues(horizontal = MiruSpace.S, vertical = MiruSpace.Xs)
-        TextButton(onClick = onExit, colors = toolbarColors, contentPadding = toolbarPadding) {
-            Text(stringResource(R.string.lib_selection_close))
-        }
-        Spacer(modifier = Modifier.weight(1f))
-        TextButton(onClick = onSelectAll, colors = toolbarColors, contentPadding = toolbarPadding) {
-            Text(stringResource(R.string.lib_select_all))
-        }
-        TextButton(onClick = onClear, colors = toolbarColors, contentPadding = toolbarPadding) {
-            Text(stringResource(R.string.lib_clear_selection))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val toolbarColors = ButtonDefaults.textButtonColors(
+                contentColor = LocalMiruExtraColors.current.accent,
+            )
+            val toolbarPadding = PaddingValues(horizontal = MiruSpace.S, vertical = MiruSpace.Xs)
+            TextButton(onClick = onExit, colors = toolbarColors, contentPadding = toolbarPadding) {
+                Text(stringResource(R.string.lib_selection_close))
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            TextButton(onClick = onSelectAll, colors = toolbarColors, contentPadding = toolbarPadding) {
+                Text(stringResource(R.string.lib_select_all))
+            }
+            TextButton(onClick = onClear, colors = toolbarColors, contentPadding = toolbarPadding) {
+                Text(stringResource(R.string.lib_clear_selection))
+            }
         }
     }
 }
@@ -320,15 +325,20 @@ private fun HistoryDeleteSheet(
 
 @Composable
 private fun HistoryEmptyState(modifier: Modifier = Modifier) {
-    Column(
+    MiruCard(
         modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
+        contentPadding = PaddingValues(MiruSpace.L),
     ) {
-        Text(
-            text = stringResource(R.string.dash_history_empty),
-            style = MaterialTheme.typography.bodySmall,
-            color = LocalMiruExtraColors.current.muted,
-        )
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = stringResource(R.string.dash_history_empty),
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalMiruExtraColors.current.muted,
+            )
+        }
     }
 }
 

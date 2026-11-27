@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -72,7 +73,6 @@ import androidx.compose.material.icons.filled.RemoveDone
 import androidx.compose.material.icons.filled.Rule
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Translate
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -80,7 +80,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -1573,8 +1572,7 @@ internal fun BookScreen(
     LazyColumn(
         state = if (current == null) loadingListState else pageListState,
         modifier = Modifier.fillMaxSize(),
-        // The book page is denser than the global 16dp rhythm: one 12dp gap
-        // between blocks, 12dp side padding.
+        // The book page keeps a denser 12dp rhythm so Chapters stays visible above the fold.
         verticalArrangement = Arrangement.spacedBy(MiruSpace.M),
         contentPadding = PaddingValues(
             start = MiruSpace.M,
@@ -2495,7 +2493,10 @@ private fun BookErrorCard(message: String?, onRetry: () -> Unit) {
             modifier = Modifier.padding(top = MiruSpace.Xs),
         )
         Spacer(modifier = Modifier.height(MiruSpace.M))
-        Button(onClick = onRetry) {
+        MiruButton(
+            onClick = onRetry,
+            style = MiruButtonStyle.Primary,
+        ) {
             Text(text = stringResource(UiKitR.string.theme_presets_retry))
         }
     }
@@ -2722,12 +2723,12 @@ private fun AnnounceCard(
                         style = MiruCardType.Meta,
                         color = extra.accent,
                         modifier = Modifier
-                            .compactTouchTarget(MiruSize.ChipCompact)
                             .clip(RoundedCornerShape(MiruRadius.Split))
                             .clickable(
                                 role = Role.Button,
                                 onClick = { titleExpanded = !titleExpanded },
                             )
+                            .compactTouchTarget(MiruSize.ChipCompact)
                             .padding(vertical = MiruSpace.Xxs),
                     )
                 }
@@ -2764,7 +2765,7 @@ private fun AnnounceCard(
         }
         if (book.genres.isNotEmpty()) {
             Spacer(modifier = Modifier.height(MiruSpace.M))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(MiruSpace.S))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
                 items(book.genres, key = { it }) { genre -> MiruTag(label = genre) }
@@ -2772,7 +2773,7 @@ private fun AnnounceCard(
         }
         if (!catalogEntry) {
             Spacer(modifier = Modifier.height(MiruSpace.M))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(MiruSpace.S))
             val shelfButton: @Composable (Modifier) -> Unit = { modifier ->
                 MiruCompactButton(
@@ -2785,7 +2786,7 @@ private fun AnnounceCard(
                         Icon(
                             imageVector = Icons.Filled.ArrowDropDown,
                             contentDescription = null,
-                            tint = extra.accent,
+                            tint = if (book.inLibrary) extra.accent else extra.muted,
                             modifier = Modifier.size(MiruSize.IconSmall),
                         )
                     },
@@ -2900,7 +2901,9 @@ private fun StatStrip(
                 MiruSplitProgress(
                     read = book.readCount,
                     total = book.totalChapters,
-                    modifier = Modifier.width(MiruSize.SplitProgress * LocalDensity.current.fontScale),
+                    modifier = Modifier.width(
+                        MiruSize.SplitProgress * LocalDensity.current.fontScale.coerceIn(1f, 2f),
+                    ),
                     contentDescription = stringResource(
                         R.string.card_ratio_fmt,
                         book.readCount,
@@ -2979,8 +2982,8 @@ private fun StatStrip(
         }
     }
 
-    val dividerColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-    MiruCard(contentPadding = PaddingValues(horizontal = MiruSpace.M, vertical = MiruSpace.S)) {
+    val dividerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+    MiruCard(contentPadding = PaddingValues(horizontal = MiruSpace.L, vertical = MiruSpace.M)) {
         if (largeText) {
             Column(verticalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
                 ratingCell(Modifier.fillMaxWidth())
@@ -3121,7 +3124,7 @@ private fun OpdsActions(
         ) {
             MiruButton(
                 onClick = onClick,
-                style = MiruButtonStyle.InversePrimary,
+                style = MiruButtonStyle.Primary,
                 enabled = !adding && action != BookActionKind.NotDownloadable,
                 busy = adding,
                 busyDescription = label,
@@ -3143,11 +3146,9 @@ private fun OpdsActions(
     }
 }
 
-// Continue / Start / Read again as the page's loudest action: one
-// full-width inverse pill (same ink pair as the sheet footers). Under it a
-// pair of plate pills — download-all first (left), then the library toggle
-// (right; download-all refuses with a hint until the book is in the library
-// and shows its progress in place).
+// Continue / Start / Read again as the page's loudest primary CTA. Under it a
+// pair of compact pills — download, site/login, and options (download refuses
+// with a hint until the book is in the library and shows progress in place).
 @Composable
 private fun ActionRow(
     book: BookDetails,
@@ -3224,7 +3225,7 @@ private fun ActionRow(
         MiruButton(
             onClick = onContinue,
             enabled = action.enabled,
-            style = MiruButtonStyle.InversePrimary,
+            style = MiruButtonStyle.Primary,
             busy = action.kind == BookActionKind.LoadingChapters,
             busyDescription = label,
             leadingIcon = Icons.Filled.PlayArrow,
@@ -3361,29 +3362,44 @@ private fun DownloadQueueNotice(
                     .padding(horizontal = MiruSpace.S, vertical = MiruSpace.Xs),
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.Xs)) {
+        MiruChipFlow(modifier = Modifier.padding(horizontal = MiruSpace.S)) {
             if (state == DownloadState.NEEDS_SOURCE_ACTION && sourceUrl.isNotBlank()) {
-                TextButton(onClick = onOpenSource) {
-                    Text(stringResource(R.string.dl_action_open_source))
+                Box(modifier = Modifier.width(IntrinsicSize.Max)) {
+                    MiruCompactButton(
+                        label = stringResource(R.string.dl_action_open_source),
+                        onClick = onOpenSource,
+                    )
                 }
             }
             if (state != DownloadState.PAUSED) {
-                TextButton(onClick = onRetry) {
-                    Text(stringResource(R.string.dl_action_retry))
+                Box(modifier = Modifier.width(IntrinsicSize.Max)) {
+                    MiruCompactButton(
+                        label = stringResource(R.string.dl_action_retry),
+                        onClick = onRetry,
+                    )
                 }
             }
             if (state == DownloadState.PAUSED) {
-                TextButton(onClick = onResume) {
-                    Text(stringResource(R.string.dl_action_resume))
+                Box(modifier = Modifier.width(IntrinsicSize.Max)) {
+                    MiruCompactButton(
+                        label = stringResource(R.string.dl_action_resume),
+                        onClick = onResume,
+                    )
                 }
             }
             if (state == DownloadState.WAITING_NETWORK) {
-                TextButton(onClick = onPause) {
-                    Text(stringResource(R.string.dl_action_pause))
+                Box(modifier = Modifier.width(IntrinsicSize.Max)) {
+                    MiruCompactButton(
+                        label = stringResource(R.string.dl_action_pause),
+                        onClick = onPause,
+                    )
                 }
             }
-            TextButton(onClick = onCancel) {
-                Text(stringResource(R.string.dl_action_cancel))
+            Box(modifier = Modifier.width(IntrinsicSize.Max)) {
+                MiruCompactButton(
+                    label = stringResource(R.string.dl_action_cancel),
+                    onClick = onCancel,
+                )
             }
         }
     }
@@ -3399,8 +3415,15 @@ private fun VideoDownloadPausedNotice(onResume: () -> Unit) {
         description = stringResource(R.string.book_dl_paused_desc),
         contentPadding = PaddingValues(horizontal = MiruSpace.S, vertical = MiruSpace.Xs),
     ) {
-        TextButton(onClick = onResume) {
-            Text(stringResource(R.string.dl_action_resume))
+        Box(
+            modifier = Modifier
+                .padding(horizontal = MiruSpace.S)
+                .width(IntrinsicSize.Max),
+        ) {
+            MiruCompactButton(
+                label = stringResource(R.string.dl_action_resume),
+                onClick = onResume,
+            )
         }
     }
 }
@@ -3428,8 +3451,15 @@ private fun ChapterDeleteErrorNotice(
             color = MaterialTheme.colorScheme.onErrorContainer,
             modifier = Modifier.weight(1f),
         )
-        TextButton(onClick = onRetry) {
-            Text(text = stringResource(R.string.dl_action_retry))
+        Box(
+            modifier = Modifier
+                .width(IntrinsicSize.Max)
+                .padding(end = MiruSpace.Xs),
+        ) {
+            MiruCompactButton(
+                label = stringResource(R.string.dl_action_retry),
+                onClick = onRetry,
+            )
         }
         MiruIconButton(
             icon = Icons.Filled.Close,
@@ -3449,12 +3479,13 @@ private fun AboutSection(description: String) {
     if (description.isBlank()) return
     var expanded by remember(description) { mutableStateOf(false) }
     val synopsisTitle = stringResource(R.string.book_synopsis)
+    val extra = LocalMiruExtraColors.current
     MiruCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = remember(synopsisTitle) { synopsisTitle.uppercase(Locale.ROOT) },
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = extra.accent,
                 modifier = Modifier.weight(1f),
             )
             Text(
@@ -3462,20 +3493,20 @@ private fun AboutSection(description: String) {
                     if (expanded) R.string.book_read_less else R.string.book_read_more,
                 ),
                 style = MaterialTheme.typography.labelSmall,
-                color = LocalMiruExtraColors.current.accent,
+                color = extra.accent,
                 modifier = Modifier
-                    .compactTouchTarget(MiruSize.ChipCompact)
                     .clip(RoundedCornerShape(MiruRadius.Cover))
                     .clickable(role = Role.Button) { expanded = !expanded }
+                    .compactTouchTarget(MiruSize.ChipCompact)
                     .padding(MiruSpace.Xs),
             )
         }
         Spacer(modifier = Modifier.height(MiruSpace.Xs))
         Text(
             text = description,
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
-            maxLines = if (expanded) Int.MAX_VALUE else 2,
+            maxLines = if (expanded) Int.MAX_VALUE else 3,
             overflow = TextOverflow.Ellipsis,
         )
     }

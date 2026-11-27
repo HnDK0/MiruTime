@@ -21,6 +21,16 @@ class SplitProgressTest {
     }
 
     @Test
+    fun `zero read keeps a valid non-unknown split state and clamped divider`() {
+        val state = splitProgressState(0, 346)
+        assertFalse(state.unknown)
+        assertEquals(0f, state.fraction, 0.0001f)
+        assertEquals("0", state.left)
+        assertEquals("346", state.right)
+        assertEquals(18f, splitDividerX(56f, 0f, 18f, 26f), 0.001f)
+    }
+
+    @Test
     fun `unknown counts are honest`() {
         assertTrue(splitProgressState(0, 0).unknown)
         assertTrue(splitProgressState(null, null).unknown)

@@ -19,7 +19,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -58,6 +59,7 @@ import dev.mirutime.app.design.components.toMiruBadge
 import dev.mirutime.uikit.LocalMiruExtraColors
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
+import dev.mirutime.uikit.ChipRail
 import dev.mirutime.uikit.MiruCard
 import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruRowDivider
@@ -364,37 +366,45 @@ fun GlobalSearchScreen(
             bottom = contentPadding.calculateBottomPadding() + MiruSpace.L,
         ),
     ) {
-        item(key = "field") {
-            MiruCard(contentPadding = PaddingValues(MiruSpace.S)) {
-                MiruSearchBar(
-                    value = field,
-                    onValueChange = { field = it },
-                    placeholder = stringResource(R.string.finder_gs_hint),
-                    onClear = {
-                        field = ""
-                        submitted = null
-                        results = emptyList()
-                    },
-                    onSearch = { submit(field) },
-                    plate = false,
-                )
-            }
-        }
-        item(key = "scope") {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-                item {
-                    MiruFilterChip(
-                        selected = scopeType == null,
-                        onClick = { scopeType = null },
-                        label = stringResource(R.string.finder_filter_all),
+        item(key = "search-scope") {
+            MiruCard(contentPadding = PaddingValues(0.dp)) {
+                Box(modifier = Modifier.padding(MiruSpace.S)) {
+                    MiruSearchBar(
+                        value = field,
+                        onValueChange = { field = it },
+                        placeholder = stringResource(R.string.finder_gs_hint),
+                        onClear = {
+                            field = ""
+                            submitted = null
+                            results = emptyList()
+                        },
+                        onSearch = { submit(field) },
+                        plate = false,
                     )
                 }
-                items(PluginContentTypes) { type ->
-                    MiruFilterChip(
-                        selected = scopeType == type.name,
-                        onClick = { scopeType = if (scopeType == type.name) null else type.name },
-                        label = typeLabel(type),
-                    )
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                )
+                ChipRail(
+                    contentPadding = PaddingValues(
+                        horizontal = MiruSpace.L,
+                        vertical = MiruSpace.S,
+                    ),
+                ) {
+                    item(key = "all") {
+                        MiruFilterChip(
+                            selected = scopeType == null,
+                            onClick = { scopeType = null },
+                            label = stringResource(R.string.finder_filter_all),
+                        )
+                    }
+                    items(PluginContentTypes, key = { it.name }) { type ->
+                        MiruFilterChip(
+                            selected = scopeType == type.name,
+                            onClick = { scopeType = if (scopeType == type.name) null else type.name },
+                            label = typeLabel(type),
+                        )
+                    }
                 }
             }
         }
@@ -438,7 +448,12 @@ fun GlobalSearchScreen(
         } else {
             item(key = "progress") {
                 if (done < total) {
-                    androidx.compose.foundation.layout.Column {
+                    MiruCard(
+                        contentPadding = PaddingValues(
+                            horizontal = MiruSpace.L,
+                            vertical = MiruSpace.S,
+                        ),
+                    ) {
                         Text(
                             text = stringResource(R.string.finder_gs_progress_fmt, done, total),
                             style = MaterialTheme.typography.bodySmall,
@@ -465,12 +480,13 @@ fun GlobalSearchScreen(
                     contentPadding = PaddingValues(MiruSpace.S),
                 ) {
                     val dedupedBooks = remember(result.books) { dedupeCatalogBooks(result.books) }
+                    val tileWidth = MiruSize.Tile * LocalDensity.current.fontScale.coerceIn(1f, 1.4f)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(MiruSpace.CardGap)) {
                         items(
                             dedupedBooks,
                             key = { globalBookKey(it.bookUrl) },
                         ) { book ->
-                            Box(modifier = Modifier.width(MiruSize.Tile)) {
+                            Box(modifier = Modifier.width(tileWidth)) {
                                 CatalogTile(
                                     book = book,
                                     inLibrary = book.inLibrary,
@@ -495,7 +511,7 @@ fun GlobalSearchScreen(
                 )
             }
             item(key = "summary") {
-                val finished = done >= total
+                val finished = sources != null && done >= total
                 when {
                     finished && withBooks.isEmpty() && failureReports.isEmpty() &&
                         failedNames.isEmpty() -> MiruCard(modifier = Modifier.fillMaxWidth()) {
@@ -505,14 +521,22 @@ fun GlobalSearchScreen(
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                     }
-                    finished && failedNames.isNotEmpty() -> Text(
-                        text = stringResource(
-                            R.string.finder_gs_failed_fmt,
-                            failedNames.joinToString(", "),
+                    finished && failedNames.isNotEmpty() -> MiruCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(
+                            horizontal = MiruSpace.L,
+                            vertical = MiruSpace.S,
                         ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = LocalMiruExtraColors.current.muted,
-                    )
+                    ) {
+                        Text(
+                            text = stringResource(
+                                R.string.finder_gs_failed_fmt,
+                                failedNames.joinToString(", "),
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = LocalMiruExtraColors.current.muted,
+                        )
+                    }
                 }
             }
         }

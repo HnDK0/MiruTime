@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 
 data class ChipOption(val id: String, val label: String)
 
@@ -93,8 +94,7 @@ fun ChipRow(
 // 40dp box (surface + 8, per the hitbox rule). The 48dp box it replaced made
 // grouped rows read ~32dp apart although the spacing was 8dp; a lone chip can
 // still ask for the 48dp target. Unselected = the plate + onSurface ink +
-// outline hairline; selected = solid accent, or a tint when the chip sits on
-// artwork.
+// outline hairline; selected = solid accent with contrastInkFor.
 @Composable
 fun MiruFilterChip(
     selected: Boolean,
@@ -119,15 +119,9 @@ fun MiruFilterChip(
         ink = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
         border = Color.Transparent
     } else if (selected) {
-        if (LocalMiruOnImage.current) {
-            backing = extra.accent.copy(alpha = 0.18f)
-            ink = extra.accent
-            border = extra.accent.copy(alpha = 0.35f)
-        } else {
-            backing = extra.accent
-            ink = contrastInkFor(extra.accent, false, listOf(extra.onAccent))
-            border = Color.Transparent
-        }
+        backing = extra.accent
+        ink = contrastInkFor(extra.accent, false, listOf(extra.onAccent))
+        border = Color.Transparent
     } else {
         backing = miruCardSurface()
         ink = MaterialTheme.colorScheme.onSurface
@@ -149,7 +143,7 @@ fun MiruFilterChip(
                     .clip(shape)
                     .background(backing)
                     .border(MiruSize.Stroke, border, shape)
-                    .padding(horizontal = MiruSpace.M),
+                    .padding(horizontal = MiruSpace.M, vertical = MiruSpace.Xxs),
                 contentAlignment = Alignment.Center,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -167,6 +161,7 @@ fun MiruFilterChip(
                         style = MaterialTheme.typography.labelMedium,
                         color = ink,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }

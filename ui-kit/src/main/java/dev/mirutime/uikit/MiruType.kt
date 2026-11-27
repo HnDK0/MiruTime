@@ -80,21 +80,20 @@ val MiruTypography = Typography(
     labelSmall = style(FontWeight.SemiBold, 11, 14, tracking = 0.5),
 )
 
-// Card roles. The card is denser than the screen scale:
-// 12.5 title, 10 meta/num, 10.5 rating. 10 sp is a deliberate exception to
-// the 11 sp floor.
+// Card roles. The card typography scale (Bento / Breezy):
+// 13.5 title, 11 meta/num/rating, 10 cover-meta.
 object MiruCardType {
-    val Title = style(FontWeight.SemiBold, 12, 16).copy(
-        fontSize = 12.5.sp,
+    val Title = style(FontWeight.SemiBold, 13, 18).copy(
+        fontSize = 13.5.sp,
         // Greedy line breaking: the first line is as full as possible; hyphen
         // dictionaries handle Latin/Cyrillic. Heading/Paragraph can leave a
         // short first line, which is exactly what the user rejected.
         lineBreak = LineBreak.Simple,
         hyphens = Hyphens.Auto,
     )
-    val Meta = style(FontWeight.Normal, 10, 13)
-    val Rating = style(FontWeight.SemiBold, 10, 13).copy(fontSize = 10.5.sp)
+    val Meta = style(FontWeight.Normal, 11, 14)
+    val Rating = style(FontWeight.SemiBold, 11, 14).copy(fontSize = 11.sp)
     // Source chip on a cover: one step smaller than the list meta.
-    val CoverMeta = style(FontWeight.Normal, 9, 12)
-    val Num = style(FontWeight.SemiBold, 10, 13)
+    val CoverMeta = style(FontWeight.Normal, 10, 13)
+    val Num = style(FontWeight.SemiBold, 11, 14)
 }

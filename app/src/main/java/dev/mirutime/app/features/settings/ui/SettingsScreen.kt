@@ -66,6 +66,7 @@ fun SettingsScreen(
         item(key = "app") {
             MiruSectionCard(
                 title = stringResource(R.string.st_group_app),
+                description = stringResource(R.string.st_group_app_desc),
                 contentPadding = PaddingValues(0.dp),
             ) {
                 MiruActionRow(
@@ -108,6 +109,7 @@ fun SettingsScreen(
         item(key = "reading") {
             MiruSectionCard(
                 title = stringResource(R.string.st_group_reading),
+                description = stringResource(R.string.st_group_reading_desc),
                 contentPadding = PaddingValues(0.dp),
             ) {
                 MiruActionRow(
@@ -145,6 +147,7 @@ fun SettingsScreen(
         item(key = "system") {
             MiruSectionCard(
                 title = stringResource(R.string.st_group_system),
+                description = stringResource(R.string.st_group_system_desc),
                 contentPadding = PaddingValues(0.dp),
             ) {
                 MiruActionRow(

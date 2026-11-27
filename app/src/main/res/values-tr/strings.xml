@@ -465,6 +465,7 @@
     <string name="book_genres_less">Daha az</string>
 
     <!-- Dashboard -->
+    <string name="dash_continue_reading">Okumaya devam et</string>
     <string name="dash_today">Bugün</string>
     <string name="dash_today_desc">Okuma ve dinlemeye ayırdığınız süre</string>
     <string name="dash_stat_read">okunan</string>
@@ -721,7 +722,7 @@
     <string name="finder_ext_no_match">Bu filtrelerle eşleşen uzantı yok.</string>
     <string name="finder_ext_query_hint">Uzantı ara</string>
     <string name="finder_ext_row_fmt">%1$s · v%2$s · %3$s</string>
-    <string name="finder_ext_sheet_desc">Liste için tür, dil ve durum. Sorgu yukarıdaki arama alanında kalır.</string>
+    <string name="finder_ext_sheet_desc">Liste için tür ve dil. Sorgu yukarıdaki arama alanında kalır.</string>
     <string name="finder_ext_sheet_title">Filtreler</string>
     <string name="finder_ext_status_disabled">Devre dışı</string>
     <string name="finder_ext_status_enabled">Etkin</string>

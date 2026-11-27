@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
@@ -59,18 +60,21 @@ fun MiruCompactButton(
     trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val extra = LocalMiruExtraColors.current
+    val plate = miruCardSurface()
     val shape = RoundedCornerShape(MiruRadius.Control)
-    val textInk = when {
+    val baseInk = when {
         ink != null -> ink
         muted -> extra.muted
         selected -> extra.accent
         else -> MaterialTheme.colorScheme.onSurface
-    }.let { if (enabled) it else extra.muted.copy(alpha = 0.6f) }
+    }
+    val hasProgress = busy || progress != null
+    val textInk = if (!enabled && hasProgress) baseInk.copy(alpha = 0.78f) else baseInk
     Box(
         modifier = modifier
             .heightIn(min = MiruSize.Touch)
             .defaultMinSize(minWidth = MiruSize.Touch)
-            .alpha(if (enabled) 1f else 0.55f)
+            .alpha(if (enabled || hasProgress) 1f else 0.55f)
             .clip(shape)
             .semantics(mergeDescendants = true) {
                 when {
@@ -91,11 +95,11 @@ fun MiruCompactButton(
                 .height(MiruSize.ButtonCompact)
                 .clip(shape)
                 .background(
-                    if (selected) extra.accent.copy(alpha = 0.12f) else miruCardSurface(),
+                    if (selected) extra.accent.copy(alpha = 0.16f).compositeOver(plate) else plate,
                 )
                 .border(
                     MiruSize.Stroke,
-                    if (selected) extra.accent.copy(alpha = 0.40f) else MaterialTheme.colorScheme.outline,
+                    if (selected) extra.accent.copy(alpha = 0.40f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.60f),
                     shape,
                 )
                 .padding(horizontal = MiruSpace.S),

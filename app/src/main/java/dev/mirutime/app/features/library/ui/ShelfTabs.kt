@@ -80,7 +80,7 @@ fun ShelfTabsRow(
                     .fillMaxWidth()
                     .padding(top = 2.dp)
                     .height(1.dp)
-                    .background(MaterialTheme.colorScheme.outlineVariant),
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
             )
         }
     }

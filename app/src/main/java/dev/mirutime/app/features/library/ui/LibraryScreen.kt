@@ -7,10 +7,12 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,19 +24,22 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -58,20 +63,23 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.mirutime.uikit.CoverInset
+import dev.mirutime.uikit.MiruButton
+import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruCard
-import dev.mirutime.uikit.MiruIconButton
+import dev.mirutime.uikit.MiruCompactButton
 import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.app.R
 import dev.mirutime.app.shell.TabBarDecoration
 import dev.mirutime.uikit.LocalMiruExtraColors
-import dev.mirutime.uikit.LocalMiruOnImage
-import dev.mirutime.uikit.miruPhotoMuted
+import dev.mirutime.uikit.compactTouchTarget
+import dev.mirutime.uikit.isLargeText
+import dev.mirutime.uikit.miruCardBorder
 import dev.mirutime.uikit.miruCardElevation
 import dev.mirutime.uikit.miruCardSurface
 import dev.mirutime.uikit.AppBottomSheet
@@ -82,8 +90,6 @@ import dev.mirutime.uikit.CardProgressBar
 import dev.mirutime.uikit.ChipRail
 import dev.mirutime.uikit.MiruChipFlow
 import dev.mirutime.uikit.MiruFilterChip
-import dev.mirutime.uikit.MiruButton
-import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruRoundIconButton
 import dev.mirutime.uikit.MiruSlider
 import dev.mirutime.uikit.SkeletonBar
@@ -135,9 +141,9 @@ private enum class BulkAction { Delete, Move, Read, Unread }
 // actually scrolled through, capped so a deep list never refetches all rows.
 private const val MaxReloadPages = 5
 
-// Library order: search first, shelf chips, last-read
-// block, mini-filters, then the grid. Full filter state lives here so the big
-// sheet and the mini-filters stay in two-way sync.
+// Library order: search first, shelf chips, mini-filters, last-read block, then
+// the grid. Full filter state lives here so the big sheet and the mini-filters
+// stay in two-way sync.
 @Composable
 fun LibraryScreen(
     contentPadding: PaddingValues,
@@ -667,6 +673,26 @@ fun LibraryScreen(
                 )
             }
 
+            item {
+                Box(modifier = Modifier.padding(top = MiruSpace.Xxs, bottom = MiruSpace.S)) {
+                    MiniFilters(
+                        sources = selSources,
+                        genres = genres,
+                        layout = layout,
+                        sort = sort,
+                        sortDir = sortDir,
+                        sortEnabled = sortEnabled,
+                        onSource = { sourceSheetOpen = true },
+                        onGenres = { genresSheetOpen = true },
+                        onLayout = {
+                            AppSettings.listLayout =
+                                if (layout == LayoutMode.Grid) "list" else "grid"
+                        },
+                        onSort = { sortSheetOpen = true },
+                    )
+                }
+            }
+
             if (
                 shown.isEmpty() &&
                 !pager.firstError &&
@@ -688,81 +714,110 @@ fun LibraryScreen(
                 if (lastRead != null && (selShelves.isEmpty() || "reading" in selShelves)) {
                     item {
                         lastRead?.let { book ->
-                            ResumeCard(
-                                book = fixCover(book),
-                                onOpen = { onBookOpen(book.bookKey) },
-                                onRetry = {
-                                    provider.refreshCover(book.bookKey).getOrNull()?.also { fresh ->
-                                        coverFixes[book.bookKey] = fresh
-                                    }
-                                },
-                                reloadKey = pager.generation,
-                            )
+                            Box(modifier = Modifier.padding(bottom = MiruSpace.Xs)) {
+                                ResumeCard(
+                                    book = fixCover(book),
+                                    onOpen = { onBookOpen(book.bookKey) },
+                                    onRetry = {
+                                        provider.refreshCover(book.bookKey).getOrNull()?.also { fresh ->
+                                            coverFixes[book.bookKey] = fresh
+                                        }
+                                    },
+                                    reloadKey = pager.generation,
+                                )
+                            }
                         }
                     }
                 }
 
-                item {
-                    MiniFilters(
-                        sources = selSources,
-                        genres = genres,
-                        layout = layout,
-                        sort = sort,
-                        sortDir = sortDir,
-                        sortEnabled = sortEnabled,
-                        onSource = { sourceSheetOpen = true },
-                        onGenres = { genresSheetOpen = true },
-                        onLayout = {
-                            AppSettings.listLayout =
-                                if (layout == LayoutMode.Grid) "list" else "grid"
-                        },
-                        onSort = { sortSheetOpen = true },
-                    )
-                }
-
                 // Shelf caption (prototype language): live count on the left, the
                 // local-import entry on the right.
-            item {
-                // Counter row: hug-content mini-pill + Import pill, space-between.
-                // Shared size grid: 32dp pills, 12sp labels — identical in every
-                // mode; backing matches the secondary plate fill (surfaceContainerLow).
-                val onImage = LocalMiruOnImage.current
-                val zone = LocalMiruExtraColors.current.photoTop
-                Row(
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = MiruSpace.Xs),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .heightIn(min = MiruSize.RowCompact)
-                            .clip(RoundedCornerShape(MiruRadius.Control))
-                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                            .padding(horizontal = MiruSpace.M),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        val count = pager.total ?: shown.size
-                        Text(
-                            text = pluralStringResource(
-                                R.plurals.plural_books,
-                                count,
-                                count,
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (onImage) zone.pillInk else MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
-                    }
-                    MiruButton(
-                        onClick = { importOpen = true },
-                        style = MiruButtonStyle.Secondary,
-                    ) {
-                        Text(text = stringResource(R.string.lib_import))
+                item {
+                    val largeText = isLargeText()
+                    val count = pager.total ?: shown.size
+                    val countLabel = pluralStringResource(R.plurals.plural_books, count, count)
+                    val countShape = RoundedCornerShape(MiruRadius.Chip)
+                    if (largeText) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = MiruSpace.Xs),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .heightIn(min = MiruSize.RowCompact)
+                                    .clip(countShape)
+                                    .background(miruCardSurface())
+                                    .border(miruCardBorder(), countShape)
+                                    .padding(horizontal = MiruSpace.M, vertical = MiruSpace.Xs),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = countLabel,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            MiruButton(
+                                onClick = { importOpen = true },
+                                style = MiruButtonStyle.Secondary,
+                                leadingIcon = Icons.Filled.UploadFile,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(text = stringResource(R.string.lib_import))
+                            }
+                        }
+                    } else {
+                        // Counter row: hug-content mini-pill + compact Import pill on
+                        // the same 32dp visual height grid.
+                        BoxWithConstraints(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = MiruSpace.Xs),
+                        ) {
+                            val maxCountWidth = maxWidth * 0.45f
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .widthIn(max = maxCountWidth)
+                                        .heightIn(min = MiruSize.RowCompact)
+                                        .clip(countShape)
+                                        .background(miruCardSurface())
+                                        .border(miruCardBorder(), countShape)
+                                        .padding(horizontal = MiruSpace.M),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = countLabel,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier.weight(1f),
+                                    contentAlignment = Alignment.CenterEnd,
+                                ) {
+                                    Box(modifier = Modifier.width(IntrinsicSize.Max)) {
+                                        MiruCompactButton(
+                                            label = stringResource(R.string.lib_import),
+                                            icon = Icons.Filled.UploadFile,
+                                            onClick = { importOpen = true },
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-            }
 
                 // Stale-while-revalidate: the previous page stays visible and a
                 // slim spinner says the next page/query is still running.
@@ -808,6 +863,7 @@ fun LibraryScreen(
                             shape = MaterialTheme.shapes.medium,
                             color = miruCardSurface(),
                             shadowElevation = miruCardElevation(),
+                            border = miruCardBorder(),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = MiruSpace.M),
@@ -1270,13 +1326,14 @@ private fun LibrarySkeleton(columns: Int) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Surface(
             shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surface,
+            color = miruCardSurface(),
+            border = miruCardBorder(),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(MiruSpace.M),
             ) {
-                SkeletonBox(width = 48.dp, height = 68.dp, corner = 6.dp)
+                SkeletonBox(width = 48.dp, height = 68.dp, corner = MiruRadius.Cover)
                 Spacer(modifier = Modifier.width(MiruSpace.M))
                 Column(modifier = Modifier.weight(1f)) {
                     SkeletonBar(modifier = Modifier.fillMaxWidth(0.6f))
@@ -1291,24 +1348,27 @@ private fun LibrarySkeleton(columns: Int) {
 
 @Composable
 private fun LibraryPageError(message: String, onRetry: () -> Unit) {
-    Surface(
-        shape = MaterialTheme.shapes.medium,
-        color = miruCardSurface(),
-        shadowElevation = miruCardElevation(),
+    MiruCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = MiruSpace.M),
+        contentPadding = PaddingValues(MiruSpace.Xl),
     ) {
         Column(
-            modifier = Modifier.padding(MiruSpace.Xl),
+            modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
                 text = message,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
             )
-            TextButton(onClick = onRetry) {
+            MiruButton(
+                onClick = onRetry,
+                style = MiruButtonStyle.Secondary,
+                modifier = Modifier.padding(top = MiruSpace.M),
+            ) {
                 Text(text = stringResource(R.string.lib_retry))
             }
         }
@@ -1317,6 +1377,7 @@ private fun LibraryPageError(message: String, onRetry: () -> Unit) {
 
 @Composable
 private fun LibraryPagerFooter(loading: Boolean, error: Boolean, onRetry: () -> Unit) {
+    val largeText = isLargeText()
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
@@ -1330,15 +1391,50 @@ private fun LibraryPagerFooter(loading: Boolean, error: Boolean, onRetry: () -> 
                 color = LocalMiruExtraColors.current.accent,
                 modifier = Modifier.size(18.dp),
             )
-            error -> {
-                Text(
-                    text = stringResource(R.string.lib_page_more_error),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = LocalMiruExtraColors.current.muted,
-                )
-                Spacer(modifier = Modifier.width(MiruSpace.S))
-                TextButton(onClick = onRetry) {
-                    Text(text = stringResource(R.string.lib_retry))
+            error -> MiruCard(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(
+                    horizontal = MiruSpace.L,
+                    vertical = MiruSpace.S,
+                ),
+            ) {
+                if (largeText) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.lib_page_more_error),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = LocalMiruExtraColors.current.muted,
+                        )
+                        MiruButton(
+                            onClick = onRetry,
+                            style = MiruButtonStyle.Secondary,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(text = stringResource(R.string.lib_retry))
+                        }
+                    }
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.lib_page_more_error),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = LocalMiruExtraColors.current.muted,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Box(modifier = Modifier.width(IntrinsicSize.Max)) {
+                            MiruCompactButton(
+                                label = stringResource(R.string.lib_retry),
+                                onClick = onRetry,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1388,7 +1484,7 @@ private fun ResumeCard(
     val percent = (progress * 100).roundToInt()
     MiruCard(
         contentPadding = PaddingValues(0.dp),
-        modifier = Modifier.clickable(onClick = onOpen),
+        onClick = onOpen,
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -1441,19 +1537,8 @@ private fun ResumeCard(
                             book.lastReadLabel,
                         )
                     },
-                    // Small meta is never bare ≤14sp on the photo: it rides
-                    // the TOP strip's zonal soft ink at 14sp (classic keeps
-                    // the 10sp muted line verbatim).
-                    style = if (LocalMiruOnImage.current) {
-                        MaterialTheme.typography.bodyMedium
-                    } else {
-                        MaterialTheme.typography.bodySmall
-                    },
-                    color = if (LocalMiruOnImage.current) {
-                        miruPhotoMuted()
-                    } else {
-                        LocalMiruExtraColors.current.muted
-                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalMiruExtraColors.current.muted,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -1472,18 +1557,36 @@ private fun ResumeCard(
                 )
             }
             Spacer(modifier = Modifier.width(MiruSpace.S))
-            MiruIconButton(
-                icon = Icons.AutoMirrored.Filled.ArrowForward,
-                contentDescription = stringResource(
-                    R.string.lib_continue_desc_fmt,
-                    book.continueLabel,
-                ),
-                tint = MaterialTheme.colorScheme.onBackground,
-                onClick = onOpen,
-            )
+            val extra = LocalMiruExtraColors.current
+            Box(
+                modifier = Modifier
+                    .compactTouchTarget(36.dp)
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(extra.accent.copy(alpha = 0.16f))
+                    .border(1.dp, extra.accent.copy(alpha = 0.32f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = stringResource(
+                        R.string.lib_continue_desc_fmt,
+                        book.continueLabel,
+                    ),
+                    tint = extra.accent,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }
+
+private data class MiniChip(
+    val id: String,
+    val label: String,
+    val selected: Boolean,
+    val onClick: () -> Unit,
+)
 
 // One chip language with the shelf strip above (FilterChip everywhere).
 @Composable
@@ -1517,15 +1620,35 @@ private fun MiniFilters(
         stringResource(R.string.lib_layout_list)
     }
     val minis = listOfNotNull(
-        stringResource(R.string.lib_chip_source_fmt, sourceLabel) to onSource,
-        stringResource(R.string.lib_chip_genres_fmt, genresLabel) to onGenres,
-        layoutLabel to onLayout,
+        MiniChip(
+            id = "source",
+            label = stringResource(R.string.lib_chip_source_fmt, sourceLabel),
+            selected = sources.isNotEmpty(),
+            onClick = onSource,
+        ),
+        MiniChip(
+            id = "genres",
+            label = stringResource(R.string.lib_chip_genres_fmt, genresLabel),
+            selected = genres.isNotEmpty(),
+            onClick = onGenres,
+        ),
+        MiniChip(
+            id = "layout",
+            label = layoutLabel,
+            selected = false,
+            onClick = onLayout,
+        ),
         if (sortEnabled) {
-            stringResource(
-                R.string.lib_chip_sort_fmt,
-                sortLabel,
-                sortDir.arrow(),
-            ) to onSort
+            MiniChip(
+                id = "sort",
+                label = stringResource(
+                    R.string.lib_chip_sort_fmt,
+                    sortLabel,
+                    sortDir.arrow(),
+                ),
+                selected = false,
+                onClick = onSort,
+            )
         } else {
             null
         },
@@ -1536,11 +1659,11 @@ private fun MiniFilters(
     // already puts chips on the same left grid line as the cards/resume bar,
     // giving a symmetric start→end rhythm. Side inset follows the same rule.
     ChipRail {
-        items(minis, key = { it.first }) { (label, action) ->
+        items(minis, key = { it.id }) { item ->
             MiruFilterChip(
-                selected = false,
-                onClick = action,
-                label = label,
+                selected = item.selected,
+                onClick = item.onClick,
+                label = item.label,
             )
         }
     }

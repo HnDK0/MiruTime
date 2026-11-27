@@ -464,6 +464,7 @@
     <string name="book_genres_less">أقل</string>
 
     <!-- لوحة التحكم -->
+    <string name="dash_continue_reading">متابعة القراءة</string>
     <string name="dash_today">اليوم</string>
     <string name="dash_today_desc">الوقت الذي أمضيته في القراءة والاستماع</string>
     <string name="dash_stat_read">قراءة</string>
@@ -764,7 +765,7 @@
     <string name="finder_ext_no_match">لا إضافات مطابقة لهذه المرشحات.</string>
     <string name="finder_ext_query_hint">بحث في الإضافات</string>
     <string name="finder_ext_row_fmt">%1$s · v%2$s · %3$s</string>
-    <string name="finder_ext_sheet_desc">النوع واللغة والحالة للقائمة. يبقى الاستعلام في حقل البحث أعلاه.</string>
+    <string name="finder_ext_sheet_desc">النوع واللغة للقائمة. يبقى الاستعلام في حقل البحث أعلاه.</string>
     <string name="finder_ext_sheet_title">المرشحات</string>
     <string name="finder_ext_status_disabled">معطّلة</string>
     <string name="finder_ext_status_enabled">مفعّلة</string>

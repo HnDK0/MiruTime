@@ -30,8 +30,6 @@ import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.Public
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -74,7 +72,10 @@ import dev.mirutime.uikit.CoverInset
 import dev.mirutime.uikit.ChipOption
 import dev.mirutime.uikit.ChipRow
 import dev.mirutime.uikit.LocalMiruExtraColors
+import dev.mirutime.uikit.LocalMiruOnImage
 import dev.mirutime.uikit.MiruActionRow
+import dev.mirutime.uikit.MiruButton
+import dev.mirutime.uikit.MiruButtonStyle
 import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
@@ -712,12 +713,19 @@ internal fun SourceCatalogScreen(
                     }
                     // 69shuba searches GBK: the user must type Chinese.
                     if (!isOpds && shouldShowSearchLanguageHint(sourceLanguage, input)) {
-                        Text(
-                            text = stringResource(R.string.finder_search_language_hint_zh),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = LocalMiruExtraColors.current.muted,
+                        CatalogNotePlate(
+                            contentPadding = PaddingValues(
+                                horizontal = MiruSpace.M,
+                                vertical = MiruSpace.Xs,
+                            ),
                             modifier = Modifier.padding(top = MiruSpace.Xs),
-                        )
+                        ) {
+                            Text(
+                                text = stringResource(R.string.finder_search_language_hint_zh),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = LocalMiruExtraColors.current.muted,
+                            )
+                        }
                     }
                 }
             }
@@ -741,53 +749,69 @@ internal fun SourceCatalogScreen(
             pageState.facets.forEachIndexed { index, group ->
                 if (group.options.isNotEmpty()) {
                     item(key = "facet:$index", span = { GridItemSpan(maxLineSpan) }) {
-                        Column {
-                            Text(
-                                text = group.label,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = LocalMiruExtraColors.current.muted,
-                            )
-                            ChipRow(
-                                options = group.options.map { option ->
-                                    ChipOption(
-                                        id = option.href,
-                                        label = option.count?.let { "${option.label} ($it)" }
-                                            ?: option.label,
-                                    )
-                                },
-                                selectedIds = group.options.filter { it.active }.map { it.href }.toSet(),
-                                onToggle = { href ->
-                                    opdsSearchLayer = false
-                                    opdsSession?.openFacet(href)
-                                },
-                                contentPadding = PaddingValues(0.dp),
-                                modifier = Modifier.padding(top = MiruSpace.Xs),
-                            )
+                        CatalogNotePlate(
+                            contentPadding = if (LocalMiruOnImage.current) {
+                                PaddingValues(MiruSpace.M)
+                            } else {
+                                PaddingValues(0.dp)
+                            },
+                        ) {
+                            Column {
+                                Text(
+                                    text = group.label,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = LocalMiruExtraColors.current.muted,
+                                )
+                                ChipRow(
+                                    options = group.options.map { option ->
+                                        ChipOption(
+                                            id = option.href,
+                                            label = option.count?.let { "${option.label} ($it)" }
+                                                ?: option.label,
+                                        )
+                                    },
+                                    selectedIds = group.options.filter { it.active }.map { it.href }.toSet(),
+                                    onToggle = { href ->
+                                        opdsSearchLayer = false
+                                        opdsSession?.openFacet(href)
+                                    },
+                                    contentPadding = PaddingValues(0.dp),
+                                    modifier = Modifier.padding(top = MiruSpace.Xs),
+                                )
+                            }
                         }
                     }
                 }
             }
             if (pageState.sortOptions.isNotEmpty()) {
                 item(key = "sort", span = { GridItemSpan(maxLineSpan) }) {
-                    Column {
-                        Text(
-                            text = stringResource(R.string.opds_sort_label),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = LocalMiruExtraColors.current.muted,
-                        )
-                        ChipRow(
-                            options = pageState.sortOptions.map { ChipOption(it.href, it.label) },
-                            selectedIds = pageState.sortOptions
-                                .filter { it.active }
-                                .map { it.href }
-                                .toSet(),
-                            onToggle = { href ->
-                                opdsSearchLayer = false
-                                opdsSession?.openSort(href)
-                            },
-                            contentPadding = PaddingValues(0.dp),
-                            modifier = Modifier.padding(top = MiruSpace.Xs),
-                        )
+                    CatalogNotePlate(
+                        contentPadding = if (LocalMiruOnImage.current) {
+                            PaddingValues(MiruSpace.M)
+                        } else {
+                            PaddingValues(0.dp)
+                        },
+                    ) {
+                        Column {
+                            Text(
+                                text = stringResource(R.string.opds_sort_label),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = LocalMiruExtraColors.current.muted,
+                            )
+                            ChipRow(
+                                options = pageState.sortOptions.map { ChipOption(it.href, it.label) },
+                                selectedIds = pageState.sortOptions
+                                    .filter { it.active }
+                                    .map { it.href }
+                                    .toSet(),
+                                onToggle = { href ->
+                                    opdsSearchLayer = false
+                                    opdsSession?.openSort(href)
+                                },
+                                contentPadding = PaddingValues(0.dp),
+                                modifier = Modifier.padding(top = MiruSpace.Xs),
+                            )
+                        }
                     }
                 }
             }
@@ -894,15 +918,18 @@ internal fun SourceCatalogScreen(
                 books.isEmpty() -> when {
                     // A navigation feed: the sections above ARE the content, and
                     // there is no filter to reset.
-                    pageState.sectionsOnly -> Text(
-                        text = stringResource(R.string.opds_sections_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = LocalMiruExtraColors.current.muted,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = MiruSpace.L),
-                    )
+                    pageState.sectionsOnly -> CatalogNotePlate(
+                        contentPadding = PaddingValues(MiruSpace.M),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.opds_sections_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = LocalMiruExtraColors.current.muted,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                     isLocal && filters == CatalogFilters() && input.isBlank() ->
                         LocalCatalogEmptyState(onManageFolders = { foldersOpen = true })
                     else -> EmptyState(
@@ -914,15 +941,18 @@ internal fun SourceCatalogScreen(
                         },
                     )
                 }
-                !hasMore -> Text(
-                    text = stringResource(R.string.finder_no_more),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = LocalMiruExtraColors.current.muted,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = MiruSpace.L),
-                )
+                !hasMore -> CatalogNotePlate(
+                    contentPadding = PaddingValues(MiruSpace.M),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = stringResource(R.string.finder_no_more),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalMiruExtraColors.current.muted,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
     }
@@ -1033,6 +1063,19 @@ private fun CatalogBook.toLibraryBook(
 )
 
 @Composable
+private fun CatalogNotePlate(
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    if (LocalMiruOnImage.current) {
+        MiruCard(contentPadding = contentPadding, modifier = modifier) { content() }
+    } else {
+        Box(modifier = modifier.padding(contentPadding)) { content() }
+    }
+}
+
+@Composable
 private fun EmptyState(canReset: Boolean, onReset: () -> Unit) {
     MiruCard(modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -1042,13 +1085,9 @@ private fun EmptyState(canReset: Boolean, onReset: () -> Unit) {
         )
         if (canReset) {
             Spacer(modifier = Modifier.height(MiruSpace.M))
-            Button(
+            MiruButton(
                 onClick = onReset,
-                modifier = Modifier.heightIn(min = MiruSize.Button),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.onBackground,
-                    contentColor = MaterialTheme.colorScheme.background,
-                ),
+                style = MiruButtonStyle.Primary,
             ) {
                 Text(text = stringResource(R.string.finder_reset_filters))
             }
@@ -1074,27 +1113,27 @@ private fun ErrorCard(message: String, onReload: () -> Unit, onCopy: () -> Unit)
         )
         Spacer(modifier = Modifier.height(MiruSpace.M))
         Row(horizontalArrangement = Arrangement.spacedBy(MiruSpace.S)) {
-            val colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.onBackground,
-                contentColor = MaterialTheme.colorScheme.background,
-            )
-            Button(
+            MiruButton(
                 onClick = onReload,
-                colors = colors,
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = MiruSize.Button),
+                style = MiruButtonStyle.Primary,
+                modifier = Modifier.weight(1f),
             ) {
-                Text(text = stringResource(R.string.finder_error_reload), maxLines = 1)
+                Text(
+                    text = stringResource(R.string.finder_error_reload),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            Button(
+            MiruButton(
                 onClick = onCopy,
-                colors = colors,
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = MiruSize.Button),
+                style = MiruButtonStyle.Secondary,
+                modifier = Modifier.weight(1f),
             ) {
-                Text(text = stringResource(R.string.finder_error_copy), maxLines = 1)
+                Text(
+                    text = stringResource(R.string.finder_error_copy),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }

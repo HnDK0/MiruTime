@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -34,7 +33,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -44,10 +42,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Tune
 import dev.mirutime.uikit.CoverInset
+import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.app.R
 import dev.mirutime.uikit.LocalMiruExtraColors
@@ -67,6 +65,7 @@ import dev.mirutime.uikit.MiruRadius
 import dev.mirutime.app.design.components.BookCover
 import dev.mirutime.uikit.SkeletonBar
 import dev.mirutime.uikit.SkeletonBox
+import dev.mirutime.uikit.miruCardBorder
 import dev.mirutime.uikit.miruCardElevation
 import dev.mirutime.uikit.miruCardSurface
 import dev.mirutime.app.features.dashboard.data.DashboardDataProvider
@@ -138,9 +137,9 @@ fun UpdatesScreen(
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
-            start = 16.dp,
-            end = 16.dp,
-            top = contentPadding.calculateTopPadding() + 8.dp,
+            start = MiruSize.ScreenPad,
+            end = MiruSize.ScreenPad,
+            top = contentPadding.calculateTopPadding() + MiruSpace.S,
             bottom = contentPadding.calculateBottomPadding() + BottomClearance,
         ),
     ) {
@@ -391,6 +390,7 @@ private fun UpdateRowSkeleton(modifier: Modifier = Modifier) {
         shape = shape,
         color = miruCardSurface(),
         shadowElevation = miruCardElevation(),
+        border = miruCardBorder(),
         modifier = modifier,
     ) {
         Row(
@@ -433,9 +433,8 @@ fun UpdateRow(
 ) {
     MiruCard(
         contentPadding = PaddingValues(0.dp),
-        modifier = modifier
-            .clip(MaterialTheme.shapes.medium)
-            .clickable(onClick = onOpen),
+        modifier = modifier,
+        onClick = onOpen,
     ) {
         Row(
             // Cover sits on the plate with the shared 2dp frame; top/bottom
@@ -462,11 +461,13 @@ fun UpdateRow(
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Surface(
                         shape = RoundedCornerShape(MiruRadius.Badge),
                         color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.weight(1f, fill = false),
                     ) {
                         Text(
                             text = pluralStringResource(
@@ -481,13 +482,16 @@ fun UpdateRow(
                             modifier = Modifier.padding(horizontal = MiruSpace.S, vertical = 3.dp),
                         )
                     }
-                    Spacer(modifier = Modifier.weight(1f))
                     // Where a tap lands: the first unread chapter.
                     Text(
                         text = stringResource(R.string.card_next_ch_fmt, update.book.nextChapter),
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                         color = LocalMiruExtraColors.current.accent,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .padding(start = MiruSpace.S),
                     )
                 }
                 Text(
@@ -541,6 +545,7 @@ fun UpdateRow(
                             )
                         }
                     },
+                    style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = MiruSpace.Xs),
                 )
             }

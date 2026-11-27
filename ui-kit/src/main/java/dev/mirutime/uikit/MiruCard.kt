@@ -1,6 +1,7 @@
 package dev.mirutime.uikit
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,19 +43,38 @@ fun MiruCard(
     modifier: Modifier = Modifier,
     shape: Shape = MaterialTheme.shapes.medium,
     contentPadding: PaddingValues = PaddingValues(MiruSize.CardPad),
+    onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Surface(
-        modifier = modifier,
-        shape = shape,
-        color = miruCardSurface(),
-        // Same contract as AppBottomSheet: the photo plate is not a scheme
-        // role, so pin the ink instead of letting contentColorFor() emit black.
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        shadowElevation = miruCardElevation(),
-        tonalElevation = 0.dp,
-    ) {
-        Column(modifier = Modifier.padding(contentPadding), content = content)
+    if (onClick != null) {
+        Surface(
+            onClick = onClick,
+            modifier = modifier,
+            shape = shape,
+            color = miruCardSurface(),
+            // Same contract as AppBottomSheet: the photo plate is not a scheme
+            // role, so pin the ink instead of letting contentColorFor() emit black.
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            shadowElevation = miruCardElevation(),
+            border = miruCardBorder(),
+            tonalElevation = 0.dp,
+        ) {
+            Column(modifier = Modifier.padding(contentPadding), content = content)
+        }
+    } else {
+        Surface(
+            modifier = modifier,
+            shape = shape,
+            color = miruCardSurface(),
+            // Same contract as AppBottomSheet: the photo plate is not a scheme
+            // role, so pin the ink instead of letting contentColorFor() emit black.
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            shadowElevation = miruCardElevation(),
+            border = miruCardBorder(),
+            tonalElevation = 0.dp,
+        ) {
+            Column(modifier = Modifier.padding(contentPadding), content = content)
+        }
     }
 }
 
@@ -86,7 +107,8 @@ fun MiruListCard(
         .miruCardShadow(shape)
         .clip(shape)
         .background(miruCardSurface())
-    val root = if (onClick != null) shell.clickable(onClick = onClick) else shell
+        .border(miruCardBorder(), shape)
+    val root = if (onClick != null) shell.clickable(role = Role.Button, onClick = onClick) else shell
     Column(modifier = root) {
         // IntrinsicSize.Min pins the row height to the thumb (96×1.45) while
         // bottom-pinning the bar/counts group; the row still grows when the

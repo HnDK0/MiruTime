@@ -1,5 +1,6 @@
 package dev.mirutime.uikit
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -26,7 +27,10 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import java.util.Locale
 
@@ -64,13 +68,14 @@ fun MiruContentTypeIcon(
     Surface(
         modifier = modifier.size(20.dp),
         shape = RoundedCornerShape(MiruRadius.Split),
-        color = extra.accent,
+        color = extra.pillBg,
+        border = BorderStroke(0.5.dp, extra.onScrim.copy(alpha = 0.16f)),
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = icon,
                 contentDescription = contentDescription,
-                tint = extra.onAccent,
+                tint = extra.onScrim,
                 modifier = Modifier.size(14.dp),
             )
         }
@@ -86,13 +91,16 @@ fun MiruRatingLabel(
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(MiruRadius.Split),
-        color = extra.accent,
+        color = extra.pillBg,
+        border = BorderStroke(0.5.dp, extra.onScrim.copy(alpha = 0.16f)),
     ) {
         Text(
-            text = "★ $text",
+            text = buildAnnotatedString {
+                withStyle(SpanStyle(color = extra.scrimStar)) { append("★ ") }
+                withStyle(SpanStyle(color = extra.onScrim)) { append(text) }
+            },
             maxLines = 1,
             style = MiruCardType.Rating,
-            color = extra.onAccent,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
         )
     }

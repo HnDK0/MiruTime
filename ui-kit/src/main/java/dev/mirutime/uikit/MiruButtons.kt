@@ -153,7 +153,7 @@ fun MiruIconButton(
     val extra = LocalMiruExtraColors.current
     val shape = MaterialTheme.shapes.small
     val ink = when {
-        !enabled -> extra.muted.copy(alpha = 0.38f)
+        !busy && !enabled -> extra.muted.copy(alpha = 0.38f)
         tint != null -> tint
         selected == true && style == MiruIconButtonStyle.Plate -> extra.onAccent
         selected == true -> extra.accent

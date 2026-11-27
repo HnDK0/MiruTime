@@ -465,6 +465,7 @@
     <string name="book_genres_less">Lebih sedikit</string>
 
     <!-- Dashboard -->
+    <string name="dash_continue_reading">Lanjutkan membaca</string>
     <string name="dash_today">Hari ini</string>
     <string name="dash_today_desc">Waktu yang Anda habiskan untuk membaca dan mendengarkan</string>
     <string name="dash_stat_read">dibaca</string>
@@ -710,7 +711,7 @@
     <string name="finder_ext_no_match">Tidak ada ekstensi yang cocok dengan filter ini.</string>
     <string name="finder_ext_query_hint">Cari ekstensi</string>
     <string name="finder_ext_row_fmt">%1$s · v%2$s · %3$s</string>
-    <string name="finder_ext_sheet_desc">Jenis, bahasa, dan status untuk daftar. Kueri tetap di kolom pencarian di atas.</string>
+    <string name="finder_ext_sheet_desc">Jenis dan bahasa untuk daftar. Kueri tetap di kolom pencarian di atas.</string>
     <string name="finder_ext_sheet_title">Filter</string>
     <string name="finder_ext_status_disabled">Nonaktif</string>
     <string name="finder_ext_status_enabled">Aktif</string>

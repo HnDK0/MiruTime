@@ -3,17 +3,19 @@ package dev.mirutime.app.features.settings.ui
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +39,7 @@ import dev.mirutime.uikit.LocalMiruLocale
 import dev.mirutime.uikit.MiruSize
 import dev.mirutime.uikit.MiruSpace
 import dev.mirutime.uikit.AppBottomSheet
+import dev.mirutime.uikit.MiruCompactButton
 import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.MiruSectionCard
 import dev.mirutime.uikit.SettingsHint
@@ -224,7 +227,10 @@ fun DataSettingsScreen(contentPadding: PaddingValues) {
         item(key = "storage") {
             MiruSectionCard(
                 title = stringResource(R.string.st_data_storage),
-                description = stringResource(R.string.st_data_total_fmt, formatBytes(usage.totalBytes, locale)),
+                description = stringResource(
+                    R.string.st_data_total_fmt,
+                    if (loading) stringResource(R.string.loading_value) else formatBytes(usage.totalBytes, locale),
+                ),
                 contentPadding = PaddingValues(0.dp),
             ) {
                 StorageBucket.entries.forEachIndexed { index, bucket ->
@@ -246,7 +252,11 @@ fun DataSettingsScreen(contentPadding: PaddingValues) {
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
                             Text(
-                                text = stringResource(R.string.st_data_size_fmt, formatBytes(size, locale)),
+                                text = if (loading) {
+                                    stringResource(R.string.loading_value)
+                                } else {
+                                    stringResource(R.string.st_data_size_fmt, formatBytes(size, locale))
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = LocalMiruExtraColors.current.muted,
                             )
@@ -257,7 +267,8 @@ fun DataSettingsScreen(contentPadding: PaddingValues) {
                                 color = LocalMiruExtraColors.current.accent,
                                 modifier = Modifier
                                     .padding(end = MiruSpace.M)
-                                    .padding(MiruSpace.Xs),
+                                    .padding(MiruSpace.Xs)
+                                    .size(MiruSize.Indicator),
                             )
 
                             cleaning == bucket -> CircularProgressIndicator(
@@ -265,7 +276,8 @@ fun DataSettingsScreen(contentPadding: PaddingValues) {
                                 color = LocalMiruExtraColors.current.accent,
                                 modifier = Modifier
                                     .padding(end = MiruSpace.M)
-                                    .padding(MiruSpace.Xs),
+                                    .padding(MiruSpace.Xs)
+                                    .size(MiruSize.Indicator),
                             )
 
                             size > 0L && !clearable -> Text(
@@ -275,16 +287,16 @@ fun DataSettingsScreen(contentPadding: PaddingValues) {
                                 modifier = Modifier.padding(end = MiruSpace.M),
                             )
 
-                            else -> TextButton(
-                                onClick = { confirm = bucket },
-                                enabled = size > 0L && cleaning == null,
-                                colors = ButtonDefaults.textButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.error,
-                                ),
+                            else -> Box(
+                                modifier = Modifier
+                                    .width(IntrinsicSize.Max)
+                                    .padding(end = MiruSpace.Xs),
                             ) {
-                                Text(
-                                    text = stringResource(R.string.st_data_clear),
-                                    style = MaterialTheme.typography.labelLarge,
+                                MiruCompactButton(
+                                    label = stringResource(R.string.st_data_clear),
+                                    ink = MaterialTheme.colorScheme.error,
+                                    enabled = size > 0L && cleaning == null && !purgingOutOfLibrary,
+                                    onClick = { confirm = bucket },
                                 )
                             }
                         }
@@ -327,20 +339,24 @@ fun DataSettingsScreen(contentPadding: PaddingValues) {
                         CircularProgressIndicator(
                             strokeWidth = 2.dp,
                             color = LocalMiruExtraColors.current.accent,
-                            modifier = Modifier.padding(MiruSpace.Xs),
+                            modifier = Modifier
+                                .padding(MiruSpace.Xs)
+                                .size(MiruSize.Indicator),
                         )
                     } else {
-                        TextButton(
-                            onClick = { outOfLibraryConfirm = true },
-                            enabled = usage.outOfLibraryBookCount > 0 ||
-                                usage.orphanBookDirCount > 0,
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error,
-                            ),
+                        Box(
+                            modifier = Modifier
+                                .width(IntrinsicSize.Max)
+                                .padding(end = MiruSpace.Xs),
                         ) {
-                            Text(
-                                text = stringResource(R.string.st_data_clear),
-                                style = MaterialTheme.typography.labelLarge,
+                            MiruCompactButton(
+                                label = stringResource(R.string.st_data_clear),
+                                ink = MaterialTheme.colorScheme.error,
+                                enabled = !loading &&
+                                    cleaning == null &&
+                                    !purgingOutOfLibrary &&
+                                    (usage.outOfLibraryBookCount > 0 || usage.orphanBookDirCount > 0),
+                                onClick = { outOfLibraryConfirm = true },
                             )
                         }
                     }

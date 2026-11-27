@@ -465,6 +465,7 @@
     <string name="book_genres_less">Meno</string>
 
     <!-- Dashboard -->
+    <string name="dash_continue_reading">Continua a leggere</string>
     <string name="dash_today">Oggi</string>
     <string name="dash_today_desc">Tempo passato leggendo e ascoltando</string>
     <string name="dash_stat_read">letto</string>
@@ -732,7 +733,7 @@
     <string name="finder_ext_no_match">Nessuna estensione corrisponde a questi filtri.</string>
     <string name="finder_ext_query_hint">Cerca estensioni</string>
     <string name="finder_ext_row_fmt">%1$s · v%2$s · %3$s</string>
-    <string name="finder_ext_sheet_desc">Tipo, lingua e stato per l\'elenco. La query resta nel campo di ricerca qui sopra.</string>
+    <string name="finder_ext_sheet_desc">Tipo e lingua per l\'elenco. La query resta nel campo di ricerca qui sopra.</string>
     <string name="finder_ext_sheet_title">Filtri</string>
     <string name="finder_ext_status_disabled">Disattivata</string>
     <string name="finder_ext_status_enabled">Attiva</string>

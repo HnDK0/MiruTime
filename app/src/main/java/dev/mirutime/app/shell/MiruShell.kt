@@ -90,6 +90,7 @@ import dev.mirutime.uikit.MiruRowDivider
 import dev.mirutime.uikit.SheetSection
 import dev.mirutime.app.design.components.ThemePickerRails
 import dev.mirutime.uikit.miruCardElevation
+import dev.mirutime.uikit.miruCardSurface
 import dev.mirutime.uikit.miruPlateBorder
 import dev.mirutime.uikit.miruTopVeilBrush
 import dev.mirutime.uikit.title
@@ -484,7 +485,7 @@ fun MiruShell(
                         localManga = stringResource(R.string.finder_local_manga_title),
                     )
             }
-            val onGlobalSearch = route == "finder/search"
+            val onGlobalSearch = route?.startsWith("finder/search") == true
             val onCatalog = route == CatalogRoute
             val onManageExt = route == "finder/extensions"
             val settingsHeader = settingsHeaderRes(route)
@@ -579,20 +580,41 @@ fun MiruShell(
                 exit = fadeOut(animationSpec = tween(150)) +
                     shrinkVertically(animationSpec = tween(150)),
             ) {
-                Column {
-                    // Fade the last content above the opaque plate instead of
-                    // letting a card edge sit hard against the tab bar.
+                Column(
+                    modifier = if (hasBg) {
+                        Modifier.background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = 0.50f),
+                                    Color.Black.copy(alpha = 0.78f),
+                                ),
+                            ),
+                        )
+                    } else {
+                        Modifier
+                    },
+                ) {
+                    // Fade the last content above the plate; on custom photos
+                    // the whole bottom dock carries a soft vertical veil so
+                    // there is never a hard stripe above the floating pill.
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(TabBarFadeStrip)
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(
-                                        Color.Transparent,
-                                        MaterialTheme.colorScheme.background,
-                                    ),
-                                ),
+                            .then(
+                                if (!hasBg) {
+                                    Modifier.background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color.Transparent,
+                                                MaterialTheme.colorScheme.background,
+                                            ),
+                                        ),
+                                    )
+                                } else {
+                                    Modifier
+                                },
                             ),
                     )
                     MiruTabBar(
@@ -1102,7 +1124,7 @@ fun MiruShell(
             .align(Alignment.BottomCenter)
             .fillMaxWidth()
             .height(navBottom)
-            .background(MaterialTheme.colorScheme.surface),
+            .background(if (hasBg) Color.Transparent else MaterialTheme.colorScheme.surface),
     )
     }
 
@@ -1196,11 +1218,9 @@ private fun MiruTabBar(
                 bottom = 8.dp,
             )
             .windowInsetsPadding(WindowInsets.navigationBars),
-        shape = RoundedCornerShape(MiruRadius.Sheet),
-        // Opaque backing: content scrolling past the floating panel must
-        // never be readable under it. The navigation inset lives INSIDE the
-        // surface so the plate also covers the gesture-bar strip.
-        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(MiruRadius.Plate),
+        // Match the header plate translucency on photo themes; opaque on classic themes.
+        color = miruCardSurface().let { if (it.alpha < 1f) it.copy(alpha = 0.94f) else it },
         shadowElevation = miruCardElevation(),
         border = miruPlateBorder(),
         tonalElevation = 0.dp,
