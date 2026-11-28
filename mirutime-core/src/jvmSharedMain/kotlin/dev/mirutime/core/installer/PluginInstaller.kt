@@ -2,6 +2,7 @@ package dev.mirutime.core.installer
 
 import dev.mirutime.core.api.SUPPORTED_PLUGIN_API
 import dev.mirutime.core.engine.createSandboxGlobals
+import dev.mirutime.core.engine.withoutBom
 import dev.mirutime.core.host.FileSystem
 import dev.mirutime.core.network.cache.sha256Hex
 import dev.mirutime.core.network.security.SsrfGuard
@@ -325,7 +326,7 @@ class PluginInstaller(
     // Compile + load (never call) in a fresh sandbox: broken syntax is caught
     // without executing plugin logic. null = ok, otherwise the failure reason.
     private fun syntaxError(code: String, id: String): String? = try {
-        createSandboxGlobals().load(code, "@$id")
+        createSandboxGlobals().load(code.withoutBom(), "@$id")
         null
     } catch (e: Exception) {
         "script '$id' failed to load: ${e.message}"

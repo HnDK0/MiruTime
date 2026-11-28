@@ -35,6 +35,7 @@ import dev.mirutime.core.api.PluginRegistry
 import dev.mirutime.core.api.PluginSource
 import dev.mirutime.core.api.PluginState
 import dev.mirutime.core.api.SUPPORTED_PLUGIN_API
+import dev.mirutime.core.engine.adapter.LuaPluginSource
 import dev.mirutime.core.engine.adapter.LuaPluginSourceFactory
 import dev.mirutime.core.host.CfChallengeSolver
 import dev.mirutime.core.installer.IndexEntry
@@ -971,6 +972,22 @@ class PluginGraph(
         handlesMutex.withLock { handles.remove(id)?.dispose() }
     }
 
+    // A source whose call ran past its wall clock rejects every later call (LuaJ
+    // cannot kill the worker thread) and its handle stays cached, so Retry and
+    // Reload kept meeting the dead instance until the app restarted. Opening or
+    // reloading a catalogue page is a request for a fresh try: drop the dead
+    // handle here and the next source() builds a new one. Bulk jobs do not call
+    // this, so after one timeout they still fail fast instead of waiting a full
+    // wall clock per book. True when a dead handle was dropped.
+    suspend fun restartIfTimedOut(id: String): Boolean = handlesMutex.withLock {
+        val dead = isTimedOutSource(handles[id]?.source)
+        if (dead) {
+            handles.remove(id)?.dispose()
+            MiruLog.event("plugins", "restart", "plugin" to id, "reason" to "timeout")
+        }
+        dead
+    }
+
     /** Cheap KV refresh for a restore that could not safely rescan plugins yet. */
     fun refreshRepoUrl() {
         _repoUrl.value = keyValueStore.get(REPO_NS, REPO_KEY)
@@ -1288,6 +1305,11 @@ internal fun imageHeadersFor(url: String, hostOptions: HostOptionsRegistry): Map
         ?: PluginUserAgentRegistry.resolve(null, host)
     return headers
 }
+
+// LuaPluginSource rejects every call after one wall-clock timeout; any other
+// source (a fake, null) counts as alive.
+internal fun isTimedOutSource(source: PluginSource?): Boolean =
+    (source as? LuaPluginSource)?.isTimedOut == true
 
 private fun opdsHost(url: String): String? = runCatching { URI(url).host.orEmpty() }
     .getOrNull()

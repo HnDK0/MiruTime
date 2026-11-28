@@ -202,4 +202,40 @@ class ScriptMetadataParserTest {
         assertEquals("GBK", plugin.charset)
         assertNull(ScriptMetadataParser.parse("-- none").toPluginMetadata("f", 1, "sha").charset)
     }
+
+    @Test
+    fun `a script saved with a byte order mark is read`() {
+        val withBom = "\uFEFF" + header
+        assertEquals("komiku", ScriptMetadataParser.parse(withBom).id)
+        assertEquals(
+            setOf("getCatalogList"),
+            definedFunctions(withBom, listOf("getCatalogList", "getBookTitle")),
+        )
+    }
+
+    @Test
+    fun `a header that never returns is abandoned at the deadline`() {
+        // A loop long enough to outlast the deadline, but short enough to end soon after it: a
+        // truly endless one would keep a CPU-burning thread alive for the rest of the test run.
+        val spin = "for i = 1, 20000000 do end"
+        val startedAt = System.nanoTime()
+
+        val meta = ScriptMetadataParser.parse("id = \"slow\"\n$spin", headerTimeoutMs = 100)
+        val defined = definedFunctions(
+            "function getCatalogList() end\n$spin",
+            listOf("getCatalogList"),
+            headerTimeoutMs = 100,
+        )
+
+        val tookMs = (System.nanoTime() - startedAt) / 1_000_000
+        assertNull(meta.id)
+        assertTrue(defined.isEmpty())
+        assertTrue(tookMs < 5_000, "both calls returned after $tookMs ms")
+    }
+
+    @Test
+    fun `a header that throws still reports what it declared before`() {
+        val meta = ScriptMetadataParser.parse("id = \"half\"\nerror(\"boom\")")
+        assertEquals("half", meta.id)
+    }
 }

@@ -70,7 +70,7 @@ private fun readStreamLimited(input: InputStream, cap: Long): ByteArray {
 
 // ── EPUB ───────────────────────────────────────────────────────────────────
 
-private val FILE_CHAPTER_EXTENSIONS = setOf("xhtml", "xml", "html")
+private val FILE_CHAPTER_EXTENSIONS = setOf("xhtml", "xml", "html", "htm")
 
 class EpubFileReader(file: File) : Closeable {
     private val archive = ZipArchive(file)
@@ -84,6 +84,12 @@ class EpubFileReader(file: File) : Closeable {
     val description: String?
     val coverBytes: ByteArray?
     val coverMediaType: String?
+
+    // Images already read, by archive path. A decoration repeated in every chapter is one image: it is
+    // read and charged against the budget once, then shared (null = unreadable or over budget, also
+    // remembered, so a missing file is not looked up again for every reference).
+    private val imageCache = HashMap<String, LocalImage?>()
+
     var imageBudget = MAX_ZIP_TOTAL_IMAGES_BYTES
         private set
 
@@ -96,7 +102,8 @@ class EpubFileReader(file: File) : Closeable {
                 ?.attr("full-path")
                 ?.decodedURL
                 ?: throw IllegalStateException("Invalid container.xml file")
-            rootPath = opfPath.substringBefore('/', "")
+            // The folder of the OPF is everything before its LAST slash.
+            rootPath = opfPath.substringBeforeLast('/', "")
 
             val opf = archive.read(opfPath) ?: throw IllegalStateException(".opf file missing")
             val document = parseXmlDocument(opf)
@@ -123,26 +130,22 @@ class EpubFileReader(file: File) : Closeable {
             }.toMap()
             spine = spineEl.selectChildTag("itemref").mapNotNull { itemRef ->
                 manifestItems[itemRef.attr("idref").orEmpty()]
-            }.filter { it.absPath.substringAfterLast('.') in FILE_CHAPTER_EXTENSIONS }
+            }.filter { it.absPath.substringAfterLast('.').lowercase() in FILE_CHAPTER_EXTENSIONS }
 
             // NCX is optional: EPUB 3 commonly ships only nav.xhtml.
             val ncxPath = manifestItems.values.firstOrNull {
                 it.mediaType == "application/x-dtbncx+xml"
             }?.absPath ?: manifestItems["ncx"]?.absPath
-            tocEntries = if (ncxPath != null) {
-                runCatching {
-                    parseNcxToc(
-                        { runCatching { archive.read(it) }.getOrNull() },
-                        ncxPath,
-                        rootPath,
-                    )
-                }
-                    .getOrNull()
-                    ?.takeIf { it.isNotEmpty() }
-                    ?: parseEpub3NavFromArchive(archive, manifestItems, rootPath)
-            } else {
-                parseEpub3NavFromArchive(archive, manifestItems, rootPath)
-            }
+            val navPath = manifestItems.values.firstOrNull { item ->
+                item.properties.split(Regex("\\s+")).contains("nav")
+            }?.absPath
+            tocEntries = parseToc(
+                read = { runCatching { archive.read(it) }.getOrNull() },
+                ncxPath = ncxPath,
+                navPath = navPath,
+                rootPath = rootPath,
+                spineUrls = spine.map { it.absPath },
+            )
             val cover = runCatching { extractEpubCover(archive, manifestItems, metadata) }.getOrNull()
             coverBytes = cover?.bytes
             coverMediaType = cover?.mediaType
@@ -205,6 +208,13 @@ class EpubFileReader(file: File) : Closeable {
     ): LocalImage? {
         if (src.isBlank()) return null
         val path = src.substringBefore('#').substringBefore('?').decodedURL.hrefAbsolutePath(spineDir)
+        if (imageCache.containsKey(path)) return imageCache[path]
+        val image = loadEpubImage(path, manifestItems)
+        imageCache[path] = image
+        return image
+    }
+
+    private fun loadEpubImage(path: String, manifestItems: Map<String, EpubManifestRef>): LocalImage? {
         val bytes = runCatching { archive.read(path) }.getOrNull() ?: return null
         if (bytes.isEmpty() || bytes.size > imageBudget) return null
         imageBudget -= bytes.size
@@ -216,21 +226,6 @@ class EpubFileReader(file: File) : Closeable {
     }
 
     override fun close() = archive.close()
-}
-
-private fun parseEpub3NavFromArchive(
-    archive: ZipArchive,
-    manifestItems: Map<String, EpubManifestRef>,
-    rootPath: String,
-): List<EpubNavEntry> {
-    val navPath = manifestItems.values.firstOrNull { item ->
-        item.properties.split(Regex("\\s+")).contains("nav")
-    }?.absPath ?: return emptyList()
-    return parseEpub3Nav(
-        read = { runCatching { archive.read(it) }.getOrNull() },
-        navPath = navPath,
-        rootPath = rootPath,
-    )
 }
 
 private fun extractEpubCover(
@@ -377,9 +372,9 @@ internal fun readZipEntry(
 ): ByteArray? = ZipArchive(file).use { it.read(name, cap) }
 
 internal fun parseLocalBookFile(file: File, path: String): LocalBook = when {
-    path.endsWith(".epub") -> EpubFileReader(file).use { it.readAll() }
-    path.endsWith(".fb2") || path.endsWith(".fb2.zip") -> Fb2FileReader(file).book
-    path.endsWith(".cbz") -> CbzFileReader(file).use { it.readAll() }
+    path.endsWith(".epub", ignoreCase = true) -> EpubFileReader(file).use { it.readAll() }
+    path.endsWith(".fb2", ignoreCase = true) || path.endsWith(".fb2.zip", ignoreCase = true) -> Fb2FileReader(file).book
+    path.endsWith(".cbz", ignoreCase = true) -> CbzFileReader(file).use { it.readAll() }
     path.endsWith(".txt", ignoreCase = true) -> TxtFileReader(file).readAll()
     else -> throw IllegalStateException("Unsupported local format: $path")
 }

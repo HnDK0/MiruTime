@@ -34,6 +34,8 @@ import dev.mirutime.core.engine.binding.StringBindings
 import dev.mirutime.core.engine.binding.UrlBindings
 import dev.mirutime.core.engine.createSandboxGlobals
 import dev.mirutime.core.engine.loader.LibraryLoader
+import dev.mirutime.core.engine.pinningBaseUrl
+import dev.mirutime.core.engine.withoutBom
 import dev.mirutime.core.host.CfChallengeSolver
 import dev.mirutime.core.host.CookieStore
 import dev.mirutime.core.host.FileSystem
@@ -114,6 +116,11 @@ class LuaPluginSource(
 
     private val mutex = Mutex()
     private val timedOut = AtomicBoolean(false)
+
+    // True once a call ran past its wall clock: LuaJ cannot kill the worker
+    // thread, so this instance rejects every later call. The host reads it to
+    // replace the instance instead of keeping the dead one.
+    val isTimedOut: Boolean get() = timedOut.get()
 
     // NoveLA SourceInterface.referer (LuaSourceAdapter.kt:99
     // `override val referer: String = readReferer()`): the ready-made Referer
@@ -544,6 +551,9 @@ class LuaPluginSource(
                 future.cancel(true)
                 throw LuaCallTimeoutException(metadata.id)
             } catch (e: CancellationException) {
+                // ceiling: LuaJ ignores the interrupt, so the abandoned call keeps its worker busy and
+                // this source still counts as alive — the next call waits the full wall clock once more
+                // before it flips timedOut and the host restarts it.
                 future.cancel(true)
                 throw e
             } catch (e: ExecutionException) {
@@ -1007,7 +1017,12 @@ class LuaPluginSourceFactory(
         }
         try {
             val loaded = loadExecutor.submit(Callable {
-                globals.load(descriptor.script, "@${metadata.id}").call()
+                // The chunk is where a plugin declares `baseUrl` and derives
+                // its API roots from it, so the host's value (the one set under
+                // Manage extensions) has to be in place while it runs.
+                globals.pinningBaseUrl(metadata.baseUrl) {
+                    globals.load(descriptor.script.withoutBom(), "@${metadata.id}").call()
+                }
                 registerLoadTimeOptions(session, metadata)
             })
             val timeout = callTimeoutMs.takeIf { it > 0 } ?: 90_000

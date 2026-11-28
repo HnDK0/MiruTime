@@ -26,14 +26,14 @@ internal fun parseFb2(raw: ByteArray): LocalBook {
             it.selectFirstChildTag("last-name")?.textContent?.trim(),
         ).joinToString(" ").ifEmpty { null }
     }
-    val description = doc.selectFirstTag("annotation")?.textContent?.trim()
+    val description = doc.selectFirstTag("annotation")?.let { blockText(it) }
 
     val binaries = doc.selectTag("binary").associateBy { it.attr("id").orEmpty() }
     val chapters = doc.selectTag("section").mapIndexedNotNull { index, section ->
         val parsed = sectionBodyText(section, binaries)
         if (parsed.body.isEmpty() && parsed.images.isEmpty()) null else {
             val sectionTitle = section.selectFirstChildTag("title")
-                ?.textContent?.replace(WhitespaceRun, " ")?.trim().orEmpty()
+                ?.let { blockText(it) }?.replace(WhitespaceRun, " ")?.trim().orEmpty()
             LocalChapter(
                 url = "fb2_$index",
                 title = sectionTitle.ifEmpty { "Chapter ${index + 1}" },
@@ -81,14 +81,18 @@ private fun sectionBodyText(section: XmlElement, binaries: Map<String, XmlElemen
             "empty-line" -> out.append("\n\n")
             "br" -> out.append('\n')
             "p", "subtitle", "cite", "epigraph", "table" -> {
-                val text = child.textContent.replace(WhitespaceRun, " ").trim()
+                val text = if (child.name == "p" || child.name == "subtitle") {
+                    child.textContent.replace(WhitespaceRun, " ").trim()
+                } else {
+                    blockText(child)
+                }
                 if (text.isNotEmpty()) out.append(text)
                 child.selectTag("image").forEach { appendFb2Image(it, out, binaries) }
                 out.append("\n\n")
             }
             "image" -> appendFb2Image(child, out, binaries)
             else -> {
-                val text = child.textContent.trim()
+                val text = blockText(child)
                 if (text.isNotEmpty()) out.append(text).append("\n\n")
             }
         }
@@ -121,4 +125,29 @@ private fun decodeFb2Binary(binary: XmlElement): LocalImage? {
         ?.takeIf { it.isNotEmpty() }
         ?: return null
     return LocalImage(position = 0, bytes = bytes, mediaType = binary.attr("content-type"))
+}
+
+// FictionBook elements that hold the text of one line or paragraph.
+private val FB2_TEXT_BLOCKS = setOf("p", "v", "subtitle", "text-author", "th", "td")
+
+// Text of a container (cite, epigraph, poem, annotation, title, table...): one line per text block,
+// in document order. XmlElement.textContent alone glues the blocks together when the file has no
+// whitespace between tags (<v>one</v><v>two</v> reads "onetwo"). Whitespace is collapsed inside each
+// line (hard-wrapped source), never across lines.
+private fun blockText(node: XmlElement): String {
+    val lines = ArrayList<String>()
+    collectBlocks(node, lines)
+    return lines.joinToString("\n")
+}
+
+private fun collectBlocks(node: XmlElement, lines: MutableList<String>) {
+    if (node.name in FB2_TEXT_BLOCKS || node.children.isEmpty()) {
+        val text = node.textContent.replace(WhitespaceRun, " ").trim()
+        if (text.isNotEmpty()) lines.add(text)
+        return
+    }
+    // Text sitting directly in a container is not expected, but it is never dropped.
+    val own = node.text.replace(WhitespaceRun, " ").trim()
+    if (own.isNotEmpty()) lines.add(own)
+    node.children.forEach { collectBlocks(it, lines) }
 }

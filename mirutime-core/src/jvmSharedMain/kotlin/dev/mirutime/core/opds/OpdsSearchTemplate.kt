@@ -21,9 +21,15 @@ object OpdsSearchTemplate {
         EXPRESSION.findAll(href).any { variableOf(it.groupValues[1]) != null }
 
     fun substitute(template: String, query: String): String {
-        val encoded = URLEncoder.encode(query, "UTF-8")
+        // URLEncoder writes a space as '+': right inside a query string (the form every catalogue
+        // already sees), wrong in a path, where '+' is a literal plus and a space is %20. A real
+        // plus sign is %2B in both.
+        val formEncoded = URLEncoder.encode(query, "UTF-8")
         return EXPRESSION.replace(template) { match ->
             val variable = variableOf(match.groupValues[1]) ?: return@replace match.value
+            val inQuery = variable.prefix != null ||
+                template.substring(0, match.range.first).contains('?')
+            val encoded = if (inQuery) formEncoded else formEncoded.replace("+", "%20")
             variable.prefix?.let { "$it${variable.name}=$encoded" } ?: encoded
         }
     }

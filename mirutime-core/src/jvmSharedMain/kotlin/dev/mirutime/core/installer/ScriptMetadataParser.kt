@@ -3,11 +3,16 @@ package dev.mirutime.core.installer
 import dev.mirutime.core.api.ContentType
 import dev.mirutime.core.api.PluginMetadata
 import dev.mirutime.core.engine.createSandboxGlobals
+import dev.mirutime.core.engine.withoutBom
 import dev.mirutime.core.network.cf.CfOptions
 import org.luaj.vm2.Globals
 import org.luaj.vm2.LuaTable
 import org.luaj.vm2.LuaValue
 import org.luaj.vm2.lib.OneArgFunction
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 // cf_options declared by a plugin script (external-sources plugin guide):
 // whitelist / ignore_markers / trigger_markers. The Lua field names are kept
@@ -97,17 +102,18 @@ fun ScriptMetadata.toPluginMetadata(fallbackId: String, api: Int, sha256: String
 // Exists because LuaSession.globals is internal to this module: a host that
 // wants the "functions defined" list has no other read-only door onto it.
 // ceiling: a script that throws in its top level reports only the candidates
-// defined before the throw.
-fun definedFunctions(code: String, candidates: Collection<String>): Set<String> {
+// defined before the throw; one that does not finish within headerTimeoutMs
+// reports none.
+fun definedFunctions(
+    code: String,
+    candidates: Collection<String>,
+    headerTimeoutMs: Long = HEADER_TIMEOUT_MS,
+): Set<String> {
     val globals = createSandboxGlobals()
     globals.set("require_lib", object : OneArgFunction() {
         override fun call(arg: LuaValue): LuaValue = LuaTable()
     })
-    try {
-        globals.load(code, "@introspect").call()
-    } catch (_: Exception) {
-        // Functions defined before the failing statement are still readable.
-    }
+    if (!runHeader(globals, code, "@introspect", headerTimeoutMs)) return emptySet()
     return candidates.filterTo(mutableSetOf()) { name ->
         try {
             globals.get(name).isfunction()
@@ -117,17 +123,51 @@ fun definedFunctions(code: String, candidates: Collection<String>): Set<String> 
     }
 }
 
+// How long a script's top level may run when only its header is wanted. It
+// declares a few globals and defines functions, so this is far above any real
+// script; the limit exists for one that never returns.
+internal const val HEADER_TIMEOUT_MS = 10_000L
+
+// LuaJ 3.0.1 has no hook to interrupt a running script, so the header runs on
+// a daemon thread and the caller waits at most timeoutMs, as the engine does
+// for the real load. A thread that overruns is abandoned. Returns false for
+// that case, true when the header finished or threw: metadata globals set
+// before a failing statement are still readable.
+private val headerThreads = Executors.newCachedThreadPool { task ->
+    Thread(task, "lua-header").apply { isDaemon = true }
+}
+
+private fun runHeader(globals: Globals, code: String, chunkName: String, timeoutMs: Long): Boolean {
+    val run = headerThreads.submit { globals.load(code.withoutBom(), chunkName).call() }
+    return try {
+        run.get(timeoutMs, TimeUnit.MILLISECONDS)
+        true
+    } catch (_: ExecutionException) {
+        true
+    } catch (_: TimeoutException) {
+        run.cancel(true)
+        false
+    } catch (_: InterruptedException) {
+        run.cancel(true)
+        Thread.currentThread().interrupt()
+        false
+    }
+}
+
+// What a script that never finished its header declared: nothing readable.
+private val UNDECLARED = ScriptMetadata(
+    id = null, name = null, version = null, baseUrl = null, language = null,
+    contentType = null, icon = null, description = null, cfOptions = null,
+    charset = null, referer = null,
+)
+
 object ScriptMetadataParser {
-    fun parse(code: String): ScriptMetadata {
+    fun parse(code: String, headerTimeoutMs: Long = HEADER_TIMEOUT_MS): ScriptMetadata {
         val globals = createSandboxGlobals()
         globals.set("require_lib", object : OneArgFunction() {
             override fun call(arg: LuaValue): LuaValue = LuaTable()
         })
-        try {
-            globals.load(code, "@metadata").call()
-        } catch (_: Exception) {
-            // Metadata globals set before the failing statement are still readable.
-        }
+        if (!runHeader(globals, code, "@metadata", headerTimeoutMs)) return UNDECLARED
         return parseGlobals(globals)
     }
 

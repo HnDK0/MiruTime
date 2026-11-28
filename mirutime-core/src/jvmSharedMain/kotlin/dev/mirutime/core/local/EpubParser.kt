@@ -10,7 +10,7 @@ import com.fleeksoft.ksoup.nodes.TextNode
 // Android-only), ksoup for chapter XHTML (Jsoup fallback path — ksoup is the
 // already-installed multiplatform port). Cover and inline chapter artwork are
 // extracted only from entries the book actually references.
-private val CHAPTER_EXTENSIONS = setOf("xhtml", "xml", "html")
+private val CHAPTER_EXTENSIONS = setOf("xhtml", "xml", "html", "htm")
 
 internal fun parseEpub(bytes: ByteArray): LocalBook {
     val entries = readZipEntries(bytes)
@@ -22,7 +22,8 @@ internal fun parseEpub(bytes: ByteArray): LocalBook {
         ?.attr("full-path")
         ?.decodedURL
         ?: throw IllegalStateException("Invalid container.xml file")
-    val rootPath = opfFilePath.substringBefore('/', "")
+    // The folder of the OPF is everything before its LAST slash: "OEBPS/Content/content.opf" -> "OEBPS/Content".
+    val rootPath = opfFilePath.substringBeforeLast('/', "")
 
     val opf = entries[opfFilePath] ?: throw IllegalStateException(".opf file missing")
     val document = parseXmlDocument(opf) ?: throw IllegalStateException(".opf file failed to parse data")
@@ -50,14 +51,21 @@ internal fun parseEpub(bytes: ByteArray): LocalBook {
     // NCX is optional: EPUB 3 commonly ships only nav.xhtml.
     val ncxPath = manifestItems.values.firstOrNull { it.mediaType == "application/x-dtbncx+xml" }
         ?.absPath ?: manifestItems["ncx"]?.absPath
-    val tocEntries = if (ncxPath != null) {
-        runCatching { parseNcxToc({ entries[it] }, ncxPath, rootPath) }
-            .getOrNull()
-            ?.takeIf { it.isNotEmpty() }
-            ?: parseEpub3NavFromEntries(entries, manifestItems, rootPath)
-    } else {
-        parseEpub3NavFromEntries(entries, manifestItems, rootPath)
-    }
+    val navPath = manifestItems.values.firstOrNull { item ->
+        item.properties.split(Regex("\\s+")).contains("nav")
+    }?.absPath
+    val tocEntries = parseToc(
+        read = { entries[it] },
+        ncxPath = ncxPath,
+        navPath = navPath,
+        rootPath = rootPath,
+        // Chapter files only: a TOC whose links reach just a non-chapter spine item (a cover image in
+        // the spine, a converted book) is not a usable TOC — the caller then falls back to one
+        // chapter per spine file instead of dropping every chapter.
+        spineUrls = spine.selectChildTag("itemref")
+            .mapNotNull { manifestItems[it.attr("idref").orEmpty()]?.absPath }
+            .filter { it.substringAfterLast('.').lowercase() in CHAPTER_EXTENSIONS },
+    )
 
     // Spine order (sequential port of the NoveLA batched-parallel loop).
     val chapters = mutableListOf<LocalChapter>()
@@ -67,7 +75,7 @@ internal fun parseEpub(bytes: ByteArray): LocalBook {
 
     for (itemRef in spine.selectChildTag("itemref")) {
         val item = manifestItems[itemRef.attr("idref").orEmpty()] ?: continue
-        val extension = item.absPath.substringAfterLast('.')
+        val extension = item.absPath.substringAfterLast('.').lowercase()
         if (extension !in CHAPTER_EXTENSIONS) continue
         val spineUrl = item.absPath
         val spineDir = spineUrl.substringBeforeLast('/', "")
@@ -102,17 +110,6 @@ internal fun parseEpub(bytes: ByteArray): LocalBook {
         coverBytes = cover?.bytes,
         coverMediaType = cover?.mediaType,
     )
-}
-
-private fun parseEpub3NavFromEntries(
-    entries: Map<String, ByteArray>,
-    manifestItems: Map<String, ManifestRef>,
-    rootPath: String,
-): List<EpubNavEntry> {
-    val navPath = manifestItems.values.firstOrNull { item ->
-        item.properties.split(Regex("\\s+")).contains("nav")
-    }?.absPath ?: return emptyList()
-    return parseEpub3Nav({ entries[it] }, navPath, rootPath)
 }
 
 // EPUB2 declares the cover through <meta name="cover" content="id">, EPUB3
@@ -194,46 +191,88 @@ private fun appendChildren(
     out: InlineImagesBuilder,
     resolveImage: (String) -> LocalImage?,
 ) {
+    // Text and inline tags that sit next to each other are one paragraph, like the content of a <p>.
+    // Turning every text node into its own paragraph cut "Hello <b>world</b> again." in three.
+    val run = ArrayList<Node>()
+    fun flushRun() {
+        if (run.isEmpty()) return
+        if (!appendParagraphOf(run, out, resolveImage)) {
+            // Nothing visible, only <br> tags: each one still adds its line break, as before.
+            run.forEach { if (it.nodeName() == "br") out.append('\n') }
+        }
+        run.clear()
+    }
     for (child in node.childNodes()) {
+        if (isInline(child)) {
+            run.add(child)
+            continue
+        }
+        flushRun()
         when (child.nodeName()) {
-            "p" -> {
-                val paragraph = InlineImagesBuilder()
-                appendParagraph(child, paragraph, resolveImage)
-                val parsed = paragraph.build().trimmed()
-                if (parsed.body.isNotBlank()) {
-                    out.appendParsed(parsed)
-                    out.append("\n\n")
-                } else if (parsed.images.isNotEmpty()) {
-                    // An image-only paragraph contributes no blank text block.
-                    out.appendParsed(parsed)
-                }
-            }
-            "br" -> out.append('\n')
+            "p" -> appendParagraphOf(child.childNodes(), out, resolveImage)
             "hr" -> out.append("\n\n")
-            "img", "image" -> out.image(resolveImage(imageSource(child)))
-            else -> if (child is TextNode) {
-                val text = child.text()
-                if (text.isNotBlank()) out.append(text).append("\n\n")
-            } else {
+            else -> if (containsBlock(child)) {
                 appendChildren(child, out, resolveImage)
+            } else {
+                // A block that holds only inline content (li, h2, blockquote, td...): one paragraph.
+                appendParagraphOf(child.childNodes(), out, resolveImage)
             }
         }
+    }
+    flushRun()
+}
+
+private val BLOCK_TAGS = setOf(
+    "p", "div", "section", "article", "aside", "blockquote", "ul", "ol", "li", "dl", "dt", "dd",
+    "table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption", "h1", "h2", "h3", "h4", "h5", "h6",
+    "pre", "figure", "figcaption", "header", "footer", "nav", "main", "address", "center", "form",
+    "fieldset", "details", "summary", "hr",
+)
+
+private fun containsBlock(node: Node): Boolean =
+    node.childNodes().any { it.nodeName() in BLOCK_TAGS || containsBlock(it) }
+
+private fun isInline(node: Node): Boolean =
+    node is TextNode || (node.nodeName() !in BLOCK_TAGS && !containsBlock(node))
+
+// One paragraph made of sibling nodes, appended with its blank-line separator. True when it
+// contributed text or images.
+private fun appendParagraphOf(
+    nodes: List<Node>,
+    out: InlineImagesBuilder,
+    resolveImage: (String) -> LocalImage?,
+): Boolean {
+    val paragraph = InlineImagesBuilder()
+    appendInline(nodes, paragraph, resolveImage)
+    val parsed = paragraph.build().trimmed()
+    return when {
+        parsed.body.isNotBlank() -> {
+            out.appendParsed(parsed)
+            out.append("\n\n")
+            true
+        }
+        parsed.images.isNotEmpty() -> {
+            // An image-only paragraph contributes no blank text block.
+            out.appendParsed(parsed)
+            true
+        }
+        else -> false
     }
 }
 
 // Paragraph text keeps inline markup flat: nested tags contribute their text.
 // Images get their marker at the exact paragraph offset via a nested builder;
 // positions are rebased when the paragraph is appended.
-private fun appendParagraph(
-    node: Node,
+private fun appendInline(
+    nodes: List<Node>,
     out: InlineImagesBuilder,
     resolveImage: (String) -> LocalImage?,
 ) {
-    for (child in node.childNodes()) {
+    for (child in nodes) {
         when (child.nodeName()) {
             "br" -> out.append('\n')
             "img", "image" -> out.image(resolveImage(imageSource(child)))
-            else -> if (child is TextNode) out.append(child.text()) else appendParagraph(child, out, resolveImage)
+            else -> if (child is TextNode) out.append(child.text()) else appendInline(child.childNodes(), out, resolveImage)
         }
     }
 }

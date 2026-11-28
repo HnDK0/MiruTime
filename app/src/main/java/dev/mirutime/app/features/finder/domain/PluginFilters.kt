@@ -140,9 +140,10 @@ private fun String?.toBooleanWire(): String =
         else -> "false"
     }
 
-// Defaults are always sent to the plugin (NoveLA ActiveFilters includes the
-// widget defaults); only values that differ from a default live in
-// CatalogFilters.pluginValues so the badge stays honest.
+// Defaults are merged into every filtered or query request (NoveLA
+// ActiveFilters includes the widget defaults); only values that differ from a
+// default live in CatalogFilters.pluginValues so the badge stays honest. A
+// plain listing sends nothing: it is getCatalogList (see pluginFilterRequest).
 fun defaultPluginValues(schema: List<PluginFilter>): Map<String, List<String>> = buildMap {
     schema.forEach { filter ->
         when (filter.type) {
@@ -232,6 +233,15 @@ internal fun pluginCatalogRequest(
         else -> CatalogRequest.List
     }
 }
+
+// A plugin may save the user's pick while it serves a filtered page (a
+// set_preference inside getCatalogFiltered) and build the default of its
+// getFilterList from it. Which values count as "changed" is decided against
+// the cached schema, so after the first filtered page that schema may be
+// stale: picking the old default again would be dropped as unchanged and the
+// plugin would answer with what it saved. Later pages repeat the same request.
+internal fun CatalogRequest.mayChangeFilterDefaults(index: Int): Boolean =
+    this is CatalogRequest.Filtered && index == 0
 
 // One filter's values in final Lua keys. UI widgets later call this instead of
 // re-implementing suffix rules.

@@ -329,6 +329,25 @@ internal fun SourceCatalogScreen(
         schemaLoading = false
     }
 
+    // A plugin may save the pick while it serves a filtered page and build the
+    // defaults of getFilterList from it; the provider drops its cached schema
+    // after such a page. Read it again once the page and the first schema read
+    // are both in, so the sheet and its "changed from the default" check use
+    // what the plugin reports now. A cache hit costs nothing, so this may run
+    // after every finished load. A failed read keeps the schema on screen; the
+    // first read owns the loading and error state.
+    LaunchedEffect(sourceId, loading, schemaLoading) {
+        if (isLocal || loading || schemaLoading || schemaError != null) return@LaunchedEffect
+        val fresh = try {
+            (provider.filterSchema(sourceId) as? Outcome.Ok)?.value
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+        if (fresh != null && fresh != schema) schema = fresh
+    }
+
     // Browser-style reload of a plugin source. It forgets what search and
     // filters left in memory (the other lists of this source, the filter
     // schema, the global-search snapshot) and asks the site again for the page

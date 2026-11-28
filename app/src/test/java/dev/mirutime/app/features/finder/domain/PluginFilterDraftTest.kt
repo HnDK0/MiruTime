@@ -149,6 +149,46 @@ class PluginFilterDraftTest {
         assertEquals(2, filters.pluginValues.count { it.value.isNotEmpty() })
     }
 
+    // webnovel.lua keeps the chosen mode with set_preference inside
+    // getCatalogFiltered and builds the default of its "mode" select from it.
+    @Test
+    fun `the old default picked again is kept once the schema carries the saved default`() {
+        fun modeSchema(default: String) = listOf(
+            PluginFilter(
+                key = "mode",
+                type = PluginFilterType.Select,
+                label = "Mode",
+                options = listOf(
+                    PluginFilterOption("novel", "Novels"),
+                    PluginFilterOption("fanfic", "Fanfic"),
+                ),
+                defaultValue = default,
+            ),
+        )
+        fun pick(value: String) = mapOf<String, PluginFilterValue>("mode" to PluginFilterValue.Select(value))
+        fun requestFor(schema: List<PluginFilter>, value: String) = pluginCatalogRequest(
+            CatalogFilters().withPluginDraft(schema, pick(value)),
+            schema,
+            supportsSearchFilters = false,
+        )
+        val before = modeSchema("novel") // read before the first filtered page
+        val after = modeSchema("fanfic") // read after the plugin saved "fanfic"
+
+        // Fanfic differs from the default the app knew: a filtered request.
+        assertEquals(
+            CatalogRequest.Filtered(mapOf("mode" to listOf("fanfic"))),
+            requestFor(before, "fanfic"),
+        )
+        // Novel is that stale default: dropped as unchanged, the request is a
+        // plain listing and the plugin answers with what it saved (Fanfic).
+        assertEquals(CatalogRequest.List, requestFor(before, "novel"))
+        // Read again after the page, Novel is a change and reaches the plugin.
+        assertEquals(
+            CatalogRequest.Filtered(mapOf("mode" to listOf("novel"))),
+            requestFor(after, "novel"),
+        )
+    }
+
     @Test
     fun `reset returns every widget to the schema defaults`() {
         val edited = pluginFilterDefaults(schema)

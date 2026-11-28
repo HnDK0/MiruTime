@@ -1,6 +1,7 @@
 package dev.mirutime.core.engine.loader
 
 import dev.mirutime.core.engine.LuaSession
+import dev.mirutime.core.engine.withoutBom
 import dev.mirutime.core.host.FileSystem
 import dev.mirutime.core.network.cache.sha256Hex
 import org.luaj.vm2.Globals
@@ -71,7 +72,7 @@ class LibraryLoader(
         if (expectedSha256 != null && !actual.equals(expectedSha256, ignoreCase = true)) {
             throw LuaError("require_lib: sha256 mismatch for $id: got $actual")
         }
-        val source = bytes.decodeToString()
+        val source = bytes.decodeToString().withoutBom()
         // Bound (corpus ceiling: external-sources/libs ships 49 lib files, so
         // 64 leaves headroom; overflow clears instead of evicting one entry —
         // safe because entries are immutable and sha-keyed, worst case is a

@@ -6,11 +6,13 @@ import dev.mirutime.app.features.finder.domain.CatalogRequest
 import dev.mirutime.app.features.finder.domain.PluginFilter
 import dev.mirutime.app.features.finder.domain.PluginFilterOption
 import dev.mirutime.app.features.finder.domain.PluginFilterType
+import dev.mirutime.app.features.finder.domain.mayChangeFilterDefaults
 import dev.mirutime.app.features.finder.domain.pluginCatalogRequest
 import dev.mirutime.core.api.CatalogPage as CoreCatalogPage
 import dev.mirutime.core.api.Outcome
 import dev.mirutime.core.api.PluginError
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -77,6 +79,19 @@ class PluginFilterCapabilityTest {
             CatalogRequest.List,
             pluginCatalogRequest(CatalogFilters(), schema, supportsSearchFilters = true),
         )
+    }
+
+    // A plugin may save the pick while it serves the first filtered page and
+    // build its filter defaults from it, so only that page makes the cached
+    // schema suspect; later pages repeat the same request.
+    @Test
+    fun onlyTheFirstFilteredPageMayChangeTheSchemaDefaults() {
+        val filtered = CatalogRequest.Filtered(mapOf("genre_included" to listOf("action")))
+
+        assertTrue(filtered.mayChangeFilterDefaults(index = 0))
+        assertFalse(filtered.mayChangeFilterDefaults(index = 1))
+        assertFalse(CatalogRequest.List.mayChangeFilterDefaults(index = 0))
+        assertFalse(CatalogRequest.Search("dragon").mayChangeFilterDefaults(index = 0))
     }
 
     @Test

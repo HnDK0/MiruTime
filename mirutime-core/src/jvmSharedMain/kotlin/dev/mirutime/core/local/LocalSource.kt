@@ -72,7 +72,7 @@ class LocalSource(
     // the parser chapter URL (`<bookPath>#<entry>`), not a SAF URI.
     suspend fun pageBytes(pageUrl: String): ByteArray? = withContext(Dispatchers.IO) {
         val bookPath = pageUrl.substringBefore('#')
-        if (!bookPath.endsWith(".cbz")) return@withContext null
+        if (!bookPath.endsWith(".cbz", ignoreCase = true)) return@withContext null
         val entry = pageUrl.substringAfter('#', missingDelimiterValue = "")
         if (entry.isBlank()) return@withContext null
         val file = fileResolver?.invoke(bookPath)
@@ -114,7 +114,7 @@ class LocalSource(
         // a full unzip per page would be absurd. ceiling: the entry name is
         // not validated against the archive (a stale url yields an empty
         // page); validate via a parse on catalog refresh instead.
-        if (bookPath.endsWith(".cbz")) {
+        if (bookPath.endsWith(".cbz", ignoreCase = true)) {
             val file = fileResolver?.invoke(bookPath)
             val exists = if (file != null) file.isFile else fileSystem.read(bookPath) != null
             if (!exists) {
@@ -149,8 +149,9 @@ class LocalSource(
             }
 
     private fun isSupportedBook(path: String): Boolean =
-        path.endsWith(".epub") || path.endsWith(".fb2") || path.endsWith(".fb2.zip") ||
-            path.endsWith(".cbz") || path.endsWith(".txt", ignoreCase = true)
+        path.endsWith(".epub", ignoreCase = true) || path.endsWith(".fb2", ignoreCase = true) ||
+            path.endsWith(".fb2.zip", ignoreCase = true) || path.endsWith(".cbz", ignoreCase = true) ||
+            path.endsWith(".txt", ignoreCase = true)
 
     private fun pageOf(items: List<CatalogItem>, index: Int): Outcome<CatalogPage> {
         val from = index * PAGE_SIZE
@@ -178,9 +179,10 @@ class LocalSource(
         return try {
             Outcome.Ok(
                 when {
-                    path.endsWith(".epub") -> parseEpub(bytes)
-                    path.endsWith(".fb2") || path.endsWith(".fb2.zip") -> parseFb2(bytes)
-                    path.endsWith(".cbz") -> parseCbz(bytes)
+                    path.endsWith(".epub", ignoreCase = true) -> parseEpub(bytes)
+                    path.endsWith(".fb2", ignoreCase = true) || path.endsWith(".fb2.zip", ignoreCase = true) ->
+                        parseFb2(bytes)
+                    path.endsWith(".cbz", ignoreCase = true) -> parseCbz(bytes)
                     path.endsWith(".txt", ignoreCase = true) -> parseTxt(
                         bytes,
                         path.substringAfterLast('/').substringBeforeLast('.')

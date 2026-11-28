@@ -32,6 +32,7 @@ import kotlin.system.measureTimeMillis
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
@@ -114,6 +115,25 @@ class LuaPluginSourceTest {
         assertFailsWith<LuaCallTimeoutException> { s.catalog(0) }
         assertFailsWith<LuaCallTimeoutException> { s.catalog(0) }
         Unit
+    }
+
+    // The host replaces a dead source on an explicit retry; it needs to ask.
+    @Test
+    fun `a source reports that it timed out`() = runBlocking {
+        val s = factory(callTimeoutMs = 100).create(
+            PluginDescriptor(
+                metadata(id = "loop.flag"),
+                """
+                function getCatalogList(index)
+                    while true do end
+                end
+                """.trimIndent(),
+            ),
+        ) as LuaPluginSource
+
+        assertFalse(s.isTimedOut)
+        assertFailsWith<LuaCallTimeoutException> { s.catalog(0) }
+        assertTrue(s.isTimedOut)
     }
 
     @Test
@@ -985,6 +1005,36 @@ class LuaPluginSourceTest {
         assertEquals("https://covers.example/", s.referer)
         val bare = source("""function getChapterText(html, url) return "t" end""")
         assertEquals("", bare.referer)
+    }
+
+    @Test
+    fun `a script that starts with a UTF-8 BOM loads`() {
+        val s = source("\uFEFFreferer = \"https://covers.example/\"")
+        assertEquals("https://covers.example/", s.referer)
+    }
+
+    // The base URL set under Manage extensions lives in the host metadata; the
+    // script builds its requests from its own baseUrl and from what it derives
+    // from it while it loads.
+    @Test
+    fun `the host base URL reaches the script baseUrl and what it derives from it`() {
+        val engine = MockEngine { _ ->
+            respond("page", HttpStatusCode.OK, headersOf("Content-Type", "text/html; charset=UTF-8"))
+        }
+        val s = factory(engine).create(
+            PluginDescriptor(
+                metadata(id = "pin.base").copy(baseUrl = "https://mirror.example/"),
+                """
+                baseUrl = "https://site.example/"
+                local PAGE = baseUrl .. "book/1"
+                function getBookTitle(url) return "T" end
+                function getBookCoverImageUrl(url) return http_get(PAGE).body end
+                function getBookDescription(url) return http_get(PAGE).body end
+                """.trimIndent(),
+            ),
+        )
+        runBlocking { s.book("https://mirror.example/book/1") }
+        assertEquals("https://mirror.example/book/1", engine.requestHistory.single().url.toString())
     }
 
     @Test

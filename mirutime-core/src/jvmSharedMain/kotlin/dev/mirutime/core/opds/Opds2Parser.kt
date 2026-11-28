@@ -109,7 +109,7 @@ object Opds2Parser {
             links = links,
             categories = categories(metadata),
             acquisitionLinks = node.objects("links")
-                .filter { it.string("rel").orEmpty().startsWith(OpdsParser.ACQUISITION_REL) }
+                .filter { it.rel().startsWith(OpdsParser.ACQUISITION_REL) }
                 .mapNotNull { acquisition(it, baseUrl) },
             isPublication = true,
         )
@@ -125,7 +125,7 @@ object Opds2Parser {
         return OpdsAcquisitionLink(
             href = href,
             type = type,
-            rel = node.string("rel").orEmpty(),
+            rel = node.rel(),
             indirect = node.obj("properties")?.objects("indirectAcquisition")
                 .orEmpty()
                 .map { indirect -> indirect(link = href, node = indirect) },
@@ -211,15 +211,34 @@ object Opds2Parser {
         // Search templates keep their `{...}`: resolveHref preserves the braces.
         val href = node.string("href")?.let { OpdsParser.resolveHref(baseUrl, it) } ?: return null
         return OpdsLink(
-            rel = node.string("rel").orEmpty(),
+            rel = node.rel(),
             href = href,
             type = node.string("type"),
             title = node.string("title"),
         )
     }
 
-    private fun JsonObject.string(key: String): String? =
-        (this[key] as? JsonPrimitive)?.contentOrNull
+    // A localized string is plain text or an object keyed by language ({"en": "Title", "fr": "Titre"}).
+    private fun JsonObject.string(key: String): String? {
+        val value = this[key]
+        if (value is JsonObject) {
+            val texts = value.entries.filter { it.value is JsonPrimitive }
+            val preferred = texts.firstOrNull { it.key.substringBefore('-').equals("en", ignoreCase = true) }
+            return ((preferred ?: texts.firstOrNull())?.value as? JsonPrimitive)?.contentOrNull
+        }
+        return (value as? JsonPrimitive)?.contentOrNull
+    }
+
+    // "rel" is a string or an array of strings (Readium Web Publication Manifest). An OPDS relation
+    // wins over the other entries ("self", "alternate"...); otherwise the first one.
+    private fun JsonObject.rel(): String {
+        val value = this["rel"]
+        if (value is JsonArray) {
+            val rels = value.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            return rels.firstOrNull { it.startsWith("http://opds-spec.org/") } ?: rels.firstOrNull().orEmpty()
+        }
+        return (value as? JsonPrimitive)?.contentOrNull.orEmpty()
+    }
 
     private fun JsonObject.int(key: String): Int? = (this[key] as? JsonPrimitive)?.intOrNull
 

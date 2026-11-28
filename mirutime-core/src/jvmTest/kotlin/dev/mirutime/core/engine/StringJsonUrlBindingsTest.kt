@@ -154,4 +154,68 @@ class StringJsonUrlBindingsTest {
         check(r.error == null) { r.error!! }
         check(r.data == LuaData.LuaStr("https://example.com/dir/other.html?z=2#top")) { r.data.toString() }
     }
+
+    @Test
+    fun `url_resolve keeps the page path for a query-only link`() {
+        val r = eval(
+            """
+            function main()
+              return url_resolve("https://example.com/list/1", "?page=2")
+            end
+            """.trimIndent()
+        )
+        check(r.error == null) { r.error!! }
+        check(r.data == LuaData.LuaStr("https://example.com/list/1?page=2")) { r.data.toString() }
+    }
+
+    @Test
+    fun `url_resolve escapes a space instead of returning the raw link`() {
+        val r = eval(
+            """
+            function main()
+              return url_resolve("https://example.com/a/", "x y.html")
+            end
+            """.trimIndent()
+        )
+        check(r.error == null) { r.error!! }
+        check(r.data == LuaData.LuaStr("https://example.com/a/x%20y.html")) { r.data.toString() }
+    }
+
+    // -- json: numbers and byte order mark --
+
+    @Test
+    fun `json_parse keeps integers beyond 2^53 as exact strings`() {
+        val r = eval(
+            """
+            function main()
+              local t = json_parse('{"id": 7123456789012345678, "n": 9007199254740992, "m": 9007199254740993, '
+                .. '"neg": -9007199254740993, "small": 42, "f": 1.5, "e": 1e20, "list": [9007199254740993, 5]}')
+              return table.concat({
+                type(t.id), t.id, type(t.n), type(t.m), t.m, type(t.neg), type(t.small), type(t.f),
+                type(t.e), type(t.list[1]), t.list[1], type(t.list[2]),
+              }, "|")
+            end
+            """.trimIndent()
+        )
+        check(r.error == null) { r.error!! }
+        check(
+            r.data == LuaData.LuaStr(
+                "string|7123456789012345678|number|string|9007199254740993|string|number|number|number|string|9007199254740993|number",
+            ),
+        ) { r.data.toString() }
+    }
+
+    @Test
+    fun `json_parse skips a leading byte order mark`() {
+        val r = eval(
+            """
+            function main()
+              local t = json_parse("\239\187\191" .. '{"a": 1}')
+              return t and t.a or "nil"
+            end
+            """.trimIndent()
+        )
+        check(r.error == null) { r.error!! }
+        check(r.data == LuaData.LuaNum(1.0)) { r.data.toString() }
+    }
 }

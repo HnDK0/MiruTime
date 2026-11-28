@@ -12,7 +12,7 @@ import org.luaj.vm2.LuaValue
 // precedent): sourceId is an explicit session field.
 actual fun createLuaSession(sourceId: String, script: String): LuaSession {
     val globals = createSandboxGlobals()
-    globals.load(script, "@$sourceId").call()
+    globals.load(script.withoutBom(), "@$sourceId").call()
     return LuaSession(sourceId, globals)
 }
 
@@ -36,8 +36,8 @@ actual class LuaSession internal constructor(
         if (!fn.isfunction()) {
             return LuaCallResult(null, PluginError.ScriptError("'$fnName' is not a function"))
         }
-        // Clear first: a non-Exception Throwable (e.g. StackOverflowError)
-        // bypasses both catches and would leak the pending message otherwise.
+        // Clear first: a Throwable that no catch below handles (e.g. an
+        // OutOfMemoryError) would leak the pending message otherwise.
         pendingUserError = null
         return try {
             val varargs = LuaValue.varargsOf(args.map { it.toLuaValue() }.toTypedArray())
@@ -50,6 +50,12 @@ actual class LuaSession internal constructor(
             // Ethalon NoveLA (LuaSourceAdapter.kt:544-547): a parked user
             // message outranks the generic script error.
             takePendingError() ?: LuaCallResult(null, PluginError.ScriptError(e.message ?: "lua error in '$fnName'"))
+        } catch (e: StackOverflowError) {
+            // LuaJ runs Lua calls as Java recursion, so a plugin that recurses
+            // without end ends here, and its own pcall cannot catch an Error.
+            // Same result as any other script failure; the next call starts on
+            // a fresh stack. OutOfMemoryError is left alone.
+            takePendingError() ?: LuaCallResult(null, PluginError.ScriptError("stack overflow in '$fnName'"))
         } catch (e: Exception) {
             takePendingError() ?: LuaCallResult(
                 null,
@@ -100,10 +106,11 @@ private fun LuaValue.toLuaData(): LuaData = when (type()) {
 
 private fun LuaTable.toLuaData(): LuaData {
     val keys = keys()
-    // Sequential integer keys 1..n -> list, anything else -> string map.
-    // ceiling: exotic numeric keys (e.g. 2.5) may misclassify as a list;
-    // plugin tables are JSON-shaped, revisit if that ever bites.
-    val isList = keys.all { it.isnumber() && it.toint() in 1..keys.size }
+    // Sequential integer keys 1..n -> list, anything else -> string map. The
+    // key must be a number by type(): isnumber() is also true for the string
+    // "1", and toint() truncates 1.5, so {["1"] = "a"} and {[1.5] = "x"} read
+    // as lists of nils and lost their values.
+    val isList = keys.all { it.type() == LuaValue.TNUMBER && it.isint() && it.toint() in 1..keys.size }
     return if (isList) {
         LuaData.LuaList((1..keys.size).map { idx -> get(idx).toLuaData() })
     } else {

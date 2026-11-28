@@ -4,12 +4,10 @@ import dev.mirutime.core.engine.LuaSession
 import org.luaj.vm2.LuaValue
 import org.luaj.vm2.lib.OneArgFunction
 import org.luaj.vm2.lib.TwoArgFunction
-import java.net.URI
 import java.net.URLEncoder
 
-// URL bindings: encoding (NoveLA UrlEncodeFunction) and resolution
-// (NoveLA UrlResolveFunction precedent: unparseable base falls back to the
-// raw relative part). Encoding failures and unresolvable input -> nil/rel.
+// URL bindings: encoding (NoveLA UrlEncodeFunction) and resolution (RFC 3986,
+// see UrlResolver). Encoding failures -> nil.
 object UrlBindings {
 
     fun install(session: LuaSession) {
@@ -29,16 +27,8 @@ object UrlBindings {
             }
         })
         session.globals.set("url_resolve", object : TwoArgFunction() {
-            override fun call(base: LuaValue, rel: LuaValue): LuaValue {
-                val baseStr = base.checkjstring()
-                val relStr = rel.checkjstring()
-                val resolved = try {
-                    URI(baseStr).resolve(relStr).toString()
-                } catch (e: Exception) {
-                    relStr
-                }
-                return LuaValue.valueOf(resolved)
-            }
+            override fun call(base: LuaValue, rel: LuaValue): LuaValue =
+                LuaValue.valueOf(UrlResolver.resolve(base.checkjstring(), rel.checkjstring()))
         })
     }
 }

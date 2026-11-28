@@ -56,6 +56,10 @@ internal fun unwrapSingleEntryZip(raw: ByteArray): ByteArray = try {
         val entry = zip.nextEntry
         if (entry != null && !entry.isDirectory) readEntryLimited(zip) else raw
     }
+} catch (e: IllegalStateException) {
+    // The size limits throw IllegalStateException. Returning the raw zip bytes instead would hide
+    // them behind a misleading "not well-formed XML" error further down.
+    throw e
 } catch (_: Exception) {
     raw
 }

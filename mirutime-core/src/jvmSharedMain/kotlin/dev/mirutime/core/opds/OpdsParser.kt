@@ -1,6 +1,7 @@
 package dev.mirutime.core.opds
 
 import dev.mirutime.core.api.Outcome
+import dev.mirutime.core.engine.binding.UrlResolver
 import dev.mirutime.core.local.XmlElement
 import dev.mirutime.core.local.parseXmlDocument
 import java.net.URI
@@ -63,6 +64,10 @@ object OpdsParser {
             .replace("{", "%7B")
             .replace("}", "%7D")
         return runCatching { URI(baseUrl).resolve(URI(escaped)).toString() }
+            // java.net.URI is strict (RFC 2396): '|', '<' or '[' in a path, a stray '%' or a control character
+            // make it throw, and the link used to be dropped. UrlResolver (RFC 3986, behind url_resolve)
+            // escapes what it must and never throws; links that resolve through URI today keep their exact result.
+            .recoverCatching { UrlResolver.resolve(baseUrl, raw) }
             .map { it.replace("%7B", "{").replace("%7D", "}") }
             .getOrNull()
     }
@@ -168,7 +173,9 @@ object OpdsParser {
         text = text
             .replace(Regex("(?i)<br\\s*/?>"), "\n")
             .replace(Regex("</?p[^>]*>", RegexOption.IGNORE_CASE), "\n")
-            .replace(Regex("<[^>]+>"), " ")
+            // A tag starts with a letter, '/', '!' (comment) or '?' (processing instruction): a bare "<"
+            // as in "x < 3 and y > 2" is text.
+            .replace(Regex("</?[A-Za-z!?][^>]*>"), " ")
             .replace(Regex("[ \\t\\u00A0]+"), " ")
             .replace(Regex("\\n{2,}"), "\n")
             .trim()

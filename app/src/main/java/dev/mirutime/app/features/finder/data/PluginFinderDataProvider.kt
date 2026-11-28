@@ -30,6 +30,7 @@ import dev.mirutime.app.features.finder.domain.PluginFileInstall
 import dev.mirutime.app.features.finder.domain.PluginFilter
 import dev.mirutime.app.features.finder.domain.PluginResetResult
 import dev.mirutime.app.features.finder.domain.PluginSetting
+import dev.mirutime.app.features.finder.domain.mayChangeFilterDefaults
 import dev.mirutime.app.features.finder.domain.parsePluginFilters
 import dev.mirutime.app.features.finder.domain.pluginCatalogRequest
 import dev.mirutime.app.features.finder.domain.restrictToSchema
@@ -216,6 +217,11 @@ class PluginFinderDataProvider(
             // query, no feed stack.
             return opdsQueryPage(sourceId, filters)
         }
+        // Page 1 is a fresh try (open, Reload, Retry, a new query or filter): a
+        // plugin whose earlier call timed out is rebuilt here, instead of
+        // rejecting every call until the app restarts. Later pages and the
+        // bulk jobs that use graph.source() directly keep failing fast.
+        if (page <= 1) graph.restartIfTimedOut(sourceId)
         val source = graph.source(sourceId) ?: run {
             MiruCoreLogger.w(TAG, "catalog '$sourceId': plugin not loaded")
             throw PluginRequestException(
@@ -237,10 +243,18 @@ class PluginFinderDataProvider(
             is CatalogRequest.Filtered -> "filters"
             CatalogRequest.List -> "catalog"
         }
-        val result = when (request) {
-            is CatalogRequest.Search -> source.search(index, request.query)
-            is CatalogRequest.Filtered -> source.catalogFiltered(index, request.filters)
-            CatalogRequest.List -> source.catalog(index)
+        val result = try {
+            when (request) {
+                is CatalogRequest.Search -> source.search(index, request.query)
+                is CatalogRequest.Filtered -> source.catalogFiltered(index, request.filters)
+                CatalogRequest.List -> source.catalog(index)
+            }
+        } finally {
+            // The plugin may have saved the pick while it served this page and
+            // built its filter defaults from it: forget the cached schema, so
+            // the next read (the screen reads it right after the load) sees
+            // what the plugin reports now, not the defaults from before.
+            if (request.mayChangeFilterDefaults(index)) filterSchemas.invalidate(sourceId)
         }
         val ok = requirePluginPage(operation, result, sourceId, source.metadata.name)
         val mapped = mapCatalogPage(ok, baseUrl = source.metadata.baseUrl, sourceId = sourceId)
