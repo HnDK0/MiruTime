@@ -24,7 +24,7 @@ val signingProperties = Properties().apply {
 // suffix ("1.0.0-rc1"). versionCode is derived from it, so the two can never
 // disagree; a prerelease keeps the code of its final build, which only matters
 // for sideloaded builds (GitHub releases, never Play).
-val appVersionName = "1.0.6"
+val appVersionName = "1.0.7"
 
 // MAJOR*10000 + MINOR*100 + PATCH: 1.0.0 -> 10000, 1.2.3 -> 10203.
 val appVersionCode = appVersionName.substringBefore('-').split('.').let { parts ->
