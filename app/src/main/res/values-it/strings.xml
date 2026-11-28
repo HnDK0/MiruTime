@@ -306,6 +306,9 @@
     <string name="lib_cd_filters">Filtri libreria</string>
     <string name="lib_cd_scroll_top">Vai in cima</string>
     <string name="lib_import">Importa EPUB / FB2 / TXT / PDF</string>
+    <string name="lib_btn_filter">Filtra</string>
+    <string name="lib_btn_filter_active_fmt">Filtra · %1$d</string>
+    <string name="lib_btn_import">Importa</string>
     <string name="lib_empty_title">Niente qui</string>
     <string name="lib_empty_hint">Prova un altro scaffale, una ricerca o un filtro.</string>
     <string name="lib_resume_meta_fmt">%1$d/%2$d · %3$s · %4$s</string>

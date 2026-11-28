@@ -305,6 +305,9 @@
     <string name="lib_cd_filters">مرشحات المكتبة</string>
     <string name="lib_cd_scroll_top">التمرير إلى الأعلى</string>
     <string name="lib_import">استيراد EPUB / FB2 / TXT / PDF</string>
+    <string name="lib_btn_filter">تصفية</string>
+    <string name="lib_btn_filter_active_fmt">تصفية · %1$d</string>
+    <string name="lib_btn_import">استيراد</string>
     <string name="lib_empty_title">لا شيء هنا</string>
     <string name="lib_empty_hint">جرّب رفًا أو استعلامًا أو مرشحًا آخر.</string>
     <string name="lib_resume_meta_fmt">%1$d/%2$d · %3$s · %4$s</string>

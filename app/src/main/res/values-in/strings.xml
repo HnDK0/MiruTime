@@ -306,6 +306,9 @@
     <string name="lib_cd_filters">Filter perpustakaan</string>
     <string name="lib_cd_scroll_top">Gulir ke atas</string>
     <string name="lib_import">Impor EPUB / FB2 / TXT / PDF</string>
+    <string name="lib_btn_filter">Filter</string>
+    <string name="lib_btn_filter_active_fmt">Filter · %1$d</string>
+    <string name="lib_btn_import">Impor</string>
     <string name="lib_empty_title">Tidak ada apa pun di sini</string>
     <string name="lib_empty_hint">Coba rak, kueri, atau filter lain.</string>
     <string name="lib_resume_meta_fmt">%1$d/%2$d · %3$s · %4$s</string>

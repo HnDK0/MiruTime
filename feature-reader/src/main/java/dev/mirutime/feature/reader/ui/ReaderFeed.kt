@@ -22,6 +22,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
@@ -34,6 +36,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.mirutime.feature.reader.R
+import dev.mirutime.app.features.reader.document.BlockId
 import dev.mirutime.app.features.reader.document.ReadingAnchor
 import dev.mirutime.feature.reader.feedItemKey
 import dev.mirutime.feature.reader.ChapterLoadStatus
@@ -68,12 +71,36 @@ internal fun feedScrollTrigger(
     topPaddingPx = topPaddingPx,
 )
 
-/** True when the spoken block is outside the comfortable band. */
+/**
+ * QuickNovel-style follow rule: the page stays put while the spoken block is
+ * fully inside the reading area. It only advances once the block has moved
+ * off-screen (or is cut by the bottom edge and would fit on one screen).
+ * A block taller than the screen is left alone while any part of it shows.
+ */
 internal fun ttsFollowNeedsScroll(
     visible: Boolean,
     offsetPx: Int,
-    comfortOffsetPx: Int,
-): Boolean = !visible || offsetPx !in 0..comfortOffsetPx
+    sizePx: Int,
+    viewportTopPx: Int,
+    viewportBottomPx: Int,
+): Boolean {
+    if (!visible) return true
+    if (sizePx > viewportBottomPx - viewportTopPx) return false
+    return offsetPx < viewportTopPx || offsetPx + sizePx > viewportBottomPx
+}
+
+/**
+ * The follow only continues while the reader is "attached" to the voice: the
+ * previously spoken block was still on screen (or there was none, or it has
+ * left the feed). When the user scrolled away from it, the screen is theirs and
+ * is never yanked back; scrolling back to the voice (or the Focus button)
+ * re-attaches.
+ */
+internal fun ttsFollowAttached(
+    hadPrevious: Boolean,
+    previousInFeed: Boolean,
+    previousVisible: Boolean,
+): Boolean = !hadPrevious || !previousInFeed || previousVisible
 
 /** Small jumps animate; far chapter jumps should land immediately. */
 internal fun ttsFollowUsesAnimation(distance: Int): Boolean = distance <= 5
@@ -151,42 +178,68 @@ internal fun ReaderFeed(
     // The floating chrome header covers the top of the list. A negative scroll
     // offset parks the spoken block below it instead of under the title.
     val ttsFocusInsetPx = with(density) { 72.dp.toPx().toInt() }
-    // A visible block near the top is already comfortable to read: moving it
-    // again on every spoken sentence is what made the feed blink.
-    val ttsComfortOffsetPx = with(density) { 200.dp.toPx().toInt() }
+    // Advancing parks the spoken block just under the top edge, like turning
+    // to the next screen of text.
+    val ttsAdvanceInsetPx = with(density) { 16.dp.toPx().toInt() }
+    // Block id spoken before the current one; lets the follow tell "the voice
+    // moved off-screen" apart from "the user scrolled away".
+    var previousTtsBlockId by remember { mutableStateOf<BlockId?>(null) }
     fun ttsBlockIndex(): Int {
         val blockId = ttsHighlight?.blockId ?: return -1
         return entries.indexOfFirst {
             it is FeedEntry.Block && it.block.id == blockId
         }
     }
-    // When TTS moves to another paragraph, keep it below the floating header.
-    // Only block changes trigger this; per-sentence range updates do not.
-    suspend fun followTtsBlock() {
+    // The page stays stationary while the spoken block is on screen and the
+    // reader scrolls freely. Only when TTS moves the spoken block off-screen
+    // does the view advance, parking it at the top. Per-sentence range updates
+    // never trigger this; only block changes do.
+    suspend fun followTtsBlock(previous: BlockId?) {
         val index = ttsBlockIndex()
         if (index < 0) return
-        val visible = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+        val info = listState.layoutInfo
+        val previousIndex = if (previous == null) {
+            -1
+        } else {
+            entries.indexOfFirst { it is FeedEntry.Block && it.block.id == previous }
+        }
+        val previousVisible = previousIndex >= 0 &&
+            info.visibleItemsInfo.any { it.index == previousIndex }
+        if (!ttsFollowAttached(
+                hadPrevious = previous != null,
+                previousInFeed = previousIndex >= 0,
+                previousVisible = previousVisible,
+            )
+        ) {
+            return
+        }
+        val visible = info.visibleItemsInfo.firstOrNull { it.index == index }
         if (!ttsFollowNeedsScroll(
                 visible = visible != null,
                 offsetPx = visible?.offset ?: 0,
-                comfortOffsetPx = ttsComfortOffsetPx,
+                sizePx = visible?.size ?: 0,
+                viewportTopPx = 0,
+                viewportBottomPx = info.viewportEndOffset - info.afterContentPadding,
             )
         ) {
             return
         }
         val distance = abs(index - (visible?.index ?: listState.firstVisibleItemIndex))
         if (ttsFollowUsesAnimation(distance)) {
-            listState.animateScrollToItem(index, scrollOffset = -ttsFocusInsetPx)
+            listState.animateScrollToItem(index, scrollOffset = -ttsAdvanceInsetPx)
         } else {
-            listState.scrollToItem(index, scrollOffset = -ttsFocusInsetPx)
+            listState.scrollToItem(index, scrollOffset = -ttsAdvanceInsetPx)
         }
     }
     LaunchedEffect(ttsHighlight?.blockId) {
-        followTtsBlock()
+        val current = ttsHighlight?.blockId
+        val previous = previousTtsBlockId
+        previousTtsBlockId = current
+        if (current != null) followTtsBlock(previous)
     }
     // First content only: prepending a previous chapter must not re-follow.
     LaunchedEffect(entries.isEmpty()) {
-        if (entries.isNotEmpty()) followTtsBlock()
+        if (entries.isNotEmpty()) followTtsBlock(null)
     }
     // Explicit Focus action: retrigger even when the active block has not
     // changed since the last auto-follow.

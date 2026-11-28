@@ -31,12 +31,6 @@ class ChipRailContractTest {
         assertTrue(screen.contains("ChipRail {"))
     }
 
-    @Test
-    fun `library mini filters use the shared rail`() {
-        val text = source("src/main/java/dev/mirutime/app/features/library/ui/LibraryScreen.kt")
-        assertTrue(text.contains("ChipRail {"))
-    }
-
     // Icons are unconditional: the settings toggle and its key are gone, and
     // every plugin row renders the shared avatar instead of a letter tile.
     @Test

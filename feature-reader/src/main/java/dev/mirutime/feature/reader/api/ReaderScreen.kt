@@ -107,7 +107,7 @@ import dev.mirutime.feature.tts.TtsSession
 import dev.mirutime.feature.tts.TtsStatus
 import dev.mirutime.feature.tts.api.TtsHighlight
 import dev.mirutime.feature.tts.ttsSentencePreviewInfo
-import dev.mirutime.feature.tts.ui.TtsFloatingPlayer
+import dev.mirutime.feature.tts.ui.TtsClassicBar
 import dev.mirutime.feature.tts.ui.TtsMiniPlayer
 import java.io.File
 import java.util.Locale
@@ -1348,45 +1348,17 @@ fun ReaderScreen(
             )
         }
 
-        // Optional floating player: the rich in-app surface while the reader is
-        // on screen. The system overlay takes over only once the whole app goes
-        // to the background, so the two never show the same session at once.
-        // Hidden while the chrome or a sheet is open so it never duplicates the
-        // bottom-menu player or sits under a modal scrim.
-        if (ttsSessionActive &&
-            ttsSettings.floatingPlayer &&
-            panel == null &&
-            !chromeVisible
-        ) {
-            TtsFloatingPlayer(
+        // QuickNovel-style playback strip while a session runs: rewind, stop,
+        // play/pause, fast-forward. Hidden while the chrome or a sheet is open
+        // (the bottom menu carries its own player there).
+        if (ttsSessionActive && panel == null && !chromeVisible) {
+            TtsClassicBar(
                 status = ttsState.status,
-                chapterTitle = chapterTitle,
-                sentencePreview = ttsPreview,
-                paragraphText = ttsParagraph,
-                counterpartText = ttsCounterpart,
-                spokenIsTranslation = ttsState.translated,
-                ttsHighlight = ttsHighlight,
-                sentenceHighlightStart = ttsPreviewInfo?.start ?: 0,
-                sentenceHighlightEnd = ttsPreviewInfo?.end ?: 0,
-                sentenceNumber = ttsSentenceNumber,
-                chunkCount = ttsChunkCount,
-                chapterNumber = state.activeChapterIndex,
-                chapterCount = chapterCount,
-                chapterPercent = chapterPercent,
-                remainingSeconds = ttsState.estimatedRemainingSeconds,
-                sleepTimer = graph.tts.sleepTimer,
-                onSleepTimerClick = { chromeVisible = true; panel = ReaderPanel.Tts },
-                atEnd = ttsState.atEnd,
-                glowColorArgb = style.highlightColor,
-                settings = ttsSettings,
-                onSettingsChange = graph.tts::updateSettings,
-                onToggle = toggleTts,
+                onPrevious = graph.tts::skipPreviousChunk,
                 onStop = stopTts,
-                onStartHere = startTtsHere,
-                onFocus = focusTtsBlock,
-                onPreviousChunk = graph.tts::skipPreviousChunk,
-                onNextChunk = graph.tts::skipNextChunk,
-                onOpenSettings = { panel = ReaderPanel.Tts },
+                onToggle = toggleTts,
+                onNext = graph.tts::skipNextChunk,
+                modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
     }

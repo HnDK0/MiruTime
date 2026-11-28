@@ -25,10 +25,9 @@ class ContentFadeContractTest {
     }
 
     @Test
-    fun `library mini filters are not alpha masked`() {
+    fun `library screen is not alpha masked`() {
         val text = source("src/main/java/dev/mirutime/app/features/library/ui/LibraryScreen.kt")
-        val mini = slice(text, "private fun MiniFilters(", "private fun LibrarySort.label()")
-        assertFalse(mini.contains("miruEdgeFade"))
+        assertFalse(text.contains("miruEdgeFade"))
     }
 
     @Test

@@ -306,6 +306,9 @@
     <string name="lib_cd_filters">Kitaplık filtreleri</string>
     <string name="lib_cd_scroll_top">Başa kaydır</string>
     <string name="lib_import">EPUB / FB2 / TXT / PDF içe aktar</string>
+    <string name="lib_btn_filter">Filtre</string>
+    <string name="lib_btn_filter_active_fmt">Filtre · %1$d</string>
+    <string name="lib_btn_import">İçe aktar</string>
     <string name="lib_empty_title">Burada bir şey yok</string>
     <string name="lib_empty_hint">Başka bir raf, arama veya filtre deneyin.</string>
     <string name="lib_resume_meta_fmt">%1$d/%2$d · %3$s · %4$s</string>
