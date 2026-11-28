@@ -285,9 +285,13 @@ internal class CatalogSessionRegistry(
      * in place (`refresh(force = true)`), so its search and filters stay applied;
      * the others are loaded again the next time they are opened. Other sources
      * are not touched, and nothing here reaches cookies or plugin preferences.
+     *
+     * [keep] null drops every list of the source: the plugin itself changed (a new
+     * base URL or a manual restart), so no cached page — covers and book URLs included —
+     * may survive.
      */
-    fun invalidateSource(sourceId: String, keep: CatalogFilters) {
-        val keepKey = cacheKey(sourceId, keep)
+    fun invalidateSource(sourceId: String, keep: CatalogFilters? = null) {
+        val keepKey = keep?.let { cacheKey(sourceId, it) }
         val iterator = sessions.entries.iterator()
         while (iterator.hasNext()) {
             val entry = iterator.next()

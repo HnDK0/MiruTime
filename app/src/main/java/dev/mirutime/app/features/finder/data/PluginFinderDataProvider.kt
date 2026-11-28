@@ -671,8 +671,23 @@ class PluginFinderDataProvider(
                 at = System.currentTimeMillis(),
             )
         }
+        dropPluginState(id)
+    }
+
+    override suspend fun restartPlugin(id: String) {
+        if (LocalSources.isLocal(id)) return
+        dropPluginState(id)
+        MiruLog.event("plugins", "restart", "plugin" to id, "reason" to "manual")
+    }
+
+    private suspend fun dropPluginState(id: String) {
         graph.invalidateSource(id)
         filterSchemas.invalidate(id)
+        // Covers are keyed by (source, bookUrl) and bookUrl is site-relative, so a new host would
+        // keep serving the old domain's covers and the old "no cover" marks. The repair cooldown is
+        // keyed by bookUrl only; clearing it costs at most an extra details call on other sources.
+        CatalogCoverMemory.forgetSource(id)
+        catalogCoverRefreshAt.clear()
     }
 
     // The settings a plugin declares itself (getSettingsSchema), bound to the

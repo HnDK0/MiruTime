@@ -76,6 +76,7 @@ import dev.mirutime.app.features.finder.domain.CatalogBook
 import dev.mirutime.app.features.finder.domain.LocalCatalogFolder
 import dev.mirutime.app.features.finder.domain.LocalSources
 import dev.mirutime.app.features.library.ui.importFailureText
+import dev.mirutime.app.features.library.ui.mixedImportText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -269,9 +270,11 @@ internal fun LocalFoldersSheet(
         scope.launch {
             try {
                 val summary = provider.importLocalCatalogFolder(kind, folder.uri)
-                val reason = summary.firstFailureReason
+                val reason = summary.failureToReport
                 val message = when {
                     reason != null -> importFailureText(resources, reason)
+                    summary.accepted > 0 && summary.failures > 0 ->
+                        mixedImportText(resources, summary.accepted, summary.failures)
                     summary.failures > 0 -> resources.getString(
                         R.string.finder_local_import_failed_count_fmt,
                         summary.failures,
@@ -285,7 +288,7 @@ internal fun LocalFoldersSheet(
                 messages = messages + (
                     folder.uri to FolderMessage(
                         text = message,
-                        isError = summary.failures > 0 || summary.accepted == 0,
+                        isError = summary.failures > 0,
                     )
                 )
                 onCatalogChanged()

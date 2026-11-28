@@ -70,7 +70,9 @@ internal fun readTxtChapters(open: () -> Reader, consumer: (LocalChapter) -> Uni
 
     // A merged paragraph stops at the cap instead of growing to the whole file;
     // the continuation starts a new paragraph, no character is dropped.
-    fun appendText(text: String, joined: Boolean) {
+    fun appendText(raw: String, joined: Boolean) {
+        if (raw.isEmpty()) return
+        val text = raw.cleanBookText()
         if (text.isEmpty()) return
         val extra = if (joined && paragraph.isNotEmpty()) 1 else 0
         if (paragraph.isNotEmpty() && paragraph.length + text.length + extra > TXT_PARAGRAPH_MAX_CHARS) {

@@ -457,6 +457,11 @@
     <string name="toast_import_failed">Không nhập được các tệp đã chọn</string>
     <string name="import_err_too_large_fmt">Tệp quá lớn: %1$d MB (giới hạn %2$d MB).</string>
     <string name="import_err_no_space_fmt">Không đủ dung lượng trống: cần %1$d MB để nhập.</string>
+    <string name="import_added_count_fmt">Đã thêm %1$d</string>
+    <string name="import_failed_count_fmt">%1$d thất bại</string>
+    <string name="import_result_mixed_fmt">%1$s, %2$s</string>
+    <string name="import_err_drm">Sách này được bảo vệ bằng DRM và không thể mở.</string>
+    <string name="import_err_bad_archive">Tệp bị hỏng hoặc kho lưu trữ dùng bảng mã tên tệp không được hỗ trợ.</string>
     <string name="book_toast_hint_caps">Nhấn giữ tiêu đề để sao chép</string>
     <string name="book_ch_cd_downloaded">Đã tải</string>
     <string name="book_ch_cd_translated">Đã dịch</string>
@@ -691,6 +696,8 @@
     <string name="finder_action_edit_sub">Mở script tiện ích trong trình soạn thảo</string>
     <string name="finder_action_settings">Cài đặt tiện ích</string>
     <string name="finder_action_settings_sub">URL gốc và tùy chọn tiện ích</string>
+    <string name="finder_action_restart">Khởi động lại plugin</string>
+    <string name="finder_action_restart_sub">Bỏ bản đã tải và chạy lại</string>
     <string name="finder_action_uninstall_sub">Gỡ khỏi thiết bị này</string>
     <string name="finder_add_extension">Thêm tiện ích mở rộng</string>
     <string name="finder_add_extension_sub">Thêm tiện ích cục bộ từ tệp</string>
@@ -757,6 +764,7 @@
     <string name="finder_plugin_base_url_hint">Đổi khi trang chuyển sang địa chỉ mới. Địa chỉ API theo đó trừ khi tiện ích tự đặt.</string>
     <string name="finder_action_failed_fmt">Không hoàn tất được: %1$s</string>
     <string name="finder_plugin_saved">Đã lưu cài đặt tiện ích</string>
+    <string name="finder_plugin_restarted_fmt">%1$s đã được khởi động lại</string>
     <string name="finder_plugin_settings_error">Không tải được cài đặt tiện ích</string>
     <string name="finder_plugin_settings_loading">Đang tải cài đặt tiện ích…</string>
     <string name="finder_repo_reset">Đặt lại về mặc định</string>

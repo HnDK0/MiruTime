@@ -457,6 +457,11 @@
     <string name="toast_import_failed">Tidak dapat mengimpor file terpilih</string>
     <string name="import_err_too_large_fmt">Berkas terlalu besar: %1$d MB (batas %2$d MB).</string>
     <string name="import_err_no_space_fmt">Ruang kosong tidak cukup: impor membutuhkan %1$d MB.</string>
+    <string name="import_added_count_fmt">%1$d ditambahkan</string>
+    <string name="import_failed_count_fmt">%1$d gagal</string>
+    <string name="import_result_mixed_fmt">%1$s, %2$s</string>
+    <string name="import_err_drm">Buku ini dilindungi DRM dan tidak dapat dibuka.</string>
+    <string name="import_err_bad_archive">Berkas rusak, atau arsip menggunakan pengodean nama berkas yang tidak didukung.</string>
     <string name="book_toast_hint_caps">Tekan lama judul untuk menyalinnya</string>
     <string name="book_ch_cd_downloaded">Terunduh</string>
     <string name="book_ch_cd_translated">Diterjemahkan</string>
@@ -691,6 +696,8 @@
     <string name="finder_action_edit_sub">Buka skrip plugin di editor</string>
     <string name="finder_action_settings">Pengaturan plugin</string>
     <string name="finder_action_settings_sub">URL dasar dan opsi plugin</string>
+    <string name="finder_action_restart">Mulai ulang plugin</string>
+    <string name="finder_action_restart_sub">Buang salinan yang dimuat dan jalankan lagi</string>
     <string name="finder_action_uninstall_sub">Hapus dari perangkat ini</string>
     <string name="finder_add_extension">Tambah ekstensi</string>
     <string name="finder_add_extension_sub">Tambah plugin secara lokal dari file</string>
@@ -757,6 +764,7 @@
     <string name="finder_plugin_base_url_hint">Ubah saat situs pindah ke alamat baru. Alamat API mengikutinya kecuali plugin menetapkan alamatnya sendiri.</string>
     <string name="finder_action_failed_fmt">Tidak dapat menyelesaikan: %1$s</string>
     <string name="finder_plugin_saved">Pengaturan plugin disimpan</string>
+    <string name="finder_plugin_restarted_fmt">%1$s dimulai ulang</string>
     <string name="finder_plugin_settings_error">Pengaturan plugin tidak dapat dimuat</string>
     <string name="finder_plugin_settings_loading">Memuat pengaturan plugin…</string>
     <string name="finder_repo_reset">Setel ulang ke bawaan</string>

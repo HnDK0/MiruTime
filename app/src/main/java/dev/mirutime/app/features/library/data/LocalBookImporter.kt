@@ -14,6 +14,7 @@ import dev.mirutime.core.local.EpubFileReader
 import dev.mirutime.core.local.Fb2FileReader
 import dev.mirutime.core.local.TxtFileReader
 import dev.mirutime.core.local.LocalChapter
+import dev.mirutime.core.local.DrmProtectedException
 import dev.mirutime.core.local.parseComicInfo
 import dev.mirutime.app.features.finder.data.ScannedNode
 import dev.mirutime.app.features.finder.data.collectMangaChapters
@@ -33,6 +34,8 @@ import dev.mirutime.data.library.ImportJobEntity
 import dev.mirutime.data.library.LibraryRepository
 import dev.mirutime.data.library.LocalBookFileEntity
 import dev.mirutime.data.library.TagEntity
+import java.io.EOFException
+import java.util.zip.ZipException
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -297,15 +300,21 @@ internal class ImportLimitException(val limitBytes: Long, val actualBytes: Long)
 internal class ImportNoSpaceException(val requiredBytes: Long) :
     IllegalStateException("Not enough free space")
 
-private fun failureReason(e: Throwable): ImportFailureReason? = when (e) {
+internal fun failureReason(e: Throwable): ImportFailureReason? = when (e) {
     is ImportLimitException -> ImportFailureReason.SizeLimit(e.limitBytes, e.actualBytes)
     is ImportNoSpaceException -> ImportFailureReason.InsufficientSpace(e.requiredBytes)
+    // The core parser types the one encryption case an ordinary EPUB never has.
+    is DrmProtectedException -> ImportFailureReason.Drm
+    // A valid central directory can still hide a truncated deflate stream.
+    is ZipException, is EOFException -> ImportFailureReason.BadArchive
     else -> null
 }
 
 private fun reasonName(reason: ImportFailureReason): String = when (reason) {
     is ImportFailureReason.SizeLimit -> "size-limit"
     is ImportFailureReason.InsufficientSpace -> "no-space"
+    ImportFailureReason.Drm -> "drm"
+    ImportFailureReason.BadArchive -> "bad-archive"
 }
 
 // Streaming copy with digest/cap. Deletes its temp file on any failure or
@@ -588,7 +597,7 @@ class LocalBookImporter(
         addToLibrary: Boolean,
         origin: ImportOrigin?,
     ): PersistedBook = when (format) {
-        LocalImportFormat.EPUB -> EpubFileReader(file).use { reader ->
+        LocalImportFormat.EPUB -> EpubFileReader(file, checkDrm = true).use { reader ->
             val title = reader.title.trim().ifBlank { fallbackTitle }
             val bookId = saveBook(
                 format = format,

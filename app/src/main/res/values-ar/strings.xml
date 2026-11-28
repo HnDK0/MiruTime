@@ -456,6 +456,11 @@
     <string name="toast_import_failed">تعذّر استيراد الملفات المحددة</string>
     <string name="import_err_too_large_fmt">الملف كبير جدًا: %1$d م.ب (الحد %2$d م.ب).</string>
     <string name="import_err_no_space_fmt">لا توجد مساحة كافية: يتطلب الاستيراد %1$d م.ب.</string>
+    <string name="import_added_count_fmt">تمت إضافة %1$d</string>
+    <string name="import_failed_count_fmt">فشل %1$d</string>
+    <string name="import_result_mixed_fmt">%1$s، %2$s</string>
+    <string name="import_err_drm">هذا الكتاب محمي بـ DRM ولا يمكن فتحه.</string>
+    <string name="import_err_bad_archive">الملف تالف، أو يستخدم ترميزًا غير مدعوم لأسماء الملفات.</string>
     <string name="book_toast_hint_caps">اضغط العنوان مطوّلاً لنسخه</string>
     <string name="book_ch_cd_downloaded">منزّل</string>
     <string name="book_ch_cd_translated">مترجم</string>
@@ -745,6 +750,8 @@
     <string name="finder_action_edit_sub">فتح سكربت الإضافة في المحرر</string>
     <string name="finder_action_settings">إعدادات الإضافة</string>
     <string name="finder_action_settings_sub">عنوان URL الأساسي وخيارات الإضافة</string>
+    <string name="finder_action_restart">إعادة تشغيل الإضافة</string>
+    <string name="finder_action_restart_sub">إسقاط النسخة المحمّلة وبدءها من جديد</string>
     <string name="finder_action_uninstall_sub">إزالتها من هذا الجهاز</string>
     <string name="finder_add_extension">إضافة ملحق</string>
     <string name="finder_add_extension_sub">إضافة ملحق محليًا من ملف</string>
@@ -811,6 +818,7 @@
     <string name="finder_plugin_base_url_hint">غيّره عند انتقال الموقع إلى عنوان جديد. يتبعه عنوان API ما لم تحدد الإضافة عنوانها.</string>
     <string name="finder_action_failed_fmt">تعذّر الإكمال: %1$s</string>
     <string name="finder_plugin_saved">حُفظت إعدادات الإضافة</string>
+    <string name="finder_plugin_restarted_fmt">تمت إعادة تشغيل %1$s</string>
     <string name="finder_plugin_settings_error">تعذّر تحميل إعدادات الإضافة</string>
     <string name="finder_plugin_settings_loading">جارٍ تحميل إعدادات الإضافة…</string>
     <string name="finder_repo_reset">إعادة التعيين إلى الافتراضي</string>

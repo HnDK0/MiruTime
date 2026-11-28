@@ -457,6 +457,11 @@
     <string name="toast_import_failed">No se pudieron importar los archivos seleccionados</string>
     <string name="import_err_too_large_fmt">El archivo es demasiado grande: %1$d MB (límite %2$d MB).</string>
     <string name="import_err_no_space_fmt">No hay espacio libre suficiente: la importación necesita %1$d MB.</string>
+    <string name="import_added_count_fmt">%1$d añadidos</string>
+    <string name="import_failed_count_fmt">%1$d fallidos</string>
+    <string name="import_result_mixed_fmt">%1$s, %2$s</string>
+    <string name="import_err_drm">Este libro está protegido por DRM y no se puede abrir.</string>
+    <string name="import_err_bad_archive">El archivo está dañado o usa una codificación de nombres de archivo no compatible.</string>
     <string name="book_toast_hint_caps">Mantén pulsado el título para copiarlo</string>
     <string name="book_ch_cd_downloaded">Descargado</string>
     <string name="book_ch_cd_translated">Traducido</string>
@@ -713,6 +718,8 @@
     <string name="finder_action_edit_sub">Abrir el script del complemento en el editor</string>
     <string name="finder_action_settings">Ajustes del complemento</string>
     <string name="finder_action_settings_sub">URL base y opciones del complemento</string>
+    <string name="finder_action_restart">Reiniciar plugin</string>
+    <string name="finder_action_restart_sub">Descartar la copia cargada y volver a iniciarlo</string>
     <string name="finder_action_uninstall_sub">Quitarlo de este dispositivo</string>
     <string name="finder_add_extension">Añadir extensión</string>
     <string name="finder_add_extension_sub">Añadir un complemento local desde un archivo</string>
@@ -779,6 +786,7 @@
     <string name="finder_plugin_base_url_hint">Cámbiala cuando el sitio se mueva a una dirección nueva. La dirección de la API la sigue salvo que el complemento defina la suya.</string>
     <string name="finder_action_failed_fmt">No se pudo terminar: %1$s</string>
     <string name="finder_plugin_saved">Ajustes del complemento guardados</string>
+    <string name="finder_plugin_restarted_fmt">%1$s reiniciado</string>
     <string name="finder_plugin_settings_error">No se pudieron cargar los ajustes del complemento</string>
     <string name="finder_plugin_settings_loading">Cargando ajustes del complemento…</string>
     <string name="finder_repo_reset">Restablecer por defecto</string>

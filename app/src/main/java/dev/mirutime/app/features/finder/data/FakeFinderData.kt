@@ -164,6 +164,10 @@ interface FinderDataProvider {
     fun baseUrl(id: String): String
     suspend fun setBaseUrl(id: String, url: String)
 
+    // Drops the loaded handle so the next call builds a fresh one. Used by the Restart action in
+    // Manage extensions, which covers a plugin a timeout has left stopped but still healthy-looking.
+    suspend fun restartPlugin(id: String) = Unit
+
     // Settings the plugin itself declares (`getSettingsSchema`); Ok(empty) =
     // the plugin has none, Err = the plugin failed to answer. Suspend because
     // the schema comes from a Lua call; a value read here is the plugin's

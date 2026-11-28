@@ -269,6 +269,8 @@ private fun appendInline(
     resolveImage: (String) -> LocalImage?,
 ) {
     for (child in nodes) {
+        // A footnote marker (a bare "1" linking to the note) reads as a stray digit glued to the sentence.
+        if (isNoteMarker(child)) continue
         when (child.nodeName()) {
             "br" -> out.append('\n')
             "img", "image" -> out.image(resolveImage(imageSource(child)))
@@ -276,6 +278,21 @@ private fun appendInline(
         }
     }
 }
+
+// EPUB 3 marks note references with epub:type="noteref" (DPUB-ARIA: role="doc-noteref"). The note
+// itself stays in the book; the marker is what gets in the way of the sentence.
+private fun isNoteMarker(node: Node): Boolean =
+    node.nodeName() == "a" &&
+        (node.attr("epub:type").hasToken("noteref") || node.attr("role").hasToken("doc-noteref")) &&
+        // An image inside the reference is content (a linked figure), not the bare digit the marker adds.
+        !hasImage(node)
+
+private fun hasImage(node: Node): Boolean =
+    node.childNodes().any {
+        it.nodeName() == "img" || it.nodeName() == "image" || hasImage(it)
+    }
+
+private fun String.hasToken(token: String): Boolean = split(' ', '\t', '\n', '\r').any { it == token }
 
 private fun imageSource(node: Node): String =
     node.attr("src").ifBlank { node.attr("xlink:href").ifBlank { node.attr("href") } }.trim()

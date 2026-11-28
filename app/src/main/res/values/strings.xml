@@ -468,6 +468,11 @@
     <string name="toast_import_failed">Couldn\'t import the selected files</string>
     <string name="import_err_too_large_fmt">File is too large: %1$d MB (limit %2$d MB).</string>
     <string name="import_err_no_space_fmt">Not enough free space: the import needs %1$d MB.</string>
+    <string name="import_added_count_fmt">%1$d added</string>
+    <string name="import_failed_count_fmt">%1$d failed</string>
+    <string name="import_result_mixed_fmt">%1$s, %2$s</string>
+    <string name="import_err_drm">This book is protected by DRM and cannot be opened.</string>
+    <string name="import_err_bad_archive">The file is damaged, or the archive uses an unsupported file-name encoding.</string>
     <string name="book_toast_hint_caps">Long-press the title to copy it</string>
     <string name="book_ch_cd_downloaded">Downloaded</string>
     <string name="book_ch_cd_translated">Translated</string>
@@ -713,6 +718,8 @@
     <string name="finder_action_edit_sub">Open the plugin script in the editor</string>
     <string name="finder_action_settings">Plugin settings</string>
     <string name="finder_action_settings_sub">Base URL and plugin options</string>
+    <string name="finder_action_restart">Restart plugin</string>
+    <string name="finder_action_restart_sub">Drop the loaded copy and start it again</string>
     <string name="finder_action_uninstall_sub">Remove it from this device</string>
     <string name="finder_add_extension">Add extension</string>
     <string name="finder_add_extension_sub">Add a plugin locally from a file</string>
@@ -778,6 +785,7 @@
     <string name="finder_plugin_base_url">Base URL</string>
     <string name="finder_plugin_base_url_hint">Change it when the site moves to a new address. The API address follows it unless the plugin sets its own.</string>
     <string name="finder_action_failed_fmt">Couldn\'t finish: %1$s</string>
+    <string name="finder_plugin_restarted_fmt">%1$s restarted</string>
     <string name="finder_plugin_saved">Plugin settings saved</string>
     <string name="finder_plugin_settings_error">Couldn\'t load plugin settings</string>
     <string name="finder_plugin_settings_loading">Loading plugin settings…</string>

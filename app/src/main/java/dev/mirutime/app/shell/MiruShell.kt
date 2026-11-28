@@ -686,7 +686,16 @@ fun MiruShell(
                 )
             }
             composable("finder/extensions") {
-                ManageExtensionsScreen(contentPadding = padding, provider = pluginProvider)
+                ManageExtensionsScreen(
+                    contentPadding = padding,
+                    provider = pluginProvider,
+                    onSourceReset = { sourceId ->
+                        catalogSessions.invalidateSource(sourceId)
+                        // The global search keeps per-source cards with resolved covers and absolute
+                        // book URLs; both were built against the old handle.
+                        FinderSearchCache.clear()
+                    },
+                )
             }
             composable(MiruDestination.Settings.route) {
                 val readerConfig by readerGraph.config.config.collectAsState()

@@ -72,7 +72,9 @@ private fun readStreamLimited(input: InputStream, cap: Long): ByteArray {
 
 private val FILE_CHAPTER_EXTENSIONS = setOf("xhtml", "xml", "html", "htm")
 
-class EpubFileReader(file: File) : Closeable {
+// [checkDrm] is set by the import path only: an already-imported book must stay openable even if a
+// third-party tool encrypted a resource, so the reading paths never run the check.
+class EpubFileReader(file: File, private val checkDrm: Boolean = false) : Closeable {
     private val archive = ZipArchive(file)
     private val manifestItems: Map<String, EpubManifestRef>
     private val spine: List<EpubManifestRef>
@@ -95,6 +97,7 @@ class EpubFileReader(file: File) : Closeable {
 
     init {
         try {
+            if (checkDrm) checkNotDrmProtected(archive.read("META-INF/encryption.xml"))
             val container = archive.read("META-INF/container.xml")
                 ?: throw IllegalStateException("META-INF/container.xml file missing")
             val opfPath = parseXmlDocument(container)

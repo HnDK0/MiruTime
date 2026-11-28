@@ -19,6 +19,10 @@ data class PickedImportFile(
 sealed interface ImportFailureReason {
     data class SizeLimit(val limitBytes: Long, val actualBytes: Long) : ImportFailureReason
     data class InsufficientSpace(val requiredBytes: Long) : ImportFailureReason
+    /** A DRM-protected book: the archive opens, its content is encrypted. */
+    data object Drm : ImportFailureReason
+    /** A damaged archive, or file names in a legacy encoding ZipFile rejects. */
+    data object BadArchive : ImportFailureReason
 }
 
 data class ImportSummary(
@@ -29,6 +33,9 @@ data class ImportSummary(
 ) {
     // Duplicates are already in the library, so the user-visible count covers both.
     val accepted: Int get() = imported + duplicates
+
+    // A mixed batch reports what was added; the reason speaks only when nothing was.
+    val failureToReport: ImportFailureReason? get() = firstFailureReason?.takeIf { accepted == 0 }
 }
 
 internal fun summarizeImports(results: List<LocalImportResult>): ImportSummary {

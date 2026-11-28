@@ -1028,7 +1028,8 @@ internal fun SourceCatalogScreen(
                 presets = provider.presets(sourceId)
             },
             onApply = { draft ->
-                // The sheet stays open; Close dismisses it (immediate filters).
+                // Called by the sheet's Apply and by IME Search, which then close
+                // it; the sheet's draft is local until this point.
                 // A local source only understands format values; a preset or
                 // an old plugin genre must not survive into an empty result.
                 val applied = if (isLocal) {

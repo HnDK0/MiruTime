@@ -457,6 +457,11 @@
     <string name="toast_import_failed">Impossible d\'importer les fichiers sélectionnés</string>
     <string name="import_err_too_large_fmt">Fichier trop volumineux : %1$d Mo (limite %2$d Mo).</string>
     <string name="import_err_no_space_fmt">Espace libre insuffisant : l\'import nécessite %1$d Mo.</string>
+    <string name="import_added_count_fmt">%1$d ajoutés</string>
+    <string name="import_failed_count_fmt">%1$d échoués</string>
+    <string name="import_result_mixed_fmt">%1$s, %2$s</string>
+    <string name="import_err_drm">Ce livre est protégé par DRM et ne peut pas être ouvert.</string>
+    <string name="import_err_bad_archive">Le fichier est endommagé ou utilise un encodage de noms de fichiers non pris en charge.</string>
     <string name="book_toast_hint_caps">Appuyez longuement sur le titre pour le copier</string>
     <string name="book_ch_cd_downloaded">Téléchargé</string>
     <string name="book_ch_cd_translated">Traduit</string>
@@ -713,6 +718,8 @@
     <string name="finder_action_edit_sub">Ouvrir le script de l\'extension dans l\'éditeur</string>
     <string name="finder_action_settings">Paramètres de l\'extension</string>
     <string name="finder_action_settings_sub">URL de base et options de l\'extension</string>
+    <string name="finder_action_restart">Redémarrer le plugin</string>
+    <string name="finder_action_restart_sub">Abandonner la copie chargée et la relancer</string>
     <string name="finder_action_uninstall_sub">La retirer de cet appareil</string>
     <string name="finder_add_extension">Ajouter une extension</string>
     <string name="finder_add_extension_sub">Ajouter une extension localement depuis un fichier</string>
@@ -779,6 +786,7 @@
     <string name="finder_plugin_base_url_hint">Modifiez-la quand le site change d\'adresse. L\'adresse de l\'API suit, sauf si l\'extension définit la sienne.</string>
     <string name="finder_action_failed_fmt">Impossible de terminer : %1$s</string>
     <string name="finder_plugin_saved">Paramètres de l\'extension enregistrés</string>
+    <string name="finder_plugin_restarted_fmt">%1$s redémarré</string>
     <string name="finder_plugin_settings_error">Impossible de charger les paramètres de l\'extension</string>
     <string name="finder_plugin_settings_loading">Chargement des paramètres de l\'extension…</string>
     <string name="finder_repo_reset">Réinitialiser par défaut</string>

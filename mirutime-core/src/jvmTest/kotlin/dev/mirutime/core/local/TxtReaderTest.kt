@@ -42,6 +42,13 @@ class TxtReaderTest {
     }
 
     @Test
+    fun `invisible characters are cleaned like in epub and fb2`() {
+        val chapters = read("inter\u00ADnational\u00A0agree\u2060ment.\n")
+
+        assertEquals("international agreement.", chapters.single().body.trim())
+    }
+
+    @Test
     fun `hard wrapped lines of a block are merged into one paragraph`() {
         val blocks = (0 until 3).map { block ->
             (0 until 3).joinToString(" ") { line -> "Block $block line $line " + "y".repeat(60) }

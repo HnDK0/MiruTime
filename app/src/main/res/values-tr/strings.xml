@@ -457,6 +457,11 @@
     <string name="toast_import_failed">Seçilen dosyalar içe aktarılamadı</string>
     <string name="import_err_too_large_fmt">Dosya çok büyük: %1$d MB (sınır %2$d MB).</string>
     <string name="import_err_no_space_fmt">Yeterli boş alan yok: içe aktarma %1$d MB gerektiriyor.</string>
+    <string name="import_added_count_fmt">%1$d eklendi</string>
+    <string name="import_failed_count_fmt">%1$d başarısız</string>
+    <string name="import_result_mixed_fmt">%1$s, %2$s</string>
+    <string name="import_err_drm">Bu kitap DRM ile korunuyor ve açılamıyor.</string>
+    <string name="import_err_bad_archive">Dosya bozuk veya arşiv desteklenmeyen bir dosya adı kodlaması kullanıyor.</string>
     <string name="book_toast_hint_caps">Kopyalamak için başlığa uzun basın</string>
     <string name="book_ch_cd_downloaded">İndirildi</string>
     <string name="book_ch_cd_translated">Çevrildi</string>
@@ -702,6 +707,8 @@
     <string name="finder_action_edit_sub">Eklenti betiğini düzenleyicide aç</string>
     <string name="finder_action_settings">Eklenti ayarları</string>
     <string name="finder_action_settings_sub">Temel URL ve eklenti seçenekleri</string>
+    <string name="finder_action_restart">Eklentiyi yeniden başlat</string>
+    <string name="finder_action_restart_sub">Yüklü kopyayı bırakıp yeniden başlat</string>
     <string name="finder_action_uninstall_sub">Bu cihazdan kaldır</string>
     <string name="finder_add_extension">Uzantı ekle</string>
     <string name="finder_add_extension_sub">Bir dosyadan yerel olarak eklenti ekle</string>
@@ -768,6 +775,7 @@
     <string name="finder_plugin_base_url_hint">Site yeni bir adrese taşındığında değiştirin. Eklenti kendi adresini belirtmedikçe API adresi bunu izler.</string>
     <string name="finder_action_failed_fmt">Tamamlanamadı: %1$s</string>
     <string name="finder_plugin_saved">Eklenti ayarları kaydedildi</string>
+    <string name="finder_plugin_restarted_fmt">%1$s yeniden başlatıldı</string>
     <string name="finder_plugin_settings_error">Eklenti ayarları yüklenemedi</string>
     <string name="finder_plugin_settings_loading">Eklenti ayarları yükleniyor…</string>
     <string name="finder_repo_reset">Varsayılana sıfırla</string>

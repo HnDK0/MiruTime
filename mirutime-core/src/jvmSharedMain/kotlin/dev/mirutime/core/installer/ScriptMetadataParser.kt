@@ -237,22 +237,31 @@ object ScriptMetadataParser {
     private fun Globals.contentType(): String? =
         str("content_type")?.lowercase()?.takeIf { it == "manga" || it == "novel" || it == "video" }
 
+    // Tolerant like every other header global above: a field of the wrong type
+    // reads as "not declared" instead of throwing. The strict opt* readers
+    // raised LuaError here, and parseGlobals runs outside parse()'s try (and
+    // again in the load callable), so one typo such as `whitelist = "true"`
+    // made the whole plugin uninstallable and unloadable.
     private fun Globals.cfOptions(): ScriptCfOptions? {
         val raw = try { get("cf_options") } catch (_: Exception) { return null }
         if (!raw.istable()) return null
         val table = raw.checktable()
         return ScriptCfOptions(
-            whitelist = table.get("whitelist").optboolean(false),
+            whitelist = table.get("whitelist").takeIf { it.isboolean() }?.toboolean() ?: false,
             ignoreMarkers = table.strList("ignore_markers"),
             triggerMarkers = table.strList("trigger_markers"),
         )
     }
 
     private fun LuaTable.strList(key: String): List<String> {
-        val array = get(key).opttable(null) ?: return emptyList()
+        val array = get(key).takeIf { it.istable() }?.checktable() ?: return emptyList()
         val out = mutableListOf<String>()
         for (i in 1..array.length()) {
-            array.get(i).optjstring(null)?.takeIf { it.isNotBlank() }?.let { out += it }
+            val item = array.get(i)
+            // A number is a string here, as optjstring always read it.
+            if (item.isstring() || item.isnumber()) {
+                item.tojstring().takeIf { it.isNotBlank() }?.let { out += it }
+            }
         }
         return out
     }

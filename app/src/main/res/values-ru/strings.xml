@@ -464,6 +464,11 @@
     <string name="toast_import_failed">Не удалось импортировать выбранные файлы</string>
     <string name="import_err_too_large_fmt">Файл слишком большой: %1$d МБ (лимит %2$d МБ).</string>
     <string name="import_err_no_space_fmt">Не хватает свободного места: для импорта нужно %1$d МБ.</string>
+    <string name="import_added_count_fmt">%1$d добавлено</string>
+    <string name="import_failed_count_fmt">%1$d не удалось</string>
+    <string name="import_result_mixed_fmt">%1$s, %2$s</string>
+    <string name="import_err_drm">Книга защищена DRM и не может быть открыта.</string>
+    <string name="import_err_bad_archive">Файл повреждён или использует неподдерживаемую кодировку имён файлов.</string>
 
     <!-- Dashboard -->
     <string name="dash_today">Сегодня</string>
@@ -726,6 +731,8 @@
     <string name="finder_action_edit_sub">Открыть скрипт плагина в редакторе</string>
     <string name="finder_action_settings">Настройки плагина</string>
     <string name="finder_action_settings_sub">Base URL и опции плагина</string>
+    <string name="finder_action_restart">Перезапустить плагин</string>
+    <string name="finder_action_restart_sub">Отбросить загруженную копию и запустить заново</string>
     <string name="finder_action_uninstall_sub">Удалить с этого устройства</string>
     <string name="finder_add_extension">Добавить расширение</string>
     <string name="finder_add_extension_sub">Добавить плагин локально, файлом</string>
@@ -791,6 +798,7 @@
     <string name="finder_plugin_base_url">Базовый URL</string>
     <string name="finder_plugin_base_url_hint">Меняйте, когда сайт переехал на новый адрес. Адрес API следует за ним, если плагин не задаёт свой.</string>
     <string name="finder_action_failed_fmt">Не удалось выполнить: %1$s</string>
+    <string name="finder_plugin_restarted_fmt">Перезапущено: %1$s</string>
     <string name="finder_plugin_saved">Настройки плагина сохранены</string>
     <string name="finder_plugin_settings_error">Не удалось загрузить настройки плагина</string>
     <string name="finder_plugin_settings_loading">Загрузка настроек плагина…</string>

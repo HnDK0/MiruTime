@@ -72,6 +72,14 @@ private const val BYTES_PER_MB = 1024L * 1024L
 // Ceiling so a file just over a limit never rounds down to the limit itself.
 private fun megabytes(bytes: Long): Long = (bytes + BYTES_PER_MB - 1) / BYTES_PER_MB
 
+/** "N added, M failed" for a batch that did both. */
+internal fun mixedImportText(resources: Resources, added: Int, failed: Int): String =
+    resources.getString(
+        R.string.import_result_mixed_fmt,
+        resources.getString(R.string.import_added_count_fmt, added),
+        resources.getString(R.string.import_failed_count_fmt, failed),
+    )
+
 /** One mapping for every surface that reports an import failure. */
 internal fun importFailureText(resources: Resources, reason: ImportFailureReason): String =
     when (reason) {
@@ -84,6 +92,8 @@ internal fun importFailureText(resources: Resources, reason: ImportFailureReason
             R.string.import_err_no_space_fmt,
             megabytes(reason.requiredBytes),
         )
+        ImportFailureReason.Drm -> resources.getString(R.string.import_err_drm)
+        ImportFailureReason.BadArchive -> resources.getString(R.string.import_err_bad_archive)
     }
 
 // Import flow: one SAF picker, single or multi. One picked file goes to the

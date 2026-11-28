@@ -57,7 +57,7 @@ internal class InlineImagesBuilder {
     private val images = mutableListOf<LocalImage>()
 
     fun append(text: CharSequence): InlineImagesBuilder {
-        raw.append(text)
+        raw.append(text.toString().cleanBookText())
         return this
     }
 
@@ -120,4 +120,23 @@ internal class InlineImagesBuilder {
     private companion object {
         const val MARKER = '\u0000'
     }
+}
+
+// Invisible characters real books carry that only get in the way of reading aloud, searching and
+// laying out text: a soft hyphen splits a word ("inter\u00ADnational"), a word joiner and a stray BOM
+// read as nothing yet interrupt a TTS engine mid-word, and a no-break space is just a space.
+// This is deliberately lighter than the plugin-side string_clean, which applies NFKC: that would
+// also rewrite CJK full-width punctuation, which a book must keep. Zero-width spaces and joiners
+// are left alone: some scripts use them to mark word boundaries.
+internal fun String.cleanBookText(): String {
+    if (none { it == '\u00AD' || it == '\u2060' || it == '\uFEFF' || it == '\u00A0' }) return this
+    val out = StringBuilder(length)
+    for (c in this) {
+        when (c) {
+            '\u00AD', '\u2060', '\uFEFF' -> Unit
+            '\u00A0' -> out.append(' ')
+            else -> out.append(c)
+        }
+    }
+    return out.toString()
 }

@@ -88,8 +88,9 @@ internal object CatalogFilterEmission {
 // then sections. A local catalogue keeps the fixed sort + file-format chips;
 // a plugin source renders ONLY the filters its getFilterList declares (sort,
 // select, checkbox, tristate, switch, text, tag_input) with loading / error /
-// empty states. Filters apply immediately; the query applies on IME Search,
-// not on each keystroke. Close only dismisses; there is no Apply.
+// empty states. Every control, a preset included, edits a local draft; Apply
+// (or IME Search in the query field) sends it to the catalogue and closes the
+// sheet, and closing any other way throws the draft away.
 @Composable
 fun CatalogFilterSheet(
     applied: CatalogFilters,

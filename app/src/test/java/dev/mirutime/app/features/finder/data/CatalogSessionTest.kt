@@ -257,6 +257,27 @@ class CatalogSessionTest {
     }
 
     @Test
+    fun `a base-url change drops every list of the source and keeps other sources`() = runTest {
+        val registry = CatalogSessionRegistry(
+            page = { _, _, pageNumber ->
+                CatalogPage(listOf(book("book-$pageNumber")), hasMore = true)
+            },
+            newScope = { CoroutineScope(coroutineContext + Job()) },
+        )
+        val plain = registry.get("source-1", CatalogFilters())
+        val searched = registry.get("source-1", CatalogFilters(query = "elf"))
+        val otherSource = registry.get("source-2", CatalogFilters())
+        listOf(plain, searched, otherSource).forEach { it.ensureLoaded() }
+        advanceUntilIdle()
+
+        registry.invalidateSource("source-1")
+
+        assertNotSame(plain, registry.get("source-1", CatalogFilters()))
+        assertNotSame(searched, registry.get("source-1", CatalogFilters(query = "elf")))
+        assertSame(otherSource, registry.get("source-2", CatalogFilters()))
+    }
+
+    @Test
     fun `reloading a source cancels the loads of the lists it drops`() = runTest {
         val release = CompletableDeferred<CatalogPage>()
         val registry = CatalogSessionRegistry(

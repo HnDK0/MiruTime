@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
@@ -139,6 +140,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 fun ManageExtensionsScreen(
     contentPadding: PaddingValues,
     provider: FinderDataProvider,
+    // Both a base-URL change and a restart invalidate the plugin's loaded handle inside the provider;
+    // cached catalogue lists still hold pages built against the old handle/host, so the owner of the
+    // session cache drops them.
+    onSourceReset: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -773,6 +778,14 @@ fun ManageExtensionsScreen(
                     // sheet while only one AppBottomSheet is mounted at a time.
                     settingsFor = plugin
                 },
+                onRestart = {
+                    actionsFor = null
+                    scope.launch {
+                        provider.restartPlugin(plugin.id)
+                        onSourceReset(plugin.id)
+                        toast(resources.getString(R.string.finder_plugin_restarted_fmt, plugin.name))
+                    }
+                },
                 onEdit = {
                     actionsFor = null
                     sourceFor = plugin
@@ -836,7 +849,12 @@ fun ManageExtensionsScreen(
                 settingsError = pluginSettingsError,
                 settingsLoading = pluginSettingsLoading,
                 onRetrySettings = { if (!pluginSettingsLoading) settingsAttempt++ },
-                onSave = { url -> scope.launch { provider.setBaseUrl(plugin.id, url) } },
+                onSave = { url ->
+                    scope.launch {
+                        provider.setBaseUrl(plugin.id, url)
+                        onSourceReset(plugin.id)
+                    }
+                },
                 onClose = { settingsFor = null },
             )
         }
@@ -1249,6 +1267,7 @@ private fun ExtensionActionsSheet(
     plugin: PluginExtension,
     onCheckUpdate: () -> Unit,
     onSettings: () -> Unit,
+    onRestart: () -> Unit,
     onEdit: () -> Unit,
     onTranslate: () -> Unit,
     onUninstall: () -> Unit,
@@ -1282,6 +1301,13 @@ private fun ExtensionActionsSheet(
             title = stringResource(R.string.finder_action_settings),
             subtitle = stringResource(R.string.finder_action_settings_sub),
             onClick = onSettings,
+        )
+        MiruRowDivider()
+        MiruActionRow(
+            icon = Icons.Filled.PlayArrow,
+            title = stringResource(R.string.finder_action_restart),
+            subtitle = stringResource(R.string.finder_action_restart_sub),
+            onClick = onRestart,
         )
         MiruRowDivider()
         MiruActionRow(

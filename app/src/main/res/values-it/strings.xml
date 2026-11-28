@@ -457,6 +457,11 @@
     <string name="toast_import_failed">Impossibile importare i file selezionati</string>
     <string name="import_err_too_large_fmt">Il file è troppo grande: %1$d MB (limite %2$d MB).</string>
     <string name="import_err_no_space_fmt">Spazio libero insufficiente: l\'importazione richiede %1$d MB.</string>
+    <string name="import_added_count_fmt">%1$d aggiunti</string>
+    <string name="import_failed_count_fmt">%1$d non riusciti</string>
+    <string name="import_result_mixed_fmt">%1$s, %2$s</string>
+    <string name="import_err_drm">Questo libro è protetto da DRM e non può essere aperto.</string>
+    <string name="import_err_bad_archive">Il file è danneggiato o l\'archivio usa una codifica dei nomi file non supportata.</string>
     <string name="book_toast_hint_caps">Tieni premuto il titolo per copiarlo</string>
     <string name="book_ch_cd_downloaded">Scaricato</string>
     <string name="book_ch_cd_translated">Tradotto</string>
@@ -713,6 +718,8 @@
     <string name="finder_action_edit_sub">Apri lo script dell\'estensione nell\'editor</string>
     <string name="finder_action_settings">Impostazioni estensione</string>
     <string name="finder_action_settings_sub">URL di base e opzioni dell\'estensione</string>
+    <string name="finder_action_restart">Riavvia plugin</string>
+    <string name="finder_action_restart_sub">Scarta la copia caricata e avviala di nuovo</string>
     <string name="finder_action_uninstall_sub">Rimuovila da questo dispositivo</string>
     <string name="finder_add_extension">Aggiungi estensione</string>
     <string name="finder_add_extension_sub">Aggiungi un\'estensione localmente da un file</string>
@@ -779,6 +786,7 @@
     <string name="finder_plugin_base_url_hint">Cambialo quando il sito si sposta. L\'indirizzo dell\'API lo segue, a meno che l\'estensione non ne imposti uno proprio.</string>
     <string name="finder_action_failed_fmt">Impossibile completare: %1$s</string>
     <string name="finder_plugin_saved">Impostazioni dell\'estensione salvate</string>
+    <string name="finder_plugin_restarted_fmt">%1$s riavviato</string>
     <string name="finder_plugin_settings_error">Impossibile caricare le impostazioni dell\'estensione</string>
     <string name="finder_plugin_settings_loading">Caricamento delle impostazioni dell\'estensione…</string>
     <string name="finder_repo_reset">Ripristina predefinito</string>

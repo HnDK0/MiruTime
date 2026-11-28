@@ -90,6 +90,7 @@ import dev.mirutime.app.features.library.data.ImportSummary
 import dev.mirutime.app.features.library.data.PickedImportFile
 import dev.mirutime.app.features.library.ui.ImportSheet
 import dev.mirutime.app.features.library.ui.importFailureText
+import dev.mirutime.app.features.library.ui.mixedImportText
 import dev.mirutime.app.features.opds.domain.OpdsController
 import dev.mirutime.app.features.opds.ui.OpdsAddCatalogSheet
 import dev.mirutime.app.features.settings.data.AppSettings
@@ -501,10 +502,11 @@ internal fun toastImported(
     resources: android.content.res.Resources,
     summary: ImportSummary,
 ) {
-    val reason = summary.firstFailureReason
+    val reason = summary.failureToReport
     val count = summary.accepted
     val message = when {
         reason != null -> importFailureText(resources, reason)
+        count > 0 && summary.failures > 0 -> mixedImportText(resources, count, summary.failures)
         count > 0 -> resources.getQuantityString(R.plurals.plural_local_books, count, count)
         else -> resources.getString(R.string.toast_import_failed)
     }

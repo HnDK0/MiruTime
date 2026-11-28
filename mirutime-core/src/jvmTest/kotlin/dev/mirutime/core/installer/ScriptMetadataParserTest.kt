@@ -160,6 +160,44 @@ class ScriptMetadataParserTest {
         assertEquals(listOf("b"), options.triggerMarkers)
     }
 
+    // The strict readers threw LuaError out of parse() and parseGlobals() for a
+    // wrong-typed field, which made the whole plugin uninstallable and unloadable.
+    @Test
+    fun `cf_options with wrong-typed fields keeps the valid parts and does not throw`() {
+        val meta = ScriptMetadataParser.parse(
+            """
+            id = "typo"
+            baseUrl = "https://typo.example/"
+            cf_options = {
+                whitelist       = "yes",
+                ignore_markers  = "turnstile",
+                trigger_markers = { "captcha", 403, {}, false, "", "Ray ID" },
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals("typo", meta.id)
+        assertEquals("https://typo.example/", meta.baseUrl)
+        assertEquals(
+            ScriptCfOptions(
+                whitelist = false,
+                ignoreMarkers = emptyList(),
+                triggerMarkers = listOf("captcha", "403", "Ray ID"),
+            ),
+            meta.cfOptions,
+        )
+    }
+
+    @Test
+    fun `cf_options that is not a table reads as not declared`() {
+        assertNull(ScriptMetadataParser.parse("cf_options = true").cfOptions)
+        assertNull(ScriptMetadataParser.parse("""cf_options = "whitelist"""").cfOptions)
+        assertEquals(
+            ScriptCfOptions(whitelist = true, ignoreMarkers = emptyList(), triggerMarkers = emptyList()),
+            ScriptMetadataParser.parse("cf_options = { whitelist = true }").cfOptions,
+        )
+    }
+
     @Test
     fun `toPluginMetadata passes icon description charset and cfOptions through`() {
         val plugin = ScriptMetadataParser.parse(header).toPluginMetadata("fallback", 1, "sha")

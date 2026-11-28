@@ -457,6 +457,11 @@
     <string name="toast_import_failed">Die ausgewählten Dateien konnten nicht importiert werden</string>
     <string name="import_err_too_large_fmt">Die Datei ist zu groß: %1$d MB (Grenze %2$d MB).</string>
     <string name="import_err_no_space_fmt">Nicht genügend freier Speicher: der Import braucht %1$d MB.</string>
+    <string name="import_added_count_fmt">%1$d hinzugefügt</string>
+    <string name="import_failed_count_fmt">%1$d fehlgeschlagen</string>
+    <string name="import_result_mixed_fmt">%1$s, %2$s</string>
+    <string name="import_err_drm">Dieses Buch ist DRM-geschützt und kann nicht geöffnet werden.</string>
+    <string name="import_err_bad_archive">Die Datei ist beschädigt oder verwendet eine nicht unterstützte Dateinamen-Kodierung.</string>
     <string name="book_toast_hint_caps">Halte den Titel gedrückt, um ihn zu kopieren</string>
     <string name="book_ch_cd_downloaded">Heruntergeladen</string>
     <string name="book_ch_cd_translated">Übersetzt</string>
@@ -702,6 +707,8 @@
     <string name="finder_action_edit_sub">Das Erweiterungsskript im Editor öffnen</string>
     <string name="finder_action_settings">Erweiterungseinstellungen</string>
     <string name="finder_action_settings_sub">Basis-URL und Optionen der Erweiterung</string>
+    <string name="finder_action_restart">Plugin neu starten</string>
+    <string name="finder_action_restart_sub">Geladene Kopie verwerfen und neu starten</string>
     <string name="finder_action_uninstall_sub">Von diesem Gerät entfernen</string>
     <string name="finder_add_extension">Erweiterung hinzufügen</string>
     <string name="finder_add_extension_sub">Eine Erweiterung lokal aus einer Datei hinzufügen</string>
@@ -768,6 +775,7 @@
     <string name="finder_plugin_base_url_hint">Ändere sie, wenn die Seite auf eine neue Adresse umzieht. Die API-Adresse folgt ihr, außer die Erweiterung legt eine eigene fest.</string>
     <string name="finder_action_failed_fmt">Konnte nicht abgeschlossen werden: %1$s</string>
     <string name="finder_plugin_saved">Erweiterungseinstellungen gespeichert</string>
+    <string name="finder_plugin_restarted_fmt">%1$s neu gestartet</string>
     <string name="finder_plugin_settings_error">Erweiterungseinstellungen konnten nicht geladen werden</string>
     <string name="finder_plugin_settings_loading">Erweiterungseinstellungen werden geladen…</string>
     <string name="finder_repo_reset">Auf Standard zurücksetzen</string>
