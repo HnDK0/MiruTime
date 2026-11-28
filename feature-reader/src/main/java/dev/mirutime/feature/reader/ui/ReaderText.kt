@@ -112,7 +112,7 @@ fun ReaderBlockView(
     // pre-split paragraph never lights up as several.
     val splitParagraph = ReaderSplit.shouldSplit(block, style.splitSentences)
     val activeBlock = ttsHighlight?.blockId == block.id
-    val blockTint = activeBlock && !splitParagraph
+    val blockTint = activeBlock && !splitParagraph && ttsHighlight?.rangeEnabled == false
     val content: @Composable () -> Unit = {
         Box(
             Modifier

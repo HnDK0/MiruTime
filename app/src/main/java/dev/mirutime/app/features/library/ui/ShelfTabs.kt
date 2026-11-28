@@ -28,7 +28,7 @@ import dev.mirutime.uikit.miruPlateBorder
 // Shelves row: secondary scrollable tabs (M3 pattern) with a segmented-control
 // look — flat text tabs, the selected ones on a soft accent pill, never chips.
 // "All" is the leading tab and means no shelf filter (empty selection); a tap
-// on a shelf toggles it, so several shelves can be active at once. Long-press
+// on a shelf switches to it alone (single-select). Long-press
 // opens the shelf manager; the manage icon duplicates that entry.
 //
 // The tabs sit on their OWN plate: one track for the shelf group, the same

@@ -57,11 +57,30 @@ class FeedScrollTriggerTest {
     }
 
     @Test
-    fun `tts follow skips a comfortable visible block`() {
-        assertFalse(ttsFollowNeedsScroll(visible = true, offsetPx = 0, comfortOffsetPx = 200))
-        assertFalse(ttsFollowNeedsScroll(visible = true, offsetPx = 200, comfortOffsetPx = 200))
-        assertTrue(ttsFollowNeedsScroll(visible = true, offsetPx = 201, comfortOffsetPx = 200))
-        assertTrue(ttsFollowNeedsScroll(visible = false, offsetPx = 0, comfortOffsetPx = 200))
+    fun `tts follow keeps the page still while the block is fully on screen`() {
+        assertFalse(ttsFollowNeedsScroll(true, offsetPx = 0, sizePx = 100, viewportTopPx = 0, viewportBottomPx = 1000))
+        assertFalse(ttsFollowNeedsScroll(true, offsetPx = 600, sizePx = 300, viewportTopPx = 0, viewportBottomPx = 1000))
+        assertFalse(ttsFollowNeedsScroll(true, offsetPx = 900, sizePx = 100, viewportTopPx = 0, viewportBottomPx = 1000))
+    }
+
+    @Test
+    fun `tts follow advances once the block leaves or is cut by the screen`() {
+        assertTrue(ttsFollowNeedsScroll(false, offsetPx = 0, sizePx = 0, viewportTopPx = 0, viewportBottomPx = 1000))
+        assertTrue(ttsFollowNeedsScroll(true, offsetPx = 950, sizePx = 200, viewportTopPx = 0, viewportBottomPx = 1000))
+        assertTrue(ttsFollowNeedsScroll(true, offsetPx = -50, sizePx = 200, viewportTopPx = 0, viewportBottomPx = 1000))
+    }
+
+    @Test
+    fun `tts follow leaves a block taller than the screen alone while it shows`() {
+        assertFalse(ttsFollowNeedsScroll(true, offsetPx = -300, sizePx = 1500, viewportTopPx = 0, viewportBottomPx = 1000))
+    }
+
+    @Test
+    fun `tts follow never yanks the screen back after the user scrolled away`() {
+        assertTrue(ttsFollowAttached(hadPrevious = false, previousInFeed = false, previousVisible = false))
+        assertTrue(ttsFollowAttached(hadPrevious = true, previousInFeed = true, previousVisible = true))
+        assertTrue(ttsFollowAttached(hadPrevious = true, previousInFeed = false, previousVisible = false))
+        assertFalse(ttsFollowAttached(hadPrevious = true, previousInFeed = true, previousVisible = false))
     }
 
     @Test

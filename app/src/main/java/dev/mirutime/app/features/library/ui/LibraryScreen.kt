@@ -1,5 +1,8 @@
 package dev.mirutime.app.features.library.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -83,7 +86,6 @@ import dev.mirutime.uikit.AppBottomSheet
 import dev.mirutime.app.design.components.BookCover
 import dev.mirutime.app.design.components.CardStylePicker
 import dev.mirutime.uikit.MiruSearchBar
-import dev.mirutime.uikit.ChipRail
 import dev.mirutime.uikit.MiruChipFlow
 import dev.mirutime.uikit.MiruFilterChip
 import dev.mirutime.uikit.MiruRoundIconButton
@@ -190,11 +192,7 @@ fun LibraryScreen(
     val cardStyle = AppSettings.cardStyle
 
     var filterOpen by rememberSaveable { mutableStateOf(false) }
-    var sourceSheetOpen by rememberSaveable { mutableStateOf(false) }
-    var genresSheetOpen by rememberSaveable { mutableStateOf(false) }
-    var sortSheetOpen by rememberSaveable { mutableStateOf(false) }
     var shelfManagerOpen by remember { mutableStateOf(false) }
-    var importOpen by remember { mutableStateOf(false) }
     // True from the picker handoff until importFiles + the library reload
     // finish; the sheet stays open and shows a blocking progress state.
     var importing by remember { mutableStateOf(false) }
@@ -374,6 +372,12 @@ fun LibraryScreen(
             val generation = pager.generation
             loadPages(generation, targetPages, filters)
         }
+    }
+
+    // Tabs are single-select now; a multi-selection persisted by an older
+    // build collapses to its first shelf so the list is never a mixed bag.
+    LaunchedEffect(Unit) {
+        if (selShelves.size > 1) selShelves = setOf(selShelves.first())
     }
 
     // If a shelf was deleted externally or restored, prune deleted IDs from the active selection.
@@ -595,6 +599,104 @@ fun LibraryScreen(
         }
     }
 
+    // Import opens the system picker directly (no intermediate sheet). One
+    // picked file or many go through the same importer; the Import button
+    // shows a busy state until the import and the reload finish.
+    fun performImport(files: List<dev.mirutime.app.features.library.data.PickedImportFile>) {
+        if (files.isEmpty() || importing) return
+        importing = true
+        MiruLog.event("library", "import-start", "files" to files.size)
+        val wasReading = selShelves.isEmpty() || "reading" in selShelves
+        ioScope.launch {
+            try {
+                val summary = try {
+                    provider.importFiles(files)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    MiruLog.w("library", "Import failed", e)
+                    null
+                }
+                if (summary == null) {
+                    MiruLog.event("library", "import-result", "ok" to false)
+                    android.widget.Toast.makeText(
+                        context,
+                        resources.getString(R.string.toast_import_failed),
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                } else {
+                    MiruLog.event(
+                        "library",
+                        "import-result",
+                        "ok" to true,
+                        "imported" to summary.imported,
+                        "duplicates" to summary.duplicates,
+                        "failures" to summary.failures,
+                    )
+                    lastRead = provider.lastRead()
+                    // New books land on Reading; make sure they are visible.
+                    if (selShelves.isNotEmpty() && "reading" !in selShelves) {
+                        selShelves = setOf("reading")
+                    }
+                    reloadMeta()
+                    // A shelf change already starts its own page load.
+                    if (wasReading) refreshPages()
+                    val count = summary.accepted
+                    val reason = summary.failureToReport
+                    val message = if (reason != null) {
+                        importFailureText(resources, reason)
+                    } else if (count > 0 && summary.failures > 0) {
+                        mixedImportText(resources, count, summary.failures)
+                    } else if (count > 0) {
+                        if (count == 1) {
+                            resources.getString(R.string.toast_imported_one)
+                        } else {
+                            resources.getQuantityString(R.plurals.plural_local_books, count, count)
+                        }
+                    } else {
+                        resources.getString(R.string.toast_import_failed)
+                    }
+                    android.widget.Toast.makeText(
+                        context,
+                        message,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            } finally {
+                importing = false
+            }
+        }
+    }
+    val importPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris: List<Uri> ->
+        val picked = uris.mapNotNull { uri ->
+            val name = displayNameOf(context, uri) ?: uri.lastPathSegment ?: uri.toString()
+            dev.mirutime.app.features.library.data.PickedImportFile(
+                uri = uri.toString(),
+                fileName = name,
+                format = formatForFileName(name),
+            )
+        }
+        if (picked.isNotEmpty()) performImport(picked)
+    }
+    fun launchImportPicker() {
+        if (importing) return
+        importPicker.launch(
+            arrayOf(
+                "application/epub+zip",
+                "text/plain",
+                "text/xml",
+                "application/x-fictionbook+xml",
+                "application/x-cbz",
+                "application/x-cbr",
+                "application/pdf",
+                "application/x-pdf",
+                "application/zip",
+            ),
+        )
+    }
+
     val gridRows = remember(shown, columns) { shown.chunked(columns) }
     // Scaffold's bottom inset reaches past the tab pill: it also carries the
     // shell's decorative fade strip and plate top padding. Drop those (owned by
@@ -640,11 +742,46 @@ fun LibraryScreen(
                         onSearch = { focusManager.clearFocus() },
                         modifier = Modifier.weight(1f),
                     )
-                    MiruRoundIconButton(
-                        icon = Icons.Filled.Tune,
-                        contentDescription = stringResource(R.string.lib_cd_filters),
-                        onClick = { filterOpen = true },
-                    )
+                }
+            }
+
+            // Compact two-button bar: everything that used to be stacked
+            // (source, genres, grid/list, sort, count, import banner) now lives
+            // behind Filter, and Import opens the system file picker directly.
+            item {
+                val activeFilters = (if (selSources.isNotEmpty()) 1 else 0) +
+                    (if (genres.isNotEmpty()) 1 else 0) +
+                    (if (type != null) 1 else 0)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = MiruSpace.Xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        MiruCompactButton(
+                            label = if (activeFilters > 0) {
+                                stringResource(R.string.lib_btn_filter_active_fmt, activeFilters)
+                            } else {
+                                stringResource(R.string.lib_btn_filter)
+                            },
+                            icon = Icons.Filled.Tune,
+                            selected = activeFilters > 0,
+                            onClick = { filterOpen = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        MiruCompactButton(
+                            label = stringResource(R.string.lib_btn_import),
+                            icon = Icons.Filled.UploadFile,
+                            enabled = !importing,
+                            busy = importing,
+                            onClick = { launchImportPicker() },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
             }
 
@@ -655,36 +792,13 @@ fun LibraryScreen(
                 ShelfTabsRow(
                     shelves = shelves,
                     selectedIds = selShelves,
-                    onToggle = { id ->
-                        selShelves = if (id in selShelves) selShelves - id else selShelves + id
-                    },
+                    // Single-select: a tap switches to that shelf alone.
+                    onToggle = { id -> selShelves = setOf(id) },
                     onSelectAll = { selShelves = emptySet() },
                     onManage = { shelfManagerOpen = true },
                     onTabLongPress = { shelfManagerOpen = true },
                     modifier = Modifier,
                 )
-            }
-
-            item {
-                // A tight gap below the shelf plate: chip rows already carry
-                // their own touch-target padding around the visual chip faces.
-                Box(modifier = Modifier.padding(top = MiruSpace.Xxs, bottom = MiruSpace.Xxs)) {
-                    MiniFilters(
-                        sources = selSources,
-                        genres = genres,
-                        layout = layout,
-                        sort = sort,
-                        sortDir = sortDir,
-                        sortEnabled = sortEnabled,
-                        onSource = { sourceSheetOpen = true },
-                        onGenres = { genresSheetOpen = true },
-                        onLayout = {
-                            AppSettings.listLayout =
-                                if (layout == LayoutMode.Grid) "list" else "grid"
-                        },
-                        onSort = { sortSheetOpen = true },
-                    )
-                }
             }
 
             if (
@@ -760,93 +874,6 @@ fun LibraryScreen(
                                         )
                                     },
                                 )
-                            }
-                        }
-                    }
-                }
-
-                // Shelf caption (prototype language): live count on the left, the
-                // local-import entry on the right.
-                item {
-                    val largeText = isLargeText()
-                    val count = pager.total ?: shown.size
-                    val countLabel = pluralStringResource(R.plurals.plural_books, count, count)
-                    val countShape = RoundedCornerShape(MiruRadius.Chip)
-                    if (largeText) {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(MiruSpace.S),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = MiruSpace.Xs),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .heightIn(min = MiruSize.RowCompact)
-                                    .clip(countShape)
-                                    .background(miruCardSurface())
-                                    .border(miruCardBorder(), countShape)
-                                    .padding(horizontal = MiruSpace.M, vertical = MiruSpace.Xs),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = countLabel,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            MiruButton(
-                                onClick = { importOpen = true },
-                                style = MiruButtonStyle.Secondary,
-                                leadingIcon = Icons.Filled.UploadFile,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Text(text = stringResource(R.string.lib_import))
-                            }
-                        }
-                    } else {
-                        // Counter row: hug-content mini-pill + compact Import pill on
-                        // the same 32dp visual height grid.
-                        BoxWithConstraints(
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            val maxCountWidth = maxWidth * 0.45f
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(MiruSpace.S),
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .widthIn(max = maxCountWidth)
-                                        .heightIn(min = MiruSize.RowCompact)
-                                        .clip(countShape)
-                                        .background(miruCardSurface())
-                                        .border(miruCardBorder(), countShape)
-                                        .padding(horizontal = MiruSpace.M),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        text = countLabel,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier.weight(1f),
-                                    contentAlignment = Alignment.CenterEnd,
-                                ) {
-                                    Box(modifier = Modifier.width(IntrinsicSize.Max)) {
-                                        MiruCompactButton(
-                                            label = stringResource(R.string.lib_import),
-                                            icon = Icons.Filled.UploadFile,
-                                            onClick = { importOpen = true },
-                                        )
-                                    }
-                                }
                             }
                         }
                     }
@@ -1152,131 +1179,6 @@ fun LibraryScreen(
             onCardStyle = { AppSettings.cardStyle = it },
         )
     }
-    if (sourceSheetOpen) {
-        AppBottomSheet(
-            title = stringResource(R.string.lib_source_title),
-            description = stringResource(R.string.lib_source_desc),
-            onClose = { sourceSheetOpen = false },
-        ) {
-            SheetSection(title = stringResource(R.string.lib_source_title), collapsible = false) {
-                SourcesOptions(
-                    selected = selSources,
-                    all = sources,
-                    onToggle = {
-                        selSources = if (it in selSources) selSources - it else selSources + it
-                    },
-                    onClearAll = { selSources = emptySet() },
-                )
-            }
-        }
-    }
-    if (genresSheetOpen) {
-        AppBottomSheet(
-            title = stringResource(R.string.lib_genres_title),
-            description = stringResource(R.string.lib_genres_desc),
-            onClose = { genresSheetOpen = false },
-        ) {
-            SheetSection(title = stringResource(R.string.lib_genres_title), collapsible = false) {
-                GenresOptions(selected = genres, all = allGenres) {
-                    genres = if (it in genres) genres - it else genres + it
-                }
-            }
-        }
-    }
-    if (sortSheetOpen && sortEnabled) {
-        AppBottomSheet(
-            title = stringResource(R.string.lib_sort_title),
-            description = stringResource(R.string.lib_sort_desc),
-            onClose = { sortSheetOpen = false },
-        ) {
-            SheetSection(title = stringResource(R.string.lib_section_sort), collapsible = false) {
-                SortOptions(sort = sort, sortDir = sortDir) { option ->
-                    if (option == sort) {
-                        sortDir = sortDir.flip()
-                    } else {
-                        sort = option
-                        sortDir = option.defaultDirection()
-                    }
-                }
-            }
-        }
-    }
-    if (importOpen) {
-        fun performImport(files: List<dev.mirutime.app.features.library.data.PickedImportFile>) {
-            if (files.isEmpty() || importing) return
-            importing = true
-            MiruLog.event("library", "import-start", "files" to files.size)
-            val wasReading = selShelves.isEmpty() || "reading" in selShelves
-            ioScope.launch {
-                try {
-                    val summary = try {
-                        provider.importFiles(files)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        MiruLog.w("library", "Import failed", e)
-                        null
-                    }
-                    if (summary == null) {
-                        MiruLog.event("library", "import-result", "ok" to false)
-                        android.widget.Toast.makeText(
-                            context,
-                            resources.getString(R.string.toast_import_failed),
-                            android.widget.Toast.LENGTH_SHORT,
-                        ).show()
-                    } else {
-                        MiruLog.event(
-                            "library",
-                            "import-result",
-                            "ok" to true,
-                            "imported" to summary.imported,
-                            "duplicates" to summary.duplicates,
-                            "failures" to summary.failures,
-                        )
-                        lastRead = provider.lastRead()
-                        // New books land on Reading; make sure they are visible.
-                        if (selShelves.isNotEmpty() && "reading" !in selShelves) {
-                            selShelves = selShelves + "reading"
-                        }
-                        reloadMeta()
-                        // A shelf change already starts its own page load.
-                        if (wasReading) refreshPages()
-                        val count = summary.accepted
-                        val reason = summary.failureToReport
-                        val message = if (reason != null) {
-                            importFailureText(resources, reason)
-                        } else if (count > 0 && summary.failures > 0) {
-                            mixedImportText(resources, count, summary.failures)
-                        } else if (count > 0) {
-                            if (count == 1) {
-                                resources.getString(R.string.toast_imported_one)
-                            } else {
-                                resources.getQuantityString(R.plurals.plural_local_books, count, count)
-                            }
-                        } else {
-                            resources.getString(R.string.toast_import_failed)
-                        }
-                        android.widget.Toast.makeText(
-                            context,
-                            message,
-                            android.widget.Toast.LENGTH_SHORT,
-                        ).show()
-                    }
-                } finally {
-                    importing = false
-                    // Close only after the import + reload finish: the sheet
-                    // owns the blocking progress state.
-                    importOpen = false
-                }
-            }
-        }
-        ImportSheet(
-            busy = importing,
-            onClose = { if (!importing) importOpen = false },
-            onImport = { file -> performImport(listOf(file)) },
-            onImportUris = { files -> performImport(files) },
-        )
-    }
     if (shelfManagerOpen) {
         ShelfManagerSheet(
             shelves = shelves,
@@ -1501,94 +1403,6 @@ private fun SkeletonCoverGrid(columns: Int) {
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                 )
             }
-        }
-    }
-}
-
-private data class MiniChip(
-    val id: String,
-    val label: String,
-    val selected: Boolean,
-    val onClick: () -> Unit,
-)
-
-// One chip language with the shelf strip above (FilterChip everywhere).
-@Composable
-private fun MiniFilters(
-    sources: Set<String>,
-    genres: Set<String>,
-    layout: LayoutMode,
-    sort: LibrarySort,
-    sortDir: SortDirection,
-    sortEnabled: Boolean,
-    onSource: () -> Unit,
-    onGenres: () -> Unit,
-    onLayout: () -> Unit,
-    onSort: () -> Unit,
-) {
-    val allLabel = stringResource(R.string.lib_all)
-    val sourceLabel = if (sources.isEmpty()) {
-        allLabel
-    } else {
-        stringResource(R.string.lib_picked_fmt, sources.size)
-    }
-    val genresLabel = if (genres.isEmpty()) {
-        allLabel
-    } else {
-        stringResource(R.string.lib_picked_fmt, genres.size)
-    }
-    val sortLabel = sort.label()
-    val layoutLabel = if (layout == LayoutMode.Grid) {
-        stringResource(R.string.lib_layout_grid)
-    } else {
-        stringResource(R.string.lib_layout_list)
-    }
-    val minis = listOfNotNull(
-        MiniChip(
-            id = "source",
-            label = stringResource(R.string.lib_chip_source_fmt, sourceLabel),
-            selected = sources.isNotEmpty(),
-            onClick = onSource,
-        ),
-        MiniChip(
-            id = "genres",
-            label = stringResource(R.string.lib_chip_genres_fmt, genresLabel),
-            selected = genres.isNotEmpty(),
-            onClick = onGenres,
-        ),
-        MiniChip(
-            id = "layout",
-            label = layoutLabel,
-            selected = false,
-            onClick = onLayout,
-        ),
-        if (sortEnabled) {
-            MiniChip(
-                id = "sort",
-                label = stringResource(
-                    R.string.lib_chip_sort_fmt,
-                    sortLabel,
-                    sortDir.arrow(),
-                ),
-                selected = false,
-                onClick = onSort,
-            )
-        } else {
-            null
-        },
-    )
-    // Four separate pills straight on the photo — each chip draws its own
-    // ghost backing, no shared box; classic chips keep their look. The row
-    // itself adds NO horizontal padding: the LazyColumn item inset (16dp)
-    // already puts chips on the same left grid line as the cards/resume bar,
-    // giving a symmetric start→end rhythm. Side inset follows the same rule.
-    ChipRail {
-        items(minis, key = { it.id }) { item ->
-            MiruFilterChip(
-                selected = item.selected,
-                onClick = item.onClick,
-                label = item.label,
-            )
         }
     }
 }

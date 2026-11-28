@@ -306,6 +306,9 @@
     <string name="lib_cd_filters">Bộ lọc thư viện</string>
     <string name="lib_cd_scroll_top">Cuộn lên đầu</string>
     <string name="lib_import">Nhập EPUB / FB2 / TXT / PDF</string>
+    <string name="lib_btn_filter">Lọc</string>
+    <string name="lib_btn_filter_active_fmt">Lọc · %1$d</string>
+    <string name="lib_btn_import">Nhập</string>
     <string name="lib_empty_title">Không có gì ở đây</string>
     <string name="lib_empty_hint">Thử kệ, từ khóa hoặc bộ lọc khác.</string>
     <string name="lib_resume_meta_fmt">%1$d/%2$d · %3$s · %4$s</string>

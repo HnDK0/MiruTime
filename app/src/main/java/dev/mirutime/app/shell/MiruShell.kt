@@ -616,7 +616,7 @@ fun MiruShell(
         CompositionLocalProvider(LocalImeBottom provides imeBottom) {
         NavHost(
             navController = navController,
-            startDestination = initialRoute ?: MiruDestination.Dashboard.route,
+            startDestination = initialRoute ?: MiruDestination.Library.route,
             // Every destination (not only bottom sheets) lifts above the IME, so
             // full-screen text forms never have their fields/actions covered.
             modifier = Modifier.imePadding(),
