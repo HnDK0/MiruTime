@@ -17,6 +17,7 @@ import dev.mirutime.uikit.invalidateBgPaletteCache
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
@@ -39,17 +40,20 @@ import org.json.JSONObject
 // Listing, in order of preference:
 //   1. GitHub contents API (any file added to the folder shows up with no app
 //      update; unauthenticated limit is 60 req/h per IP, hence the cache);
-//   2. raw.githubusercontent.com probing of N_Backgrounds.jpeg (N = 1, 2, …
-//      until the first miss) when the API is rate-limited or blocked;
+//   2. the folder page on github.com, whose embedded JSON names the same files
+//      (used when the API is rate-limited or blocked);
 //   3. the last good listing from prefs when offline.
+// Any picture in the folder counts, whatever its name and extension: the local
+// preset folder mirrors the listing and loses pictures that left it, so a
+// renamed or replaced file never lingers.
 object PresetBackgroundSource {
     const val Repo = "HnDK0/MiruTime"
     const val Branch = "main"
     const val Folder = "testBackgrounds"
     const val ApiList = "https://api.github.com/repos/$Repo/contents/$Folder?ref=$Branch"
     const val RawBase = "https://raw.githubusercontent.com/$Repo/$Branch/$Folder"
-    const val ProbeSuffix = "_Backgrounds.jpeg"
-    const val ProbeLimit = 40
+    const val TreePage = "https://github.com/$Repo/tree/$Branch/$Folder"
+    val FolderPath = Regex("\"path\":\"${Regex.escape(Folder)}/([^\"]+)\"")
 }
 
 data class PresetBackground(val name: String, val url: String)
@@ -68,9 +72,8 @@ private const val PRESET_MAX_BYTES = 25 * 1024 * 1024
 private const val PRESET_THUMB_SIDE = 360
 private val ImageExt = Regex(".*\\.(jpe?g|png|webp)$", RegexOption.IGNORE_CASE)
 
-private fun httpOpen(url: String, method: String = "GET", accept: String? = null): HttpURLConnection =
+private fun httpOpen(url: String, accept: String? = null): HttpURLConnection =
     (URL(url).openConnection() as HttpURLConnection).apply {
-        requestMethod = method
         connectTimeout = 8000
         readTimeout = 12000
         instanceFollowRedirects = true
@@ -98,7 +101,7 @@ private fun fetchViaApi(): List<PresetBackground>? = try {
                 val name = entry.optString("name")
                 if (entry.optString("type") != "file" || !ImageExt.matches(name)) continue
                 val url = entry.optString("download_url").takeIf { it.startsWith("http") }
-                    ?: "${PresetBackgroundSource.RawBase}/$name"
+                    ?: "${PresetBackgroundSource.RawBase}/${encodePath(name)}"
                 add(PresetBackground(name, url))
             }
         }
@@ -108,16 +111,40 @@ private fun fetchViaApi(): List<PresetBackground>? = try {
     null
 }
 
-private fun probeRawNames(): List<PresetBackground>? = try {
-    val found = mutableListOf<PresetBackground>()
-    for (n in 1..PresetBackgroundSource.ProbeLimit) {
-        val name = "$n${PresetBackgroundSource.ProbeSuffix}"
-        val url = "${PresetBackgroundSource.RawBase}/$name"
-        val code = httpOpen(url, method = "HEAD").responseCode
-        if (code != 200) break
-        found += PresetBackground(name, url)
+// The folder page embeds its listing as JSON, so any file name and extension is
+// read, not just a numbered convention. Skipped names are nested paths and
+// non-pictures; the raw URL is percent-encoded for names with spaces.
+// shortcut: GitHub's embedded page payload, upgrade to the API if it changes
+// (only this fallback degrades, the API path above stays authoritative).
+internal fun parsePresetFolderHtml(html: String): List<PresetBackground> =
+    PresetBackgroundSource.FolderPath.findAll(html)
+        .map { unescapeJsonName(it.groupValues[1]) }
+        .distinct()
+        .filter { '/' !in it && ImageExt.matches(it) }
+        .map { PresetBackground(it, "${PresetBackgroundSource.RawBase}/${encodePath(it)}") }
+        .toList()
+        .let(::sortPresets)
+
+private val JsonEscape = Regex("""\\(?:u([0-9a-fA-F]{4})|(.))""")
+
+// The listing sits in a JSON payload, so "&" arrives as "\u0026" and a quote as
+// "\"". Decoding keeps such a name usable as a file name and a URL.
+internal fun unescapeJsonName(raw: String): String =
+    JsonEscape.replace(raw) { match ->
+        val hex = match.groupValues[1]
+        if (hex.isEmpty()) match.groupValues[2] else hex.toInt(16).toChar().toString()
     }
-    found.takeIf { it.isNotEmpty() }
+
+private fun encodePath(name: String): String = presetFileName(name).replace("+", "%20")
+
+private fun fetchViaHtml(): List<PresetBackground>? = try {
+    val conn = httpOpen(PresetBackgroundSource.TreePage, accept = "text/html")
+    if (conn.responseCode != 200) {
+        null
+    } else {
+        val body = conn.inputStream.bufferedReader().use { it.readText() }
+        parsePresetFolderHtml(body).takeIf { it.isNotEmpty() }
+    }
 } catch (_: Exception) {
     null
 }
@@ -175,9 +202,9 @@ suspend fun loadCachedPresetBackgrounds(context: Context): List<PresetBackground
         loadPresetListing(cached, refresh = false, fetch = ::fetchPresetListing).presets
     }
 
-// One explicit refresh: a fresh listing replaces the cache, then every missing
-// or invalid picture is pulled into the durable preset folder with bounded
-// concurrency. A valid cached picture costs zero network requests.
+// One explicit refresh: a fresh listing replaces the cache, then every listed
+// picture is checked with a conditional request (bounded concurrency). An
+// unchanged picture costs a 304, not its bytes.
 suspend fun refreshPresetBackgrounds(context: Context): PresetRefreshResult =
     withContext(Dispatchers.IO) {
         migrateLegacyPresetDir(context)
@@ -192,6 +219,7 @@ suspend fun refreshPresetBackgrounds(context: Context): PresetRefreshResult =
             // A replaced picture invalidates its decoded thumb.
             synchronized(cachedPreviewCache) { cachedPreviewCache.clear() }
             cleanPresetCopies(context, result.presets)
+            if (result.listingFetched) prunePresetFiles(context, result.presets, cached.size)
             MiruLog.event(
                 "theme",
                 "preset_refresh",
@@ -205,7 +233,7 @@ suspend fun refreshPresetBackgrounds(context: Context): PresetRefreshResult =
 
 private suspend fun fetchPresetListing(): List<PresetBackground>? {
     val viaApi = fetchViaApi()
-    val loaded = viaApi ?: probeRawNames()
+    val loaded = viaApi ?: fetchViaHtml()
     MiruLog.event(
         "theme",
         "preset_listing_fetch",
@@ -308,8 +336,13 @@ private fun migrateLegacyPresetDir(context: Context) {
     legacy.delete()
 }
 
+// Distinct remote names must stay distinct on disk: percent-encoding is
+// injective, while replacing every other character with "_" is not. ASCII names
+// keep their old form, so files downloaded by earlier builds still match.
+internal fun presetFileName(name: String): String = URLEncoder.encode(name, "UTF-8")
+
 internal fun presetFile(context: Context, preset: PresetBackground) =
-    File(presetBgDir(context), preset.name.replace(Regex("[^A-Za-z0-9._-]"), "_"))
+    File(presetBgDir(context), presetFileName(preset.name))
 
 // Downloads write to a sibling temp file; create the parent here so a fresh
 // install (no directory yet) can save its first preset.
@@ -340,8 +373,8 @@ internal fun isUsablePresetFile(file: File): Boolean {
 
 internal data class PresetFileResult(val file: File?, val skipped: Boolean)
 
-// Shared by Refresh and the tile tap: a valid local picture is used as-is with
-// zero network; a missing or invalid file is deleted and downloaded again.
+// Shared by the tile tap: a valid local picture is used as-is with zero
+// network; a missing or invalid file is deleted and downloaded again.
 internal suspend fun obtainPresetFile(
     target: File,
     download: suspend () -> File?,
@@ -352,26 +385,114 @@ internal suspend fun obtainPresetFile(
     return PresetFileResult(download(), skipped = false)
 }
 
+// The ETag of the last download sits next to the picture, so a Refresh can ask
+// the server whether it changed instead of trusting the file name.
+internal fun presetEtagFile(target: File): File = File(target.parentFile, target.name + ".etag")
+
+private fun readPresetEtag(target: File): String? =
+    presetEtagFile(target).takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotEmpty() }
+
+private fun writePresetEtag(target: File, etag: String?) {
+    val file = presetEtagFile(target)
+    if (etag.isNullOrBlank()) {
+        file.delete()
+        return
+    }
+    runCatching { file.writeText(etag) }.onFailure {
+        MiruLog.event("theme", "preset_etag_write", "ok" to false, "reason" to it.javaClass.simpleName)
+    }
+}
+
+// Refresh never trusts a file name: a conditional GET keeps an unchanged
+// remote picture local and replaces one that was re-uploaded under the same
+// name. A missing ETag means the file predates this check, so it is fetched
+// once and gets a tag. `invalidate` is injectable because unit tests cannot
+// touch the android.util.LruCache behind the real one.
+internal suspend fun refreshPresetFile(
+    preset: PresetBackground,
+    target: File,
+    invalidate: (File) -> Unit = { invalidatePresetCaches(it.absolutePath) },
+): PresetFileOutcome {
+    val cached = target.takeIf(::isUsablePresetFile)
+    if (cached == null) {
+        // Junk from an earlier build (an error page, a half file) is not kept.
+        target.delete()
+        presetEtagFile(target).delete()
+    }
+    return when (val fetched = fetchPresetFile(preset, target, cached?.let(::readPresetEtag))) {
+        is PresetFetch.Fetched -> {
+            // A replaced picture invalidates everything decoded from it.
+            invalidate(fetched.file)
+            PresetFileOutcome.Downloaded
+        }
+        PresetFetch.NotModified -> PresetFileOutcome.Skipped
+        // The picture on disk still works: the user sees a skip, the log holds
+        // the reason. Only a picture that never arrived counts as failed.
+        PresetFetch.Failed -> if (cached == null) PresetFileOutcome.Failed else PresetFileOutcome.Skipped
+    }
+}
+
 private suspend fun refreshPresetFile(
     context: Context,
     preset: PresetBackground,
-): PresetFileOutcome {
-    val target = presetFile(context, preset)
-    val result = obtainPresetFile(target) { downloadPresetFile(preset, target) }
-    return when {
-        result.file == null -> PresetFileOutcome.Failed
-        result.skipped -> PresetFileOutcome.Skipped
-        else -> PresetFileOutcome.Downloaded
-    }
-}
+): PresetFileOutcome = refreshPresetFile(preset, presetFile(context, preset))
 
 // Original bytes of a preset in durable app storage (downloaded once; unlike
 // the old cacheDir copy it is not evicted by the OS).
 private suspend fun ensurePresetFile(context: Context, preset: PresetBackground): File? =
     withContext(Dispatchers.IO) {
         val target = presetFile(context, preset)
-        obtainPresetFile(target) { downloadPresetFile(preset, target) }.file
+        obtainPresetFile(target) {
+            val fetched = fetchPresetFile(preset, target, ifNoneMatch = null)
+            if (fetched is PresetFetch.Fetched) {
+                invalidatePresetCaches(fetched.file.absolutePath)
+                fetched.file
+            } else {
+                null
+            }
+        }.file
     }
+
+// The preset folder mirrors the listing: a picture that left the listing
+// (renamed, removed, or left over by an older build) goes away with its tag.
+// The file the current theme still points at is kept, so the theme never breaks.
+internal fun pruneStalePresetFiles(dir: File, keepNames: Set<String>, activePath: String?): Int {
+    var removed = 0
+    dir.listFiles()?.forEach { file ->
+        if (!file.isFile) return@forEach
+        // "X.jpeg.tmp" and "X.jpeg.etag" belong to X.jpeg. A kept picture owns
+        // its temp file too: a download may be writing it right now.
+        val pictureName = file.name.removeSuffix(".etag").removeSuffix(".tmp")
+        if (pictureName in keepNames) return@forEach
+        val picture = File(dir, pictureName)
+        if (picture.exists() && picture.absolutePath == activePath) return@forEach
+        if (file.delete()) removed++
+    }
+    return removed
+}
+
+private fun prunePresetFiles(context: Context, presets: List<PresetBackground>, cachedCount: Int) {
+    val dir = presetBgDir(context)
+    if (!dir.isDirectory) return
+    // Fewer entries than the cached listing is more likely a partial page than
+    // deleted pictures; deleting files is the one thing that cannot be undone.
+    if (presets.size < cachedCount) {
+        MiruLog.event(
+            "theme",
+            "preset_prune",
+            "skipped" to "shrank",
+            "listed" to presets.size,
+            "cached" to cachedCount,
+        )
+        return
+    }
+    val removed = pruneStalePresetFiles(
+        dir = dir,
+        keepNames = presets.mapTo(HashSet()) { presetFileName(it.name) },
+        activePath = loadThemePrefs(context).second,
+    )
+    if (removed > 0) MiruLog.event("theme", "preset_prune", "removed" to removed)
+}
 
 // Applies a ready-made background in place: returns the durable preset file
 // path for the theme and never touches the user's bgLibrary.
@@ -418,42 +539,68 @@ internal fun cleanPresetCopies(context: Context, presets: List<PresetBackground>
     if (cleaned != stored || activeMoved) notifyThemePrefsChanged()
 }
 
-private suspend fun downloadPresetFile(
+private sealed interface PresetFetch {
+    class Fetched(val file: File) : PresetFetch
+    object NotModified : PresetFetch
+    object Failed : PresetFetch
+}
+
+// One GET. With a stored ETag the server answers 304 while the picture is
+// unchanged; only a re-uploaded file costs the bytes again.
+private suspend fun fetchPresetFile(
     preset: PresetBackground,
     target: File,
-): File? {
+    ifNoneMatch: String?,
+): PresetFetch {
     val tmp = presetTempFile(target)
     return try {
         val conn = httpOpen(preset.url)
-        if (conn.responseCode != 200) {
-            MiruLog.event("theme", "preset_download", "ok" to false, "reason" to "status")
-            null
-        } else {
-            var total = 0L
-            conn.inputStream.use { input ->
-                tmp.outputStream().use { out ->
-                    val buf = ByteArray(64 * 1024)
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        total += n
-                        if (total > PRESET_MAX_BYTES) {
-                            tmp.delete()
-                            MiruLog.event("theme", "preset_download", "ok" to false, "reason" to "size")
-                            return null
+        ifNoneMatch?.let { conn.setRequestProperty("If-None-Match", it) }
+        when (val code = conn.responseCode) {
+            HttpURLConnection.HTTP_NOT_MODIFIED -> {
+                tmp.delete()
+                conn.disconnect()
+                PresetFetch.NotModified
+            }
+            HttpURLConnection.HTTP_OK -> {
+                var total = 0L
+                conn.inputStream.use { input ->
+                    tmp.outputStream().use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            total += n
+                            if (total > PRESET_MAX_BYTES) {
+                                tmp.delete()
+                                MiruLog.event("theme", "preset_download", "ok" to false, "reason" to "size")
+                                return PresetFetch.Failed
+                            }
+                            out.write(buf, 0, n)
                         }
-                        out.write(buf, 0, n)
                     }
                 }
+                if (tmp.renameTo(target)) {
+                    writePresetEtag(target, conn.getHeaderField("ETag"))
+                    MiruLog.event("theme", "preset_download", "ok" to true)
+                    PresetFetch.Fetched(target)
+                } else {
+                    tmp.delete()
+                    MiruLog.event("theme", "preset_download", "ok" to false, "reason" to "rename")
+                    PresetFetch.Failed
+                }
             }
-            if (tmp.renameTo(target)) {
-                // A replaced picture invalidates everything decoded from it.
-                invalidatePresetCaches(target.absolutePath)
-                MiruLog.event("theme", "preset_download", "ok" to true)
-                target
-            } else {
+            else -> {
                 tmp.delete()
-                null
+                conn.disconnect()
+                MiruLog.event(
+                    "theme",
+                    "preset_download",
+                    "ok" to false,
+                    "reason" to "status",
+                    "code" to code,
+                )
+                PresetFetch.Failed
             }
         }
     } catch (e: CancellationException) {
@@ -462,7 +609,7 @@ private suspend fun downloadPresetFile(
     } catch (_: Exception) {
         tmp.delete()
         MiruLog.event("theme", "preset_download", "ok" to false, "reason" to "error")
-        null
+        PresetFetch.Failed
     }
 }
 

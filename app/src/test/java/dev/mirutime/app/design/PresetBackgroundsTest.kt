@@ -1,10 +1,14 @@
 package dev.mirutime.app.design
 
+import com.sun.net.httpserver.HttpServer
 import java.io.File
+import java.net.InetSocketAddress
 import java.nio.file.Files
+import java.util.Collections
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -236,6 +240,173 @@ class PresetBackgroundsTest {
         } finally {
             root.deleteRecursively()
         }
+    }
+
+    @Test
+    fun `refresh replaces a picture re-uploaded under the same name`() = runTest {
+        val dir = Files.createTempDirectory("preset").toFile()
+        val target = File(dir, "1_Backgrounds.jpeg").apply { writeBytes(jpegBytes()) }
+        presetEtagFile(target).writeText("\"v1\"")
+        val updated = byteArrayOf(
+            0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE1.toByte(), 0x01, 0x02, 0x03,
+        )
+        val seenTags = Collections.synchronizedList(mutableListOf<String?>())
+
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        try {
+            server.createContext("/1_Backgrounds.jpeg") { exchange ->
+                val tag = exchange.requestHeaders.getFirst("If-None-Match")
+                seenTags += tag
+                if (tag == "\"v1\"") {
+                    exchange.sendResponseHeaders(304, -1)
+                } else {
+                    exchange.responseHeaders.add("ETag", "\"v2\"")
+                    exchange.sendResponseHeaders(200, updated.size.toLong())
+                    exchange.responseBody.use { it.write(updated) }
+                }
+                exchange.close()
+            }
+            server.start()
+            val preset = PresetBackground(
+                "1_Backgrounds.jpeg",
+                "http://127.0.0.1:${server.address.port}/1_Backgrounds.jpeg",
+            )
+
+            assertEquals(PresetFileOutcome.Skipped, refreshPresetFile(preset, target, invalidate = {}))
+            assertEquals(jpegBytes().toList(), target.readBytes().toList())
+            assertEquals("\"v1\"", presetEtagFile(target).readText())
+
+            // The remote tag changed: the local picture must be replaced.
+            presetEtagFile(target).writeText("\"v0\"")
+            assertEquals(PresetFileOutcome.Downloaded, refreshPresetFile(preset, target, invalidate = {}))
+            assertEquals(updated.toList(), target.readBytes().toList())
+            assertEquals("\"v2\"", presetEtagFile(target).readText())
+            assertEquals(listOf("\"v1\"", "\"v0\""), seenTags)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `folder listing picks up any picture whatever its name and extension`() {
+        val html = """
+            {"name":"x","path":"testBackgrounds/cover ART.png","contentType":"file"},
+            {"name":"y","path":"testBackgrounds/01.jpg","contentType":"file"},
+            {"name":"z","path":"testBackgrounds/notes.txt","contentType":"file"},
+            {"name":"w","path":"testBackgrounds/sub","contentType":"directory"},
+            {"name":"v","path":"testBackgrounds/sub/nested.webp","contentType":"file"}
+        """
+
+        val items = parsePresetFolderHtml(html)
+
+        assertEquals(listOf("01.jpg", "cover ART.png"), items.map { it.name })
+        assertEquals(
+            "https://raw.githubusercontent.com/HnDK0/MiruTime/main/testBackgrounds/cover%20ART.png",
+            items[1].url,
+        )
+    }
+
+    @Test
+    fun `refresh drops local pictures that left the listing`() {
+        val dir = Files.createTempDirectory("presets").toFile()
+        val kept = File(dir, "1_Backgrounds.jpeg").apply { writeBytes(jpegBytes()) }
+        File(dir, "1_Backgrounds.jpeg.etag").writeText("\"v1\"")
+        val stale = File(dir, "old_Backgrounds.jpeg").apply { writeBytes(jpegBytes()) }
+        File(dir, "old_Backgrounds.jpeg.etag").writeText("\"v0\"")
+        val active = File(dir, "active.jpeg").apply { writeBytes(jpegBytes()) }
+        File(dir, "active.jpeg.etag").writeText("\"v2\"")
+        val tmp = File(dir, "3_Backgrounds.jpeg.tmp").apply { writeText("partial") }
+        val keptTmp = File(dir, "1_Backgrounds.jpeg.tmp").apply { writeText("in flight") }
+
+        val removed = pruneStalePresetFiles(dir, setOf("1_Backgrounds.jpeg"), active.absolutePath)
+
+        assertEquals(3, removed)
+        assertTrue(kept.exists())
+        assertTrue(File(dir, "1_Backgrounds.jpeg.etag").exists())
+        assertFalse(stale.exists())
+        assertFalse(File(dir, "old_Backgrounds.jpeg.etag").exists())
+        // The theme still shows this file, so it survives with its tag.
+        assertTrue(active.exists())
+        assertTrue(File(dir, "active.jpeg.etag").exists())
+        assertFalse(tmp.exists())
+        // A kept picture owns its temp file: a download may be writing it now.
+        assertTrue(keptTmp.exists())
+        dir.deleteRecursively()
+    }
+
+    @Test
+    fun `a picture without a tag is fetched once and tagged`() = runTest {
+        val dir = Files.createTempDirectory("preset").toFile()
+        val target = File(dir, "fresh.jpeg")
+        val served = Collections.synchronizedList(mutableListOf<String?>())
+
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        try {
+            server.createContext("/fresh.jpeg") { exchange ->
+                served += exchange.requestHeaders.getFirst("If-None-Match")
+                exchange.responseHeaders.add("ETag", "\"v9\"")
+                exchange.sendResponseHeaders(200, jpegBytes().size.toLong())
+                exchange.responseBody.use { it.write(jpegBytes()) }
+                exchange.close()
+            }
+            server.start()
+            val preset = PresetBackground(
+                "fresh.jpeg",
+                "http://127.0.0.1:${server.address.port}/fresh.jpeg",
+            )
+
+            assertEquals(PresetFileOutcome.Downloaded, refreshPresetFile(preset, target, invalidate = {}))
+            assertEquals(listOf<String?>(null), served)
+            assertEquals(jpegBytes().toList(), target.readBytes().toList())
+            assertEquals("\"v9\"", presetEtagFile(target).readText())
+        } finally {
+            server.stop(0)
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a failed fetch keeps the usable picture and fails only a missing one`() = runTest {
+        val dir = Files.createTempDirectory("preset").toFile()
+        val usable = File(dir, "usable.jpeg").apply { writeBytes(jpegBytes()) }
+        val missing = File(dir, "missing.jpeg")
+
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        try {
+            listOf("/usable.jpeg", "/missing.jpeg").forEach { path ->
+                server.createContext(path) { exchange ->
+                    exchange.sendResponseHeaders(500, -1)
+                    exchange.close()
+                }
+            }
+            server.start()
+            fun preset(path: String) =
+                PresetBackground(path, "http://127.0.0.1:${server.address.port}$path")
+
+            assertEquals(PresetFileOutcome.Skipped, refreshPresetFile(preset("/usable.jpeg"), usable, invalidate = {}))
+            assertEquals(jpegBytes().toList(), usable.readBytes().toList())
+
+            assertEquals(PresetFileOutcome.Failed, refreshPresetFile(preset("/missing.jpeg"), missing, invalidate = {}))
+            assertFalse(missing.exists())
+        } finally {
+            server.stop(0)
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `distinct picture names stay distinct on disk`() {
+        assertNotEquals(presetFileName("фон.jpg"), presetFileName("дом.jpg"))
+        assertNotEquals(presetFileName("a b.jpg"), presetFileName("a_b.jpg"))
+        assertEquals("1_Backgrounds.jpeg", presetFileName("1_Backgrounds.jpeg"))
+    }
+
+    @Test
+    fun `listing decodes json escapes in a picture name`() {
+        val items = parsePresetFolderHtml("{\"path\":\"testBackgrounds/a\\u0026b.jpg\"}")
+
+        assertEquals(listOf("a&b.jpg"), items.map { it.name })
+        assertTrue(items[0].url.endsWith("/a%26b.jpg"))
     }
 
     private fun tempFile(content: ByteArray): File =
